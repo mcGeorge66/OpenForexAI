@@ -18,8 +18,8 @@ env/
 .env.*
 !.env.example
 
-# Data
-data/
+# Data — only the root /data/ runtime directory (SQLite DB, exports, etc.)
+/data/
 *.db
 *.sqlite
 *.sqlite3

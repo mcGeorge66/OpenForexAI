@@ -2,6 +2,29 @@
 
 **Autonomous multi-agent LLM-based forex trading system**
 
+Currency markets never sleep, and neither does OpenForexAI. The project was born
+from a simple question: what happens if you replace every rule in an algorithmic
+trading system with the judgment of an AI? Instead of hardcoding "buy when RSI
+drops below 30", OpenForexAI lets a large language model read the market, reason
+about risk, and decide — just like a human trader would, but around the clock and
+without fatigue.
+
+Under the hood, a team of specialised AI agents divides the work much like a
+professional trading desk. One agent watches each currency pair and decides whether
+the current moment is worth acting on. When the picture is unclear, it calls in a
+chart analyst who digs deeper into patterns and indicator signals. A risk manager
+sits between every decision and the actual order, making sure no single trade or
+series of losses can seriously hurt the portfolio. And in the background, a fourth
+agent quietly studies what has worked and what has not — then rewrites the team's
+strategy prompts to do better next time.
+
+The result is a system that not only trades autonomously, but continuously improves
+its own decision-making without human intervention.
+
+---
+
+**Autonomous multi-agent LLM-based forex trading system** *(technical summary)*
+
 OpenForexAI is an asynchronous, fully autonomous forex trading framework in which a
 fleet of specialised AI agents collaborate through an internal event bus. Every
 trading decision — from market observation to order placement — is reasoned by a
@@ -15,17 +38,18 @@ providers, and databases are all swappable via clean port/adapter interfaces.
 1. [Architecture overview](#architecture-overview)
 2. [Agents](#agents)
 3. [Event bus & messaging](#event-bus--messaging)
-4. [Broker adapters](#broker-adapters)
-5. [LLM adapters](#llm-adapters)
-6. [Database](#database)
-7. [Risk management](#risk-management)
-8. [Self-optimisation loop](#self-optimisation-loop)
-9. [Configuration](#configuration)
-10. [Installation](#installation)
-11. [Quick start](#quick-start)
-12. [Running tests](#running-tests)
-13. [Project layout](#project-layout)
-14. [Tech stack](#tech-stack)
+4. [Indicator plugin system](#indicator-plugin-system)
+5. [Broker adapters](#broker-adapters)
+6. [LLM adapters](#llm-adapters)
+7. [Database](#database)
+8. [Risk management](#risk-management)
+9. [Self-optimisation loop](#self-optimisation-loop)
+10. [Configuration](#configuration)
+11. [Installation](#installation)
+12. [Quick start](#quick-start)
+13. [Running tests](#running-tests)
+14. [Project layout](#project-layout)
+15. [Tech stack](#tech-stack)
 
 ---
 
@@ -44,7 +68,9 @@ TradingAgent  SupervisorAgent  TechnicalAnalysisAgent  OptimizationAgent
     ▼             ▼
  LLM call     RiskEngine ──► Broker (place / close order)
     │
- DataContainer (live candles + indicators)
+ DataContainer (live candles only)
+    │
+ IndicatorToolset (stateless, plugin-based, on-demand)
 ```
 
 All agents run concurrently as asyncio tasks in a single process. They communicate
@@ -60,11 +86,13 @@ between agents at runtime.
 The TradingAgent is the core decision-maker. Every `cycle_interval_seconds`
 (default: 60 s) it:
 
-1. Fetches the current `MarketSnapshot` (tick price, candles, computed indicators)
-   from the `DataContainer`.
-2. Sends a **first-pass LLM call** with a compact trading context and receives a
-   structured `_TradingDecision` (action, entry, SL, TP, confidence, reasoning,
-   `needs_deep_analysis` flag).
+1. Fetches the current `MarketSnapshot` (tick price, raw candles) from the
+   `DataContainer`.
+2. Sends a **first-pass LLM call** with a compact context — current price, the last
+   5 H1 candles, account balance, open position count, and recent trade history —
+   and receives a structured `_TradingDecision` (action, entry, SL, TP, confidence,
+   reasoning, `needs_deep_analysis` flag). Raw indicators are intentionally withheld
+   here; interpreting them is the TechnicalAnalysisAgent's responsibility.
 3. If `needs_deep_analysis` is `true`, publishes an `ANALYSIS_REQUESTED` event and
    awaits the `TechnicalAnalysisAgent`'s reply (up to `analysis_timeout_seconds`).
 4. If deep analysis arrived, sends a **second LLM call** enriched with the TA
@@ -80,8 +108,17 @@ the `OptimizationAgent` via a `PROMPT_UPDATED` event.
 ### TechnicalAnalysisAgent *(singleton, reactive)*
 
 Does not tick on a timer. It listens exclusively for `ANALYSIS_REQUESTED` events and
-performs a deep LLM-driven analysis:
+performs a deep LLM-driven analysis using a two-phase approach:
 
+**Phase 1** — The LLM receives raw candle data and *declares* which indicators it
+needs, as `{indicator, period, timeframe, pair, history}` entries.  It is not
+given any pre-computed values — it decides what to look at based solely on price
+action.
+
+**Phase 2** — The agent computes exactly those indicators via the `IndicatorToolset`
+and feeds the results back.  The LLM returns the final structured analysis.
+
+Analysis capabilities:
 - Chart pattern recognition (head & shoulders, double tops/bottoms, triangles, …)
 - Support / resistance level identification
 - Trend assessment across multiple timeframes
@@ -143,6 +180,84 @@ subscribe dispatcher. Events are typed `AgentMessage` Pydantic models with field
 
 Agents register handlers named `on_<event_type_snake_case>`. The bus discovers and
 wires them automatically at startup.
+
+---
+
+## Indicator plugin system
+
+### Design philosophy
+
+The `DataContainer` holds **only raw candle data**.  No indicators are
+pre-computed or cached — which indicators are useful, at which periods, and on
+which timeframes is an open empirical question that the agents are meant to
+discover through the self-optimisation loop.
+
+All indicators are provided to agents as **stateless on-demand tools** via
+`IndicatorToolset.calculate(indicator, period, timeframe, pair, history=1)`.
+
+### The `history` parameter
+
+By default (`history=1`) the tool returns a single value (the latest computed
+result).  Pass a larger value to receive a series of consecutive historical
+readings — oldest first — which lets agents detect trends, divergences, and
+momentum shifts:
+
+```python
+# Single value
+atr = toolset.calculate("ATR", 14, "M15", "USDJPY")
+# → 0.00123
+
+# Last 5 RSI values — see if momentum is accelerating or fading
+rsi_series = toolset.calculate("RSI", 14, "H1", "EURUSD", history=5)
+# → [48.2, 51.7, 55.3, 59.1, 62.4]  (oldest → newest)
+```
+
+### Plugin architecture
+
+Each indicator is an `IndicatorPlugin` subclass registered in an
+`IndicatorRegistry`.  Built-in plugins live in
+`openforexai/data/indicator_plugins.py`:
+
+| Plugin | Name | Description |
+|---|---|---|
+| `SMAPlugin` | `SMA` / `MA` | Simple Moving Average |
+| `EMAPlugin` | `EMA` | Exponential Moving Average |
+| `RSIPlugin` | `RSI` | Relative Strength Index (0–100) |
+| `ATRPlugin` | `ATR` | Average True Range |
+| `BollingerBandsPlugin` | `BB` / `BOLLINGER` | Upper / Middle / Lower bands |
+| `VWAPPlugin` | `VWAP` | Volume Weighted Average Price |
+
+**Adding a new indicator** requires only implementing `IndicatorPlugin` and
+registering it:
+
+```python
+class MACDPlugin(IndicatorPlugin):
+    name = "MACD"
+    description = "MACD histogram."
+    min_candles = 35
+
+    def calculate(self, candles, period, history):
+        results = []
+        for offset in range(history - 1, -1, -1):
+            end = len(candles) - offset
+            val = _macd(candles[:end], period)
+            if val is None:
+                return []
+            results.append(round(val, 6))
+        return results
+
+DEFAULT_REGISTRY.register(MACDPlugin())
+```
+
+**Removing an indicator** (e.g. after the optimiser determines it adds no
+predictive value):
+
+```python
+DEFAULT_REGISTRY.unregister("VWAP")
+```
+
+After unregistering, the indicator disappears from the LLM tool list
+automatically — the agent can no longer request it.
 
 ---
 
@@ -387,7 +502,7 @@ OpenForexAI/
 │   │   └── llm/                           # AnthropicAdapter, OpenAIAdapter, LMStudioAdapter
 │   ├── ports/                             # Abstract interfaces (broker, database, llm, data_feed)
 │   ├── models/                            # Pydantic domain models (trade, market, risk, …)
-│   ├── data/                              # DataContainer, indicators, normalizer, correlation
+│   ├── data/                              # DataContainer, indicator_plugins, indicator_tools, normalizer, correlation
 │   ├── messaging/                         # EventBus, AgentMessage, EventType
 │   ├── config/                            # Settings, YAML loader
 │   ├── registry/                          # Plugin registry for adapters

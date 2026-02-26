@@ -98,15 +98,17 @@ async def bootstrap(settings: Settings) -> tuple[list, EventBus]:
             bus=bus,
             cycle_interval_seconds=settings.agents.trading.cycle_interval_seconds,
             analysis_timeout_seconds=settings.agents.trading.analysis_timeout_seconds,
+            context_candles=settings.agents.trading.context_candles or None,
         )
         for pair in settings.pairs
     ]
 
-    # Singleton technical analysis agent
+    # Singleton technical analysis agent (needs DataContainer for cross-TF indicator calls)
     technical_analysis_agent = TechnicalAnalysisAgent(
         llm=llm,
         repository=repository,
         bus=bus,
+        data_container=data_container,
         max_concurrent_requests=settings.agents.technical_analysis.max_concurrent_requests,
     )
 

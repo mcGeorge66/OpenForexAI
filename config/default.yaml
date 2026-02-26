@@ -12,7 +12,9 @@ pairs:
 
 data:
   rolling_weeks: 4
-  timeframes: [M1, M5, H1, H4, D1]
+  # Only M5 is fetched from the broker.
+  # M15, M30, H1, H4, D1 are derived via the resampler — no extra API traffic.
+  timeframes: [M5]
   indicator_cache_ttl_seconds: 30
 
 llm:
@@ -44,6 +46,13 @@ agents:
   trading:
     cycle_interval_seconds: 60
     analysis_timeout_seconds: 15.0
+    # Candle timeframes passed to the TradingAgent LLM context.
+    # Keys: M5 | M15 | M30 | H1 | H4 | D1  — only listed TFs are included.
+    # M15 and M30 are computed from M5 (no extra broker traffic).
+    context_candles:
+      M5: 20
+      M15: 12
+      H1: 5
   technical_analysis:
     max_concurrent_requests: 3
   optimization:
