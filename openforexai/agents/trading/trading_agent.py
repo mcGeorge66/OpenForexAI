@@ -10,6 +10,7 @@ from openforexai.agents.base import BaseAgent
 from openforexai.agents.trading.context_builder import build_trading_context
 from openforexai.agents.trading.prompt_templates import get_default_prompt
 from openforexai.data.container import DataContainer
+from openforexai.data.indicator_tools import IndicatorToolset
 from openforexai.messaging.bus import EventBus
 from openforexai.models.agent import AgentDecision, AgentRole
 from openforexai.models.analysis import AnalysisResult
@@ -59,6 +60,7 @@ class TradingAgent(BaseAgent):
         self.cycle_interval = cycle_interval_seconds
         self.analysis_timeout = analysis_timeout_seconds
         self.context_candles = context_candles  # None → context_builder uses its default
+        self.indicators = IndicatorToolset(data_container)
 
         # Pending analysis responses keyed by correlation_id
         self._pending_analyses: dict[str, asyncio.Future[AnalysisResult]] = {}
@@ -142,13 +144,34 @@ class TradingAgent(BaseAgent):
                     raw = self.data_container.get_candles(pair_req, tf)
                     extra_candles[f"{pair_req}_{tf}"] = raw[-count:]
 
+            # ── Optional on-demand indicator computation ──────────────────────
+            extra_indicators: dict[str, str] = {}
+            if decision_data.requested_indicators:
+                for req in decision_data.requested_indicators:
+                    indicator = req.get("indicator", "")
+                    period    = int(req.get("period", 14))
+                    timeframe = req.get("timeframe", "H1").upper()
+                    req_pair  = req.get("pair", self.pair).upper()
+                    label = f"{indicator.upper()}({period},{timeframe},{req_pair})"
+                    try:
+                        result = self.indicators.calculate(indicator, period, timeframe, req_pair)
+                        if result is None:
+                            extra_indicators[label] = "N/A"
+                        elif isinstance(result, dict):
+                            for k, v in result.items():
+                                extra_indicators[f"BB_{k}({period},{timeframe},{req_pair})"] = f"{v:.6f}"
+                        else:
+                            extra_indicators[label] = f"{result:.6f}"
+                    except ValueError as exc:
+                        extra_indicators[label] = f"ERROR: {exc}"
+
             # ── Optional deep analysis ───────────────────────────────────────
             analysis: AnalysisResult | None = None
             if decision_data.needs_deep_analysis:
                 analysis = await self._request_analysis(snapshot.model_dump(mode="json"))
 
             # ── Final decision if anything enriched the context ──────────────
-            if analysis is not None or extra_candles:
+            if analysis is not None or extra_candles or extra_indicators:
                 enriched_context = build_trading_context(
                     snapshot=snapshot,
                     recent_trades=recent_trades,
@@ -157,6 +180,7 @@ class TradingAgent(BaseAgent):
                     analysis=analysis,
                     context_candles=self.context_candles,
                     extra_candles=extra_candles or None,
+                    extra_indicators=extra_indicators or None,
                 )
                 final_response = await self.llm.complete_structured(
                     system_prompt=self._system_prompt,
@@ -260,6 +284,9 @@ class _TradingDecision(BaseModel):
     confidence: float = 0.0
     reasoning: str = ""
     needs_deep_analysis: bool = False
-    # Optional on-demand candle request. Each entry: {pair, timeframe, count}.
+    # On-demand candle request: [{pair, timeframe, count}]
     # Example: [{"pair": "USDJPY", "timeframe": "M5", "count": 50}]
     requested_candles: list[dict] | None = None
+    # On-demand indicator request (same tool all agents use): [{indicator, period, timeframe, pair}]
+    # Example: [{"indicator": "ATR", "period": 14, "timeframe": "M15", "pair": "USDJPY"}]
+    requested_indicators: list[dict] | None = None

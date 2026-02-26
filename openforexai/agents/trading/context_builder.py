@@ -28,14 +28,17 @@ def build_trading_context(
     analysis: AnalysisResult | None = None,
     context_candles: dict[str, int] | None = None,
     extra_candles: dict[str, list[Candle]] | None = None,
+    extra_indicators: dict[str, str] | None = None,
 ) -> str:
     """Assemble the user message for the TradingAgent LLM call.
 
     Args:
-        context_candles: mapping of timeframe → count to include from the snapshot.
-                         Defaults to M5:20 / M15:12 / H1:5.
-        extra_candles:   additional candles requested on-demand by the LLM in a
-                         previous turn, keyed as "<PAIR>_<TF>" (e.g. "USDJPY_M5").
+        context_candles:   mapping of timeframe → count to include from the snapshot.
+                           Defaults to M5:20 / M15:12 / H1:5.
+        extra_candles:     additional candles requested on-demand by the LLM in a
+                           previous turn, keyed as "<PAIR>_<TF>" (e.g. "USDJPY_M5").
+        extra_indicators:  on-demand indicator results, keyed as
+                           "ATR(14,M15,USDJPY)" → "0.001234".
     """
     candle_cfg = context_candles if context_candles is not None else _DEFAULT_CONTEXT_CANDLES
 
@@ -75,6 +78,12 @@ def build_trading_context(
                     f"  {c.timestamp.strftime('%Y-%m-%d %H:%M')}  "
                     f"O={c.open}  H={c.high}  L={c.low}  C={c.close}"
                 )
+
+    # ── On-demand indicators (requested by LLM in previous turn) ─────────────
+    if extra_indicators:
+        lines += ["", "--- Requested indicators ---"]
+        for name, value in extra_indicators.items():
+            lines.append(f"  {name}: {value}")
 
     # ── Account context ───────────────────────────────────────────────────────
     lines += [

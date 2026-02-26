@@ -12,7 +12,9 @@ pairs:
 
 data:
   rolling_weeks: 4
-  timeframes: [M1, M5, H1, H4, D1]
+  # Only M5 is fetched from the broker.
+  # M15, M30, H1, H4, D1 are derived via the resampler — no extra API traffic.
+  timeframes: [M5]
   indicator_cache_ttl_seconds: 30
 
 llm:
