@@ -53,9 +53,15 @@ class IndicatorToolset:
         self,
         data_container: DataContainer,
         registry: IndicatorRegistry | None = None,
+        default_broker: str | None = None,
     ) -> None:
         self._dc = data_container
         self._registry = registry or DEFAULT_REGISTRY
+        self._default_broker = default_broker
+
+    def set_broker(self, broker_name: str) -> None:
+        """Set the default broker_name used when calculate() is called without one."""
+        self._default_broker = broker_name
 
     def calculate(
         self,
@@ -64,18 +70,21 @@ class IndicatorToolset:
         timeframe: str,
         pair: str,
         history: int = 1,
+        broker_name: str | None = None,
     ) -> IndicatorResult:
         """Compute *indicator*(*period*) on *pair* candles at *timeframe*.
 
         Args:
-            indicator:  Indicator name — any name registered in the registry,
-                        e.g. ``"RSI"``, ``"ATR"``, ``"BB"``, ``"SMA"``.
-            period:     Lookback period (e.g. 14 for RSI / ATR, 20 for SMA / BB).
-            timeframe:  M5 | M15 | M30 | H1 | H4 | D1
-            pair:       Currency pair, e.g. ``"USDJPY"`` or ``"EURUSD"``.
-            history:    Number of consecutive historical values to return.
-                        ``1`` (default) → single scalar or dict.
-                        ``> 1`` → list of values, oldest first.
+            indicator:    Indicator name — any name registered in the registry,
+                          e.g. ``"RSI"``, ``"ATR"``, ``"BB"``, ``"SMA"``.
+            period:       Lookback period (e.g. 14 for RSI / ATR, 20 for SMA / BB).
+            timeframe:    M5 | M15 | M30 | H1 | H4 | D1
+            pair:         Currency pair, e.g. ``"USDJPY"`` or ``"EURUSD"``.
+            history:      Number of consecutive historical values to return.
+                          ``1`` (default) → single scalar or dict.
+                          ``> 1`` → list of values, oldest first.
+            broker_name:  Broker short_name required by the multi-broker DataContainer.
+                          Falls back to the instance default set via ``set_broker()``.
 
         Returns:
             - Single ``float`` or ``dict`` when ``history == 1``.
@@ -84,7 +93,7 @@ class IndicatorToolset:
               cannot be computed.
 
         Raises:
-            ValueError: when *indicator* is not registered.
+            ValueError: when *indicator* is not registered or broker_name is unknown.
         """
         plugin = self._registry.get(indicator)
         if plugin is None:
@@ -94,7 +103,14 @@ class IndicatorToolset:
                 f"Available: {available}"
             )
 
-        candles = self._dc.get_candles(pair.upper(), timeframe.upper())
+        resolved_broker = broker_name or self._default_broker
+        if resolved_broker is None:
+            raise ValueError(
+                "broker_name must be provided or set via set_broker() "
+                "before calling calculate()."
+            )
+
+        candles = self._dc.get_candles(resolved_broker, pair.upper(), timeframe.upper())
         if not candles:
             return None
 
