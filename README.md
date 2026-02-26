@@ -2,6 +2,29 @@
 
 **Autonomous multi-agent LLM-based forex trading system**
 
+Currency markets never sleep, and neither does OpenForexAI. The project was born
+from a simple question: what happens if you replace every rule in an algorithmic
+trading system with the judgment of an AI? Instead of hardcoding "buy when RSI
+drops below 30", OpenForexAI lets a large language model read the market, reason
+about risk, and decide — just like a human trader would, but around the clock and
+without fatigue.
+
+Under the hood, a team of specialised AI agents divides the work much like a
+professional trading desk. One agent watches each currency pair and decides whether
+the current moment is worth acting on. When the picture is unclear, it calls in a
+chart analyst who digs deeper into patterns and indicator signals. A risk manager
+sits between every decision and the actual order, making sure no single trade or
+series of losses can seriously hurt the portfolio. And in the background, a fourth
+agent quietly studies what has worked and what has not — then rewrites the team's
+strategy prompts to do better next time.
+
+The result is a system that not only trades autonomously, but continuously improves
+its own decision-making without human intervention.
+
+---
+
+**Autonomous multi-agent LLM-based forex trading system** *(technical summary)*
+
 OpenForexAI is an asynchronous, fully autonomous forex trading framework in which a
 fleet of specialised AI agents collaborate through an internal event bus. Every
 trading decision — from market observation to order placement — is reasoned by a
@@ -60,11 +83,13 @@ between agents at runtime.
 The TradingAgent is the core decision-maker. Every `cycle_interval_seconds`
 (default: 60 s) it:
 
-1. Fetches the current `MarketSnapshot` (tick price, candles, computed indicators)
-   from the `DataContainer`.
-2. Sends a **first-pass LLM call** with a compact trading context and receives a
-   structured `_TradingDecision` (action, entry, SL, TP, confidence, reasoning,
-   `needs_deep_analysis` flag).
+1. Fetches the current `MarketSnapshot` (tick price, raw candles) from the
+   `DataContainer`.
+2. Sends a **first-pass LLM call** with a compact context — current price, the last
+   5 H1 candles, account balance, open position count, and recent trade history —
+   and receives a structured `_TradingDecision` (action, entry, SL, TP, confidence,
+   reasoning, `needs_deep_analysis` flag). Raw indicators are intentionally withheld
+   here; interpreting them is the TechnicalAnalysisAgent's responsibility.
 3. If `needs_deep_analysis` is `true`, publishes an `ANALYSIS_REQUESTED` event and
    awaits the `TechnicalAnalysisAgent`'s reply (up to `analysis_timeout_seconds`).
 4. If deep analysis arrived, sends a **second LLM call** enriched with the TA

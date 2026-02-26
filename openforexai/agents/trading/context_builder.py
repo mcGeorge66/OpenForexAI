@@ -22,14 +22,7 @@ def build_trading_context(
         f"Session       : {snapshot.session}",
         f"Current price : bid={snapshot.current_tick.bid}  ask={snapshot.current_tick.ask}",
         "",
-        "--- H1 Indicators ---",
-    ]
-    for name, value in snapshot.indicators.items():
-        lines.append(f"  {name}: {round(value, 5)}")
-
-    lines += [
-        "",
-        f"--- Last 5 H1 candles ---",
+        "--- Last 5 H1 candles ---",
     ]
     for c in snapshot.candles_h1[-5:]:
         lines.append(
