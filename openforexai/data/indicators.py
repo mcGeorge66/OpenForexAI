@@ -85,7 +85,7 @@ def vwap(candles: list[Candle]) -> float | None:
     typical_prices = np.array(
         [float(c.high + c.low + c.close) / 3 for c in candles], dtype=float
     )
-    volumes = np.array([float(c.volume) for c in candles], dtype=float)
+    volumes = np.array([float(c.tick_volume) for c in candles], dtype=float)
     total_volume = np.sum(volumes)
     if total_volume == 0:
         return None

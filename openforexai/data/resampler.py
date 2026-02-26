@@ -69,7 +69,10 @@ def resample_candles(candles: list[Candle], target_tf: str) -> list[Candle]:
                 high=max(c.high for c in group),
                 low=min(c.low for c in group),
                 close=group[-1].close,
-                volume=sum(c.volume for c in group),
+                # tick_volume: sum all source-bar counts — proxy for total activity
+                tick_volume=sum(c.tick_volume for c in group),
+                # spread: closing bar's spread — represents end-of-period liquidity
+                spread=group[-1].spread,
                 timeframe=target_tf,
             )
         )
