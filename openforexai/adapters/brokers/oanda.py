@@ -1,41 +1,96 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import AsyncIterator
 
 import httpx
 
-from openforexai.adapters.brokers.base import normalize_candle, retry_async
-from openforexai.models.market import Candle, Tick
+from openforexai.adapters.brokers.base import BrokerBase, normalize_candle, retry_async
+from openforexai.models.account import AccountStatus
+from openforexai.models.market import Candle
 from openforexai.models.trade import (
+    OrderType,
     Position,
     TradeDirection,
     TradeOrder,
     TradeResult,
     TradeStatus,
 )
-from openforexai.ports.broker import AbstractBroker
 
-_PRACTICE_URL = "https://api-fxpractice.oanda.com"
-_LIVE_URL = "https://api-fxtrade.oanda.com"
-_STREAM_PRACTICE = "https://stream-fxpractice.oanda.com"
-_STREAM_LIVE = "https://stream-fxtrade.oanda.com"
+_PRACTICE_REST = "https://api-fxpractice.oanda.com"
+_LIVE_REST = "https://api-fxtrade.oanda.com"
 
+# OANDA granularity codes for M5 only (higher TFs derived by DataContainer)
 _TF_MAP = {
-    "M1": "M1", "M5": "M5", "H1": "H1", "H4": "H4", "D1": "D"
+    "M1": "M1",
+    "M5": "M5",
+    "M15": "M15",
+    "M30": "M30",
+    "H1": "H1",
+    "H4": "H4",
+    "D": "D",
 }
 
 
-class OANDABroker(AbstractBroker):
-    """OANDA v20 REST + Streaming adapter."""
+def _instrument(pair: str) -> str:
+    """Convert 'EURUSD' → 'EUR_USD' for OANDA API."""
+    if "_" in pair:
+        return pair
+    if "/" in pair:
+        return pair.replace("/", "_")
+    return pair[:3] + "_" + pair[3:]
 
-    def __init__(self, api_key: str, account_id: str, practice: bool = True) -> None:
+
+def _pair(instrument: str) -> str:
+    """Convert 'EUR_USD' → 'EURUSD' for internal use."""
+    return instrument.replace("_", "")
+
+
+class OANDABroker(BrokerBase):
+    """OANDA v20 REST adapter.
+
+    Implements the full AbstractBroker contract.  Streaming (tick-level) is
+    intentionally removed — the system operates on M5 candles only.
+
+    Supported order types: MARKET, LIMIT, STOP, STOP_LIMIT, TRAILING_STOP.
+
+    Instantiation
+    -------------
+    ::
+
+        broker = OANDABroker(
+            short_name="OANDA_DEMO",
+            api_key="...",
+            account_id="...",
+            practice=True,
+        )
+        await broker.connect()
+        broker.start_background_tasks(pairs, event_bus, repository)
+    """
+
+    def __init__(
+        self,
+        short_name: str,
+        api_key: str,
+        account_id: str,
+        practice: bool = True,
+        monitoring_bus=None,
+    ) -> None:
+        super().__init__(monitoring_bus=monitoring_bus)
+        self._short_name = short_name
         self._api_key = api_key
         self._account_id = account_id
-        self._base_url = _PRACTICE_URL if practice else _LIVE_URL
-        self._stream_url = _STREAM_PRACTICE if practice else _STREAM_LIVE
+        self._base_url = _PRACTICE_REST if practice else _LIVE_REST
         self._client: httpx.AsyncClient | None = None
+
+    # ── Identity ──────────────────────────────────────────────────────────────
+
+    @property
+    def short_name(self) -> str:
+        return self._short_name
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
         self._client = httpx.AsyncClient(
@@ -52,113 +107,197 @@ class OANDABroker(AbstractBroker):
             await self._client.aclose()
             self._client = None
 
-    def _client_or_raise(self) -> httpx.AsyncClient:
+    def _c(self) -> httpx.AsyncClient:
         if self._client is None:
             raise RuntimeError("OANDABroker: call connect() first")
         return self._client
 
-    async def get_account_balance(self) -> float:
-        client = self._client_or_raise()
-        resp = await retry_async(
-            lambda: client.get(f"/v3/accounts/{self._account_id}/summary"), attempts=3
-        )
-        resp.raise_for_status()
-        return float(resp.json()["account"]["balance"])
+    # ── Market data ───────────────────────────────────────────────────────────
 
-    async def get_historical_candles(
-        self, pair: str, timeframe: str, count: int
-    ) -> list[Candle]:
-        client = self._client_or_raise()
-        instrument = pair.replace("/", "_") if "/" in pair else pair[:3] + "_" + pair[3:]
-        gran = _TF_MAP.get(timeframe, timeframe)
+    async def fetch_latest_m5_candle(self, pair: str) -> Candle | None:
+        """Fetch the most recently completed M5 candle from OANDA."""
+        candles = await self.get_historical_m5_candles(pair, count=2)
+        if not candles:
+            return None
+        return candles[-1]
+
+    async def get_historical_m5_candles(self, pair: str, count: int) -> list[Candle]:
+        """Fetch up to *count* completed M5 candles (oldest first)."""
+        client = self._c()
+        instrument = _instrument(pair)
         resp = await retry_async(
             lambda: client.get(
                 f"/v3/instruments/{instrument}/candles",
-                params={"granularity": gran, "count": count, "price": "M"},
+                params={"granularity": "M5", "count": count, "price": "BA"},
             ),
             attempts=3,
         )
         resp.raise_for_status()
         raw_candles = resp.json().get("candles", [])
-        return [
-            normalize_candle(
+        result: list[Candle] = []
+        for c in raw_candles:
+            if not c.get("complete", True):
+                continue  # skip the still-forming candle
+            bid = c.get("bid", {})
+            ask = c.get("ask", {})
+            # Spread in pips: (ask_close - bid_close) / pip_size
+            # For simplicity we store raw price difference; DataContainer knows pip size
+            bid_close = Decimal(bid.get("c", "0"))
+            ask_close = Decimal(ask.get("c", "0"))
+            spread_pips = ask_close - bid_close  # raw spread; agents receive in model units
+
+            result.append(normalize_candle(
                 {
                     "time": c["time"],
-                    "open": c["mid"]["o"],
-                    "high": c["mid"]["h"],
-                    "low": c["mid"]["l"],
-                    "close": c["mid"]["c"],
-                    "volume": c.get("volume", 0),
+                    "open": bid.get("o", "0"),
+                    "high": bid.get("h", "0"),
+                    "low": bid.get("l", "0"),
+                    "close": bid.get("c", "0"),
+                    "tick_volume": c.get("volume", 0),
+                    "spread": str(spread_pips),
                 },
                 pair,
-                timeframe,
-            )
-            for c in raw_candles
-            if c.get("complete", True)
-        ]
+                "M5",
+            ))
+        return result
 
-    async def get_open_positions(self) -> list[Position]:
-        client = self._client_or_raise()
+    # ── Account ───────────────────────────────────────────────────────────────
+
+    async def get_account_status(self) -> AccountStatus:
+        client = self._c()
         resp = await retry_async(
-            lambda: client.get(f"/v3/accounts/{self._account_id}/openTrades"), attempts=3
+            lambda: client.get(f"/v3/accounts/{self._account_id}/summary"),
+            attempts=3,
         )
         resp.raise_for_status()
-        positions: list[Position] = []
-        from datetime import datetime, timezone
+        acct = resp.json()["account"]
+        margin = Decimal(str(acct.get("marginUsed", "0")))
+        equity = Decimal(str(acct.get("NAV", acct.get("balance", "0"))))
+        margin_level = (
+            float(equity / margin * 100) if margin and margin > 0 else None
+        )
+        return AccountStatus(
+            broker_name=self._short_name,
+            balance=Decimal(str(acct["balance"])),
+            equity=equity,
+            margin=margin,
+            margin_free=Decimal(str(acct.get("marginAvailable", "0"))),
+            leverage=int(acct.get("marginRate", 0.02) and round(1 / float(acct.get("marginRate", 0.02)))),
+            currency=acct.get("currency", "USD"),
+            trade_allowed=not acct.get("tradingDisabled", False),
+            margin_level=margin_level,
+            recorded_at=datetime.now(timezone.utc),
+        )
 
-        for t in resp.json().get("trades", []):
-            direction = TradeDirection.BUY if int(t["currentUnits"]) > 0 else TradeDirection.SELL
-            positions.append(
-                Position(
-                    broker_position_id=t["id"],
-                    pair=t["instrument"].replace("_", ""),
-                    direction=direction,
-                    units=abs(int(t["currentUnits"])),
-                    open_price=Decimal(t["price"]),
-                    current_price=Decimal(t.get("price", t["price"])),
-                    unrealized_pnl=Decimal(t.get("unrealizedPL", "0")),
-                    opened_at=datetime.fromisoformat(t["openTime"].replace("Z", "+00:00")),
-                )
-            )
-        return positions
+    # ── Orders ────────────────────────────────────────────────────────────────
 
     async def place_order(self, order: TradeOrder) -> TradeResult:
-        client = self._client_or_raise()
+        client = self._c()
         signal = order.signal
-        instrument = signal.pair[:3] + "_" + signal.pair[3:]
+        instrument = _instrument(signal.pair)
         units = order.units if signal.direction == TradeDirection.BUY else -order.units
 
-        body = {
-            "order": {
-                "type": "MARKET",
-                "instrument": instrument,
-                "units": str(units),
-                "stopLossOnFill": {"price": str(signal.stop_loss)},
-                "takeProfitOnFill": {"price": str(signal.take_profit)},
-            }
+        order_body: dict = {
+            "instrument": instrument,
+            "units": str(units),
         }
+
+        # ── Common SL/TP ─────────────────────────────────────────────────────
+        if signal.stop_loss:
+            order_body["stopLossOnFill"] = {"price": str(signal.stop_loss)}
+        if signal.take_profit:
+            order_body["takeProfitOnFill"] = {"price": str(signal.take_profit)}
+
+        # ── Trailing stop ─────────────────────────────────────────────────────
+        if order.trailing_stop_distance:
+            order_body["trailingStopLossOnFill"] = {
+                "distance": str(order.trailing_stop_distance)
+            }
+
+        # ── Order-type specific fields ────────────────────────────────────────
+        if order.order_type == OrderType.MARKET:
+            order_body["type"] = "MARKET"
+
+        elif order.order_type == OrderType.LIMIT:
+            if not order.limit_price:
+                raise ValueError("LIMIT order requires limit_price")
+            order_body["type"] = "LIMIT"
+            order_body["price"] = str(order.limit_price)
+
+        elif order.order_type == OrderType.STOP:
+            if not order.stop_price:
+                raise ValueError("STOP order requires stop_price")
+            order_body["type"] = "STOP"
+            order_body["price"] = str(order.stop_price)
+
+        elif order.order_type == OrderType.STOP_LIMIT:
+            if not order.stop_price or not order.limit_price:
+                raise ValueError("STOP_LIMIT order requires both stop_price and limit_price")
+            # OANDA implements this as a STOP order with priceBound
+            order_body["type"] = "STOP"
+            order_body["price"] = str(order.stop_price)
+            order_body["priceBound"] = str(order.limit_price)
+
+        elif order.order_type == OrderType.TRAILING_STOP:
+            if not order.trailing_stop_distance:
+                raise ValueError("TRAILING_STOP order requires trailing_stop_distance")
+            order_body["type"] = "MARKET"
+            # Trailing stop is set via trailingStopLossOnFill above
+
+        else:
+            raise NotImplementedError(f"Order type not supported: {order.order_type}")
+
         resp = await retry_async(
             lambda: client.post(
                 f"/v3/accounts/{self._account_id}/orders",
-                content=json.dumps(body),
+                content=json.dumps({"order": order_body}),
             ),
             attempts=3,
         )
         resp.raise_for_status()
         data = resp.json()
         fill = data.get("orderFillTransaction", {})
-        from datetime import datetime, timezone
 
         return TradeResult(
             order=order,
-            broker_order_id=fill.get("orderID", ""),
+            broker_order_id=fill.get("orderID", data.get("relatedTransactionIDs", [""])[0]),
+            broker_name=self._short_name,
             status=TradeStatus.OPEN if fill else TradeStatus.PENDING,
             fill_price=Decimal(fill["price"]) if fill.get("price") else None,
             opened_at=datetime.now(timezone.utc),
         )
 
+    # ── Positions ─────────────────────────────────────────────────────────────
+
+    async def get_open_positions(self) -> list[Position]:
+        client = self._c()
+        resp = await retry_async(
+            lambda: client.get(f"/v3/accounts/{self._account_id}/openTrades"),
+            attempts=3,
+        )
+        resp.raise_for_status()
+        positions: list[Position] = []
+        for t in resp.json().get("trades", []):
+            direction = TradeDirection.BUY if int(t["currentUnits"]) > 0 else TradeDirection.SELL
+            sl = t.get("stopLossOrder", {}).get("price")
+            tp = t.get("takeProfitOrder", {}).get("price")
+            positions.append(Position(
+                broker_position_id=t["id"],
+                broker_name=self._short_name,
+                pair=_pair(t["instrument"]),
+                direction=direction,
+                units=abs(int(t["currentUnits"])),
+                open_price=Decimal(t["price"]),
+                current_price=Decimal(t.get("price", t["price"])),
+                stop_loss=Decimal(sl) if sl else None,
+                take_profit=Decimal(tp) if tp else None,
+                unrealized_pnl=Decimal(t.get("unrealizedPL", "0")),
+                opened_at=datetime.fromisoformat(t["openTime"].replace("Z", "+00:00")),
+            ))
+        return positions
+
     async def close_position(self, position_id: str) -> TradeResult:
-        client = self._client_or_raise()
+        client = self._c()
         resp = await retry_async(
             lambda: client.put(
                 f"/v3/accounts/{self._account_id}/trades/{position_id}/close"
@@ -167,11 +306,9 @@ class OANDABroker(AbstractBroker):
         )
         resp.raise_for_status()
         data = resp.json().get("orderFillTransaction", {})
-        from datetime import datetime, timezone
-        from uuid import uuid4
 
-        from openforexai.models.trade import TradeDirection, TradeSignal
-
+        # Minimal dummy order needed to satisfy TradeResult schema
+        from openforexai.models.trade import TradeDirection, TradeSignal, TradeOrder
         dummy_signal = TradeSignal(
             pair="",
             direction=TradeDirection.BUY,
@@ -179,52 +316,22 @@ class OANDABroker(AbstractBroker):
             stop_loss=Decimal("0"),
             take_profit=Decimal("0"),
             confidence=0.0,
-            reasoning="close",
+            reasoning="position close",
             generated_at=datetime.now(timezone.utc),
             agent_id="supervisor",
         )
         dummy_order = TradeOrder(
-            signal=dummy_signal, units=0, risk_pct=0.0, approved_by="supervisor"
+            signal=dummy_signal,
+            units=0,
+            risk_pct=0.0,
+            approved_by="supervisor",
         )
         return TradeResult(
             order=dummy_order,
             broker_order_id=position_id,
+            broker_name=self._short_name,
             status=TradeStatus.CLOSED,
             fill_price=Decimal(data["price"]) if data.get("price") else None,
             pnl=Decimal(data.get("pl", "0")),
             closed_at=datetime.now(timezone.utc),
         )
-
-    async def stream_ticks(self, pairs: list[str]) -> AsyncIterator[Tick]:
-        instruments = ",".join(p[:3] + "_" + p[3:] for p in pairs)
-        stream_client = httpx.AsyncClient(
-            base_url=self._stream_url,
-            headers={"Authorization": f"Bearer {self._api_key}"},
-            timeout=None,
-        )
-        from datetime import datetime, timezone
-
-        try:
-            async with stream_client.stream(
-                "GET",
-                f"/v3/accounts/{self._account_id}/pricing/stream",
-                params={"instruments": instruments},
-            ) as response:
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if data.get("type") != "PRICE":
-                        continue
-                    raw_pair = data["instrument"].replace("_", "")
-                    yield Tick(
-                        pair=raw_pair,
-                        bid=Decimal(data["bids"][0]["price"]),
-                        ask=Decimal(data["asks"][0]["price"]),
-                        timestamp=datetime.now(timezone.utc),
-                    )
-        finally:
-            await stream_client.aclose()
