@@ -1,0 +1,52 @@
+system:
+  log_level: INFO
+  cycle_interval_seconds: 60
+  optimization_interval_hours: 6
+
+# At least one pair required.
+# One TradingAgent + one TechnicalAnalysisAgent will be spawned per entry.
+pairs:
+  - EURUSD
+  - USDJPY
+  - GBPUSD
+
+data:
+  rolling_weeks: 4
+  timeframes: [M1, M5, H1, H4, D1]
+  indicator_cache_ttl_seconds: 30
+
+llm:
+  provider: anthropic
+  model: claude-opus-4-6
+  temperature: 0.1
+  max_tokens: 1024
+  timeout_seconds: 30
+  retry_attempts: 3
+
+broker:
+  name: oanda
+  practice: true
+
+database:
+  backend: sqlite
+  sqlite_path: ./data/openforexai.db
+  pool_size: 5
+
+risk:
+  max_risk_per_trade_pct: 1.0
+  max_total_exposure_pct: 5.0
+  max_drawdown_pct: 10.0
+  max_daily_loss_pct: 3.0
+  max_correlation_threshold: 0.7
+  max_open_positions: 6
+
+agents:
+  trading:
+    cycle_interval_seconds: 60
+    analysis_timeout_seconds: 15.0
+  technical_analysis:
+    max_concurrent_requests: 3
+  optimization:
+    min_trades_before_run: 20
+    backtest_weeks: 4
+    max_prompt_candidates: 3
