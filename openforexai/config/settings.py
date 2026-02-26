@@ -53,6 +53,11 @@ class RiskSettings(BaseModel):
 class TradingAgentSettings(BaseModel):
     cycle_interval_seconds: int = 60
     analysis_timeout_seconds: float = 15.0
+    # Which timeframes and how many candles to include in the LLM context.
+    # Keys: M5 | M15 | M30 | H1 | H4 | D1  — only listed TFs are shown.
+    context_candles: dict[str, int] = Field(
+        default_factory=lambda: {"M5": 20, "M15": 12, "H1": 5}
+    )
 
 
 class TechnicalAnalysisSettings(BaseModel):

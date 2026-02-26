@@ -45,6 +45,7 @@ class TradingAgent(BaseAgent):
         bus: EventBus,
         cycle_interval_seconds: int = 60,
         analysis_timeout_seconds: float = 15.0,
+        context_candles: dict[str, int] | None = None,
     ) -> None:
         super().__init__(
             agent_id=f"trading_{pair}",
@@ -57,6 +58,7 @@ class TradingAgent(BaseAgent):
         self.data_container = data_container
         self.cycle_interval = cycle_interval_seconds
         self.analysis_timeout = analysis_timeout_seconds
+        self.context_candles = context_candles  # None → context_builder uses its default
 
         # Pending analysis responses keyed by correlation_id
         self._pending_analyses: dict[str, asyncio.Future[AnalysisResult]] = {}
@@ -121,6 +123,7 @@ class TradingAgent(BaseAgent):
                 open_positions_count=len(positions),
                 account_balance=balance,
                 analysis=None,
+                context_candles=self.context_candles,
             )
             first_response = await self.llm.complete_structured(
                 system_prompt=self._system_prompt,
@@ -129,19 +132,31 @@ class TradingAgent(BaseAgent):
             )
             decision_data = _TradingDecision(**first_response)
 
+            # ── Optional on-demand candle fetch ──────────────────────────────
+            extra_candles: dict[str, list] = {}
+            if decision_data.requested_candles:
+                for req in decision_data.requested_candles:
+                    pair_req = req.get("pair", self.pair)
+                    tf = req.get("timeframe", "M5")
+                    count = min(int(req.get("count", 50)), 500)
+                    raw = self.data_container.get_candles(pair_req, tf)
+                    extra_candles[f"{pair_req}_{tf}"] = raw[-count:]
+
             # ── Optional deep analysis ───────────────────────────────────────
             analysis: AnalysisResult | None = None
             if decision_data.needs_deep_analysis:
                 analysis = await self._request_analysis(snapshot.model_dump(mode="json"))
 
-            # ── Final decision with optional TA context ──────────────────────
-            if analysis is not None:
+            # ── Final decision if anything enriched the context ──────────────
+            if analysis is not None or extra_candles:
                 enriched_context = build_trading_context(
                     snapshot=snapshot,
                     recent_trades=recent_trades,
                     open_positions_count=len(positions),
                     account_balance=balance,
                     analysis=analysis,
+                    context_candles=self.context_candles,
+                    extra_candles=extra_candles or None,
                 )
                 final_response = await self.llm.complete_structured(
                     system_prompt=self._system_prompt,
@@ -245,3 +260,6 @@ class _TradingDecision(BaseModel):
     confidence: float = 0.0
     reasoning: str = ""
     needs_deep_analysis: bool = False
+    # Optional on-demand candle request. Each entry: {pair, timeframe, count}.
+    # Example: [{"pair": "USDJPY", "timeframe": "M5", "count": 50}]
+    requested_candles: list[dict] | None = None
