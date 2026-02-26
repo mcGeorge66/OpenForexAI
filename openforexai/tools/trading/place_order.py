@@ -1,9 +1,4 @@
-"""Tool: place_order — submit a trade order to the broker.
-
-This tool requires approval (default: supervisor) before execution.
-The SupervisorAgent runs risk checks (exposure, daily loss, correlation)
-and either approves or rejects the order.
-"""
+"""Tool: place_order — submit a trade order to the broker."""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -18,7 +13,7 @@ class PlaceOrderTool(BaseTool):
         "Submit a trade order for the current currency pair. "
         "Supported order types: MARKET, LIMIT, STOP, STOP_LIMIT, TRAILING_STOP. "
         "Always specify stop_loss and take_profit for risk management. "
-        "This tool requires supervisor approval before execution."
+        "Always specify stop_loss and take_profit for risk management."
     )
     input_schema = {
         "type": "object",
@@ -77,8 +72,7 @@ class PlaceOrderTool(BaseTool):
         },
         "required": ["direction", "order_type", "units"],
     }
-    requires_approval = True
-    default_approval_mode = "supervisor"
+    requires_approval = False
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
         from openforexai.models.trade import TradeOrder, TradeSignal, OrderType

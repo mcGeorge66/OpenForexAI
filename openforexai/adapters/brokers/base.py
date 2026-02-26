@@ -14,6 +14,18 @@ from openforexai.ports.broker import AbstractBroker
 
 _log = logging.getLogger(__name__)
 
+
+def _adapter_agent_id(broker_name: str, pair: str) -> str:
+    """Build the structured source_agent_id for a broker adapter.
+
+    One adapter = one pair.  Format: ``BROKER_PAIR_AA_ADPT``
+    Example: ``OANDA_EURUSD_AA_ADPT``, ``MT5.._USDJPY_AA_ADPT``
+    """
+    b = broker_name.upper().ljust(5, ".")[:5]
+    p = pair.upper().ljust(6, ".")[:6]
+    return f"{b}_{p}_AA_ADPT"
+
+
 # ── Candle normalisation ──────────────────────────────────────────────────────
 
 
@@ -90,14 +102,16 @@ class BrokerBase(AbstractBroker):
         self._monitoring = monitoring_bus
         self._tasks: list[asyncio.Task] = []
         self._running = False
-        # last successfully emitted M5 candle timestamp per pair
-        self._last_m5_time: dict[str, datetime] = {}
+        # One adapter = one pair; set by start_background_tasks()
+        self._pair: str = ""
+        # last successfully emitted M5 candle timestamp
+        self._last_m5_time: datetime | None = None
 
     # ── Background task lifecycle ─────────────────────────────────────────────
 
     def start_background_tasks(
         self,
-        pairs: list[str],
+        pair: str,
         event_bus,                          # EventBus — avoid import cycle
         repository,                         # AbstractRepository
         account_poll_interval: int = 60,    # seconds
@@ -105,22 +119,26 @@ class BrokerBase(AbstractBroker):
         request_agent_reasoning: bool = False,  # Option B if True
         monitoring_bus=None,
     ) -> None:
-        """Create and schedule the three background asyncio Tasks."""
+        """Create and schedule the three background asyncio Tasks.
+
+        Each adapter instance handles exactly ONE pair.
+        """
         if monitoring_bus is not None:
             self._monitoring = monitoring_bus
+        self._pair = pair
         self._running = True
         self._tasks = [
             asyncio.create_task(
-                self._m5_loop(pairs, event_bus),
-                name=f"{self.short_name}_m5_loop",
+                self._m5_loop(pair, event_bus),
+                name=f"{self.short_name}_{pair}_m5_loop",
             ),
             asyncio.create_task(
                 self._account_poll_loop(repository, account_poll_interval),
-                name=f"{self.short_name}_account_poll",
+                name=f"{self.short_name}_{pair}_account_poll",
             ),
             asyncio.create_task(
-                self._sync_loop(repository, event_bus, sync_interval, request_agent_reasoning),
-                name=f"{self.short_name}_sync_loop",
+                self._sync_loop(pair, repository, event_bus, sync_interval, request_agent_reasoning),
+                name=f"{self.short_name}_{pair}_sync_loop",
             ),
         ]
 
@@ -132,94 +150,93 @@ class BrokerBase(AbstractBroker):
 
     # ── M5 streaming loop ─────────────────────────────────────────────────────
 
-    async def _m5_loop(self, pairs: list[str], event_bus) -> None:
-        """Wait for the next M5 boundary, fetch candles, publish events."""
+    async def _m5_loop(self, pair: str, event_bus) -> None:
+        """Wait for the next M5 boundary, fetch the candle, publish events.
+
+        One adapter = one pair.
+        """
         source = f"broker.{self.short_name}"
+        source_agent_id = _adapter_agent_id(self.short_name, pair)
         while self._running:
             try:
                 await self._sleep_until_next_m5()
+                try:
+                    candle = await self.fetch_latest_m5_candle(pair)
+                    if candle is None:
+                        continue
 
-                for pair in pairs:
-                    try:
-                        candle = await self.fetch_latest_m5_candle(pair)
-                        if candle is None:
-                            continue
+                    self._emit(
+                        source, MonitoringEventType.M5_CANDLE_FETCHED,
+                        broker_name=self.short_name, pair=pair,
+                        timestamp=candle.timestamp.isoformat(),
+                        close=str(candle.close), spread=str(candle.spread),
+                        tick_volume=candle.tick_volume,
+                    )
 
-                        self._emit(
-                            source, MonitoringEventType.M5_CANDLE_FETCHED,
-                            broker_name=self.short_name, pair=pair,
-                            timestamp=candle.timestamp.isoformat(),
-                            close=str(candle.close), spread=str(candle.spread),
-                            tick_volume=candle.tick_volume,
-                        )
+                    # ── Gap detection ─────────────────────────────────────────
+                    last_ts = self._last_m5_time
+                    if last_ts is not None:
+                        expected = last_ts + timedelta(minutes=5)
+                        if candle.timestamp > expected + timedelta(seconds=30):
+                            gap_candles = int(
+                                (candle.timestamp - expected).total_seconds() / 300
+                            )
+                            _log.warning(
+                                "M5 gap detected broker=%s pair=%s missing=%d",
+                                self.short_name, pair, gap_candles,
+                            )
+                            self._emit(
+                                source, MonitoringEventType.CANDLE_GAP_DETECTED,
+                                broker_name=self.short_name, pair=pair,
+                                expected=expected.isoformat(),
+                                got=candle.timestamp.isoformat(),
+                                missing_candles=gap_candles,
+                            )
+                            await event_bus.publish(AgentMessage(
+                                event_type=EventType.CANDLE_GAP_DETECTED,
+                                source_agent_id=source_agent_id,
+                                payload={
+                                    "broker_name": self.short_name,
+                                    "pair": pair,
+                                    "expected_timestamp": expected.isoformat(),
+                                    "received_timestamp": candle.timestamp.isoformat(),
+                                    "missing_candles": gap_candles,
+                                },
+                            ))
 
-                        # ── Gap detection ────────────────────────────────────
-                        last_ts = self._last_m5_time.get(pair)
-                        if last_ts is not None:
-                            expected = last_ts + timedelta(minutes=5)
-                            if candle.timestamp > expected + timedelta(seconds=30):
-                                gap_candles = int(
-                                    (candle.timestamp - expected).total_seconds() / 300
-                                )
-                                _log.warning(
-                                    "M5 gap detected",
-                                    broker=self.short_name,
-                                    pair=pair,
-                                    expected=expected.isoformat(),
-                                    got=candle.timestamp.isoformat(),
-                                    missing_candles=gap_candles,
-                                )
-                                self._emit(
-                                    source, MonitoringEventType.CANDLE_GAP_DETECTED,
-                                    broker_name=self.short_name, pair=pair,
-                                    expected=expected.isoformat(),
-                                    got=candle.timestamp.isoformat(),
-                                    missing_candles=gap_candles,
-                                )
-                                await event_bus.publish(AgentMessage(
-                                    event_type=EventType.CANDLE_GAP_DETECTED,
-                                    source_agent_id=f"broker.{self.short_name}",
-                                    payload={
-                                        "broker_name": self.short_name,
-                                        "pair": pair,
-                                        "expected_timestamp": expected.isoformat(),
-                                        "received_timestamp": candle.timestamp.isoformat(),
-                                        "missing_candles": gap_candles,
-                                    },
-                                ))
+                    self._last_m5_time = candle.timestamp
 
-                        self._last_m5_time[pair] = candle.timestamp
+                    # ── Publish candle to event bus ───────────────────────────
+                    await event_bus.publish(AgentMessage(
+                        event_type=EventType.M5_CANDLE_AVAILABLE,
+                        source_agent_id=source_agent_id,
+                        payload={
+                            "broker_name": self.short_name,
+                            "pair": pair,
+                            "candle": candle.model_dump(mode="json"),
+                        },
+                    ))
+                    self._emit(
+                        source, MonitoringEventType.M5_CANDLE_QUEUED,
+                        broker_name=self.short_name, pair=pair,
+                        timestamp=candle.timestamp.isoformat(),
+                    )
 
-                        # ── Publish candle to event bus ───────────────────────
-                        await event_bus.publish(AgentMessage(
-                            event_type=EventType.M5_CANDLE_AVAILABLE,
-                            source_agent_id=f"broker.{self.short_name}",
-                            payload={
-                                "broker_name": self.short_name,
-                                "pair": pair,
-                                "candle": candle.model_dump(mode="json"),
-                            },
-                        ))
-                        self._emit(
-                            source, MonitoringEventType.M5_CANDLE_QUEUED,
-                            broker_name=self.short_name, pair=pair,
-                            timestamp=candle.timestamp.isoformat(),
-                        )
-
-                    except Exception as exc:
-                        _log.exception(
-                            "M5 fetch error", broker=self.short_name, pair=pair, error=str(exc)
-                        )
-                        self._emit(
-                            source, MonitoringEventType.BROKER_ERROR,
-                            broker_name=self.short_name, pair=pair, error=str(exc),
-                        )
+                except Exception as exc:
+                    _log.exception(
+                        "M5 fetch error broker=%s pair=%s: %s",
+                        self.short_name, pair, exc,
+                    )
+                    self._emit(
+                        source, MonitoringEventType.BROKER_ERROR,
+                        broker_name=self.short_name, pair=pair, error=str(exc),
+                    )
 
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.exception("M5 loop error", broker=self.short_name, error=str(exc))
-                await asyncio.sleep(10)  # brief back-off before retry
+                _log.exception("M5 loop error broker=%s: %s", self.short_name, exc)
+                await asyncio.sleep(10)
 
     # ── Account polling loop ──────────────────────────────────────────────────
 
@@ -251,29 +268,35 @@ class BrokerBase(AbstractBroker):
 
     async def _sync_loop(
         self,
+        pair: str,
         repository,
         event_bus,
         interval_seconds: int,
         request_agent_reasoning: bool,
     ) -> None:
-        """Detect broker-side closes (SL/TP hits) and update the order book."""
+        """Detect broker-side closes (SL/TP hits) and update the order book.
+
+        Operates only on the entries for this adapter's pair.
+        """
         source = f"broker.{self.short_name}"
+        source_agent_id = _adapter_agent_id(self.short_name, pair)
         while self._running:
             await asyncio.sleep(interval_seconds)
             try:
                 self._emit(source, MonitoringEventType.SYNC_CHECK_STARTED,
-                           broker_name=self.short_name)
+                           broker_name=self.short_name, pair=pair)
 
                 broker_positions = await self.get_open_positions()
                 broker_ids = {p.broker_position_id for p in broker_positions}
 
-                local_open = await repository.get_open_order_book_entries(self.short_name)
+                local_open = await repository.get_open_order_book_entries(
+                    self.short_name, pair
+                )
                 now = datetime.now(timezone.utc)
                 discrepancies = 0
 
                 for entry in local_open:
                     if entry.broker_order_id and entry.broker_order_id not in broker_ids:
-                        # Position gone from broker — SL/TP/trailing or broker-forced
                         discrepancies += 1
                         close_reason = CloseReason.SYNC_DETECTED
 
@@ -290,18 +313,18 @@ class BrokerBase(AbstractBroker):
 
                         self._emit(
                             source, MonitoringEventType.SYNC_DISCREPANCY_FOUND,
-                            broker_name=self.short_name, pair=entry.pair,
+                            broker_name=self.short_name, pair=pair,
                             entry_id=str(entry.id),
                             broker_order_id=entry.broker_order_id,
                         )
 
                         await event_bus.publish(AgentMessage(
                             event_type=EventType.ORDER_BOOK_SYNC_DISCREPANCY,
-                            source_agent_id=f"broker.{self.short_name}",
+                            source_agent_id=source_agent_id,
                             payload={
                                 "broker_name": self.short_name,
                                 "entry_id": str(entry.id),
-                                "pair": entry.pair,
+                                "pair": pair,
                                 "direction": entry.direction.value,
                                 "close_reason": close_reason.value,
                                 "request_agent_reasoning": request_agent_reasoning,
@@ -309,14 +332,14 @@ class BrokerBase(AbstractBroker):
                         ))
                         self._emit(
                             source, MonitoringEventType.SYNC_AGENT_NOTIFIED,
-                            broker_name=self.short_name, pair=entry.pair,
+                            broker_name=self.short_name, pair=pair,
                             entry_id=str(entry.id),
                             request_reasoning=request_agent_reasoning,
                         )
 
                 self._emit(
                     source, MonitoringEventType.SYNC_CHECK_COMPLETED,
-                    broker_name=self.short_name,
+                    broker_name=self.short_name, pair=pair,
                     positions_at_broker=len(broker_ids),
                     local_open=len(local_open),
                     discrepancies=discrepancies,
@@ -325,25 +348,31 @@ class BrokerBase(AbstractBroker):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.exception("Sync loop error", broker=self.short_name, error=str(exc))
+                _log.exception("Sync loop error broker=%s pair=%s: %s",
+                               self.short_name, pair, exc)
 
     # ── Trigger a manual sync (callable by agents as a tool) ─────────────────
 
-    async def trigger_sync(self, repository, event_bus, request_agent_reasoning: bool = False) -> int:
-        """Run one sync check immediately.  Returns the number of discrepancies found.
+    async def trigger_sync(
+        self,
+        pair: str,
+        repository,
+        event_bus,
+        request_agent_reasoning: bool = False,
+    ) -> list[dict]:
+        """Run one sync check immediately for this adapter's pair.
 
-        Agents can call this after placing an order to confirm fill or after
-        receiving a SYNC_DISCREPANCY event to re-verify the state.
+        Returns a list of discrepancy dicts (one per affected order book entry).
         """
+        source_agent_id = _adapter_agent_id(self.short_name, pair)
         broker_positions = await self.get_open_positions()
         broker_ids = {p.broker_position_id for p in broker_positions}
-        local_open = await repository.get_open_order_book_entries(self.short_name)
+        local_open = await repository.get_open_order_book_entries(self.short_name, pair)
         now = datetime.now(timezone.utc)
-        discrepancies = 0
+        found: list[dict] = []
 
         for entry in local_open:
             if entry.broker_order_id and entry.broker_order_id not in broker_ids:
-                discrepancies += 1
                 await repository.update_order_book_entry(
                     str(entry.id),
                     {
@@ -354,20 +383,24 @@ class BrokerBase(AbstractBroker):
                         "sync_confirmed": True,
                     },
                 )
+                disc = {
+                    "entry_id": str(entry.id),
+                    "pair": pair,
+                    "direction": entry.direction.value,
+                    "close_reason": CloseReason.SYNC_DETECTED.value,
+                }
+                found.append(disc)
                 await event_bus.publish(AgentMessage(
                     event_type=EventType.ORDER_BOOK_SYNC_DISCREPANCY,
-                    source_agent_id=f"broker.{self.short_name}",
+                    source_agent_id=source_agent_id,
                     payload={
                         "broker_name": self.short_name,
-                        "entry_id": str(entry.id),
-                        "pair": entry.pair,
-                        "direction": entry.direction.value,
-                        "close_reason": CloseReason.SYNC_DETECTED.value,
+                        **disc,
                         "request_agent_reasoning": request_agent_reasoning,
                     },
                 ))
 
-        return discrepancies
+        return found
 
     # ── M5 time boundary helper ───────────────────────────────────────────────
 

@@ -8,10 +8,8 @@
     "  Use ['*'] to allow all registered tools.",
     "  Empty list [] falls back to ['*'].",
     "",
-    "approval_modes: per-tool override of the tool's default_approval_mode.",
+    "approval_modes: per-tool override (reserved for future use, all tools currently 'direct').",
     "  'direct'     → execute immediately, no approval needed",
-    "  'supervisor' → route through SupervisorAgent risk checks",
-    "  'human'      → block until Management API provides approval",
     "",
     "context_tiers: maps budget-percentage threshold → tool-set key.",
     "  At 0-69% budget: tools in tier_tools['all'] are available.",
@@ -40,10 +38,7 @@
         "raise_alarm",
         "trigger_sync"
       ],
-      "approval_modes": {
-        "place_order":    "supervisor",
-        "close_position": "supervisor"
-      },
+      "approval_modes": {},
       "context_tiers": {
         "0":  "all",
         "70": "decision",
