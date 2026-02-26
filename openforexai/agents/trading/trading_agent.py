@@ -1,111 +1,84 @@
+"""TradingAgent — per-pair LLM-driven trading agent.
+
+One instance is created for each configured Forex pair.  The agent:
+
+1. Wakes up on its cycle interval.
+2. Calls the LLM via the native tool-use loop (``run_with_tools()``).
+3. The LLM autonomously uses available tools to:
+   - Fetch candles at any timeframe
+   - Compute technical indicators
+   - Check account status and open positions
+   - Query the order book
+   - Place or close orders (via supervisor approval)
+   - Raise alarms
+4. Persists the AgentDecision.
+5. Sleeps until the next cycle.
+
+Additionally, the agent processes inbound EventBus messages (routed via the
+routing table) to handle:
+- SIGNAL_APPROVED / SIGNAL_REJECTED responses from the SupervisorAgent
+- PROMPT_UPDATED from the OptimizationAgent
+- ORDER_BOOK_SYNC_DISCREPANCY from the broker sync loop
+
+Agent ID format: ``{BROKER(5)}_{PAIR(6)}_AA_TRD1``
+Example:         ``OANDA_EURUSD_AA_TRD1``
+"""
 from __future__ import annotations
 
 import asyncio
 import time
 from datetime import datetime, timezone
-from decimal import Decimal
-from uuid import uuid4
 
 from openforexai.agents.base import BaseAgent
-from openforexai.agents.trading.context_builder import build_trading_context
 from openforexai.agents.trading.prompt_templates import get_default_prompt
 from openforexai.data.container import DataContainer
-from openforexai.data.indicator_tools import IndicatorToolset
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
 from openforexai.models.agent import AgentDecision, AgentRole
-from openforexai.models.analysis import AnalysisResult
 from openforexai.models.messaging import AgentMessage, EventType
-from openforexai.models.trade import TradeDirection, TradeSignal
 from openforexai.ports.broker import AbstractBroker
 from openforexai.ports.database import AbstractRepository
 from openforexai.ports.llm import AbstractLLMProvider
+from openforexai.tools.dispatcher import ToolDispatcher
 
 
 class TradingAgent(BaseAgent):
-    """Per-pair trading agent.
-
-    One instance is created for every entry in ``config.pairs``.
-
-    Cycle:
-      1. Pull MarketSnapshot from DataContainer.
-      2. Quick first-pass LLM call.
-      3. If ``needs_deep_analysis``, request a TA analysis via the EventBus
-         and wait up to *analysis_timeout_seconds*.
-      4. Build final TradeSignal (or HOLD).
-      5. Publish SIGNAL_GENERATED.
-      6. Persist AgentDecision.
-    """
+    """Per-pair trading agent using native LLM tool-use."""
 
     def __init__(
         self,
+        broker_name: str,
         pair: str,
-        broker: AbstractBroker,
         data_container: DataContainer,
         llm: AbstractLLMProvider,
         repository: AbstractRepository,
         bus: EventBus,
+        tool_dispatcher: ToolDispatcher,
         cycle_interval_seconds: int = 60,
-        analysis_timeout_seconds: float = 15.0,
-        context_candles: dict[str, int] | None = None,
+        max_tokens: int = 4096,
+        max_tool_turns: int = 10,
     ) -> None:
+        aid = AgentId.build(
+            broker=broker_name, pair=pair, agent_type="AA", name="TRD1"
+        )
         super().__init__(
-            agent_id=f"trading_{pair}",
+            agent_id=aid.format(),
             llm=llm,
             repository=repository,
             bus=bus,
+            tool_dispatcher=tool_dispatcher,
+            max_tool_turns=max_tool_turns,
+            max_tokens=max_tokens,
         )
         self.pair = pair
-        self.broker = broker
+        self.broker_name = broker_name
         self.data_container = data_container
         self.cycle_interval = cycle_interval_seconds
-        self.analysis_timeout = analysis_timeout_seconds
-        self.context_candles = context_candles  # None → context_builder uses its default
-        self.indicators = IndicatorToolset(data_container)
-
-        # Pending analysis responses keyed by correlation_id
-        self._pending_analyses: dict[str, asyncio.Future[AnalysisResult]] = {}
 
         self._system_prompt = get_default_prompt(pair)
 
     async def _on_start(self) -> None:
-        self._logger.info("TradingAgent started", pair=self.pair)
-
-    # ── Event handlers (called by EventBus) ─────────────────────────────────
-
-    async def on_market_updated(self, message: AgentMessage) -> None:
-        """Triggered by DataContainer on fresh market data; no-op here (cycle-driven)."""
-
-    async def on_signal_approved(self, message: AgentMessage) -> None:
-        payload = message.payload
-        if payload.get("pair") != self.pair:
-            return
-        self._logger.info("Signal approved", signal_id=payload.get("signal_id"))
-
-    async def on_signal_rejected(self, message: AgentMessage) -> None:
-        payload = message.payload
-        if payload.get("pair") != self.pair:
-            return
-        self._logger.info(
-            "Signal rejected",
-            reason=payload.get("rejection_reason"),
-        )
-
-    async def on_analysis_result(self, message: AgentMessage) -> None:
-        """Resolve the pending Future for the matching correlation_id."""
-        cid = message.correlation_id
-        if cid and cid in self._pending_analyses:
-            result = AnalysisResult(**message.payload)
-            fut = self._pending_analyses.pop(cid)
-            if not fut.done():
-                fut.set_result(result)
-
-    async def on_prompt_updated(self, message: AgentMessage) -> None:
-        payload = message.payload
-        if payload.get("pair") != self.pair:
-            return
-        new_prompt = payload.get("system_prompt", "")
-        if new_prompt:
-            self.load_prompt(new_prompt)
+        self._logger.info("TradingAgent started", pair=self.pair, broker=self.broker_name)
 
     # ── Core cycle ───────────────────────────────────────────────────────────
 
@@ -113,180 +86,102 @@ class TradingAgent(BaseAgent):
         start = time.monotonic()
 
         try:
-            snapshot = await self.data_container.get_snapshot(self.pair)
-            positions = await self.broker.get_open_positions()
-            balance = await self.broker.get_account_balance()
-            recent_trades = await self.repository.get_trades(pair=self.pair, limit=10)
-
-            # ── First-pass LLM call ──────────────────────────────────────────
-            context = build_trading_context(
-                snapshot=snapshot,
-                recent_trades=recent_trades,
-                open_positions_count=len(positions),
-                account_balance=balance,
-                analysis=None,
-                context_candles=self.context_candles,
+            now = datetime.now(timezone.utc).isoformat()
+            user_message = (
+                f"Current time: {now}\n"
+                f"Pair: {self.pair} | Broker: {self.broker_name}\n\n"
+                "Analyse the market for your pair and make a trading decision. "
+                "Use the available tools to gather data (candles, indicators, "
+                "account status, open positions, order book) as needed. "
+                "If you decide to trade, use place_order. "
+                "If you decide to close a position, use close_position. "
+                "If you detect an anomaly, use raise_alarm. "
+                "Always justify your decision clearly."
             )
-            first_response = await self.llm.complete_structured(
-                system_prompt=self._system_prompt,
-                user_message=context,
-                response_schema=_TradingDecision,
-            )
-            decision_data = _TradingDecision(**first_response)
 
-            # ── Optional on-demand candle fetch ──────────────────────────────
-            extra_candles: dict[str, list] = {}
-            if decision_data.requested_candles:
-                for req in decision_data.requested_candles:
-                    pair_req = req.get("pair", self.pair)
-                    tf = req.get("timeframe", "M5")
-                    count = min(int(req.get("count", 50)), 500)
-                    raw = self.data_container.get_candles(pair_req, tf)
-                    extra_candles[f"{pair_req}_{tf}"] = raw[-count:]
+            final_text, total_tokens = await self.run_with_tools(user_message)
 
-            # ── Optional on-demand indicator computation ──────────────────────
-            extra_indicators: dict[str, str] = {}
-            if decision_data.requested_indicators:
-                for req in decision_data.requested_indicators:
-                    indicator = req.get("indicator", "")
-                    period    = int(req.get("period", 14))
-                    timeframe = req.get("timeframe", "H1").upper()
-                    req_pair  = req.get("pair", self.pair).upper()
-                    label = f"{indicator.upper()}({period},{timeframe},{req_pair})"
-                    try:
-                        result = self.indicators.calculate(indicator, period, timeframe, req_pair)
-                        if result is None:
-                            extra_indicators[label] = "N/A"
-                        elif isinstance(result, dict):
-                            for k, v in result.items():
-                                extra_indicators[f"BB_{k}({period},{timeframe},{req_pair})"] = f"{v:.6f}"
-                        else:
-                            extra_indicators[label] = f"{result:.6f}"
-                    except ValueError as exc:
-                        extra_indicators[label] = f"ERROR: {exc}"
-
-            # ── Optional deep analysis ───────────────────────────────────────
-            analysis: AnalysisResult | None = None
-            if decision_data.needs_deep_analysis:
-                analysis = await self._request_analysis(snapshot.model_dump(mode="json"))
-
-            # ── Final decision if anything enriched the context ──────────────
-            if analysis is not None or extra_candles or extra_indicators:
-                enriched_context = build_trading_context(
-                    snapshot=snapshot,
-                    recent_trades=recent_trades,
-                    open_positions_count=len(positions),
-                    account_balance=balance,
-                    analysis=analysis,
-                    context_candles=self.context_candles,
-                    extra_candles=extra_candles or None,
-                    extra_indicators=extra_indicators or None,
-                )
-                final_response = await self.llm.complete_structured(
-                    system_prompt=self._system_prompt,
-                    user_message=enriched_context,
-                    response_schema=_TradingDecision,
-                )
-                decision_data = _TradingDecision(**final_response)
-
-            latency_ms = (time.monotonic() - start) * 1000
-
-            # ── Persist decision ─────────────────────────────────────────────
-            agent_decision = AgentDecision(
+            # Persist AgentDecision
+            decision = AgentDecision(
                 agent_id=self.agent_id,
                 agent_role=AgentRole.TRADING,
                 pair=self.pair,
-                decision_type="signal" if decision_data.action != "HOLD" else "hold",
-                input_context={"snapshot_time": snapshot.snapshot_time.isoformat()},
-                output=decision_data.model_dump(),
+                decision_type="cycle",
+                input_context={"timestamp": now, "broker": self.broker_name},
+                output={"summary": final_text[:2000]},  # truncate for storage
                 llm_model=self.llm.model_id,
-                tokens_used=0,
-                latency_ms=latency_ms,
+                tokens_used=total_tokens,
+                latency_ms=(time.monotonic() - start) * 1000,
                 decided_at=datetime.now(timezone.utc),
             )
-            await self.repository.save_agent_decision(agent_decision)
-
-            # ── Publish signal ───────────────────────────────────────────────
-            if decision_data.action in ("BUY", "SELL") and decision_data.confidence >= 0.65:
-                signal = TradeSignal(
-                    pair=self.pair,
-                    direction=TradeDirection(decision_data.action),
-                    entry_price=Decimal(str(decision_data.entry_price or 0)),
-                    stop_loss=Decimal(str(decision_data.stop_loss or 0)),
-                    take_profit=Decimal(str(decision_data.take_profit or 0)),
-                    confidence=decision_data.confidence,
-                    reasoning=decision_data.reasoning,
-                    generated_at=datetime.now(timezone.utc),
-                    agent_id=self.agent_id,
-                )
-                await self.publish(
-                    AgentMessage(
-                        event_type=EventType.SIGNAL_GENERATED,
-                        source_agent_id=self.agent_id,
-                        payload={
-                            "pair": self.pair,
-                            "signal_id": str(signal.id),
-                            "signal": signal.model_dump(mode="json"),
-                        },
-                    )
-                )
-                self._logger.info(
-                    "Signal generated",
-                    direction=decision_data.action,
-                    confidence=decision_data.confidence,
-                )
-            else:
-                self._logger.debug("Holding", pair=self.pair)
+            await self.repository.save_agent_decision(decision)
 
         except Exception as exc:
             self._logger.exception("Cycle error", error=str(exc))
 
-        # ── Wait for next cycle ──────────────────────────────────────────────
+        # Sleep until next cycle
         elapsed = time.monotonic() - start
-        sleep_for = max(0.0, self.cycle_interval - elapsed)
-        await asyncio.sleep(sleep_for)
+        await asyncio.sleep(max(0.0, self.cycle_interval - elapsed))
 
-    # ── Analysis request helper ──────────────────────────────────────────────
+    # ── Inbound message handler ───────────────────────────────────────────────
 
-    async def _request_analysis(self, snapshot_dict: dict) -> AnalysisResult | None:
-        correlation_id = str(uuid4())
-        loop = asyncio.get_event_loop()
-        fut: asyncio.Future[AnalysisResult] = loop.create_future()
-        self._pending_analyses[correlation_id] = fut
+    async def _handle_message(self, message: AgentMessage) -> None:
+        """Process messages delivered to this agent's inbox via the EventBus."""
+        event = message.event_type
 
-        await self.publish(
-            AgentMessage(
-                event_type=EventType.ANALYSIS_REQUESTED,
-                source_agent_id=self.agent_id,
-                payload={"pair": self.pair, "snapshot": snapshot_dict},
-                correlation_id=correlation_id,
+        if event == EventType.PROMPT_UPDATED:
+            new_prompt = message.payload.get("system_prompt", "")
+            if new_prompt:
+                self.load_prompt(new_prompt)
+                self._logger.info("Prompt updated by OptimizationAgent")
+
+        elif event == EventType.SIGNAL_APPROVED:
+            self._logger.info(
+                "Signal approved",
+                signal_id=message.payload.get("signal_id"),
+                correlation_id=message.correlation_id,
             )
-        )
 
+        elif event == EventType.SIGNAL_REJECTED:
+            self._logger.info(
+                "Signal rejected",
+                reason=message.payload.get("reason"),
+                correlation_id=message.correlation_id,
+            )
+
+        elif event == EventType.ORDER_BOOK_SYNC_DISCREPANCY:
+            payload = message.payload
+            self._logger.warning(
+                "Order book sync discrepancy",
+                entry_id=payload.get("entry_id"),
+                close_reason=payload.get("close_reason"),
+                pnl=payload.get("pnl"),
+            )
+            # If the broker asks for close reasoning, publish it
+            if payload.get("request_agent_reasoning"):
+                await self._publish_close_reasoning(payload)
+
+    async def _publish_close_reasoning(self, payload: dict) -> None:
+        """Generate and publish reasoning for an unexpected position close."""
         try:
-            return await asyncio.wait_for(fut, timeout=self.analysis_timeout)
-        except asyncio.TimeoutError:
-            self._pending_analyses.pop(correlation_id, None)
-            self._logger.warning("Analysis request timed out", pair=self.pair)
-            return None
+            entry_id = payload.get("entry_id", "")
+            close_reason = payload.get("close_reason", "unknown")
+            pnl = payload.get("pnl")
 
+            reasoning_prompt = (
+                f"A position (entry_id={entry_id}) was closed unexpectedly.\n"
+                f"Close reason detected: {close_reason}\n"
+                f"P&L: {pnl}\n\n"
+                "Briefly explain in 1-2 sentences what likely happened and "
+                "whether this outcome is acceptable."
+            )
+            text, _ = await self.run_with_tools(reasoning_prompt)
 
-# ── Internal response schema ─────────────────────────────────────────────────
-
-from pydantic import BaseModel
-
-
-class _TradingDecision(BaseModel):
-    action: str  # BUY | SELL | HOLD
-    entry_price: float | None = None
-    stop_loss: float | None = None
-    take_profit: float | None = None
-    confidence: float = 0.0
-    reasoning: str = ""
-    needs_deep_analysis: bool = False
-    # On-demand candle request: [{pair, timeframe, count}]
-    # Example: [{"pair": "USDJPY", "timeframe": "M5", "count": 50}]
-    requested_candles: list[dict] | None = None
-    # On-demand indicator request (same tool all agents use): [{indicator, period, timeframe, pair}]
-    # Example: [{"indicator": "ATR", "period": 14, "timeframe": "M15", "pair": "USDJPY"}]
-    requested_indicators: list[dict] | None = None
+            await self.publish(AgentMessage(
+                event_type=EventType.ORDER_BOOK_CLOSE_REASONING,
+                source_agent_id=self.agent_id,
+                payload={"entry_id": entry_id, "close_reasoning": text},
+                correlation_id=payload.get("correlation_id"),
+            ))
+        except Exception as exc:
+            self._logger.exception("Failed to generate close reasoning: %s", exc)

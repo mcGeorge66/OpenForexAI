@@ -1,0 +1,175 @@
+{
+  "_comment": "OpenForexAI — Per-agent tool configuration",
+  "_doc": [
+    "Each key is an agent_id pattern (wildcard '*' supported).",
+    "Patterns are evaluated in order; the FIRST match wins.",
+    "",
+    "allowed_tools: list of tool names this agent may call.",
+    "  Use ['*'] to allow all registered tools.",
+    "  Empty list [] falls back to ['*'].",
+    "",
+    "approval_modes: per-tool override of the tool's default_approval_mode.",
+    "  'direct'     → execute immediately, no approval needed",
+    "  'supervisor' → route through SupervisorAgent risk checks",
+    "  'human'      → block until Management API provides approval",
+    "",
+    "context_tiers: maps budget-percentage threshold → tool-set key.",
+    "  At 0-69% budget: tools in tier_tools['all'] are available.",
+    "  At 70-89% budget: only tools in tier_tools['decision'].",
+    "  At 90-100% budget: only tools in tier_tools['safety'].",
+    "",
+    "tier_tools: defines which tools belong to each tier.",
+    "  Use '*' in the list to allow all allowed_tools for that tier.",
+    "",
+    "max_tool_turns: maximum tool-use loop iterations per cycle."
+  ],
+
+  "agents": [
+
+    {
+      "pattern": "*_*_AA_TRD*",
+      "_comment": "Trading Agents (Adapter Agent, per pair)",
+      "allowed_tools": [
+        "get_candles",
+        "calculate_indicator",
+        "get_account_status",
+        "get_open_positions",
+        "get_order_book",
+        "place_order",
+        "close_position",
+        "raise_alarm",
+        "trigger_sync"
+      ],
+      "approval_modes": {
+        "place_order":    "supervisor",
+        "close_position": "supervisor"
+      },
+      "context_tiers": {
+        "0":  "all",
+        "70": "decision",
+        "90": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_candles",
+          "calculate_indicator",
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "place_order",
+          "close_position",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "decision": [
+          "place_order",
+          "close_position",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm",
+          "close_position"
+        ]
+      },
+      "max_tool_turns": 10,
+      "max_tokens": 4096
+    },
+
+    {
+      "pattern": "*_ALL..._BA_SUP*",
+      "_comment": "Supervisor Agents (Broker Agent, per broker)",
+      "allowed_tools": [
+        "get_account_status",
+        "get_open_positions",
+        "get_order_book",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0":  "all",
+        "80": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 5,
+      "max_tokens": 2048
+    },
+
+    {
+      "pattern": "GLOBL_ALL..._GA_TA__*",
+      "_comment": "TechnicalAnalysisAgent (Global Agent, singleton)",
+      "allowed_tools": [
+        "get_candles",
+        "calculate_indicator",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0":  "all",
+        "85": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_candles",
+          "calculate_indicator",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 8,
+      "max_tokens": 4096
+    },
+
+    {
+      "pattern": "GLOBL_ALL..._GA_OPT*",
+      "_comment": "OptimizationAgent (Global Agent, singleton)",
+      "allowed_tools": [
+        "get_order_book",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all"
+      },
+      "tier_tools": {
+        "all": [
+          "get_order_book",
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 3,
+      "max_tokens": 8192
+    },
+
+    {
+      "pattern": "*",
+      "_comment": "Fallback — all other agents get read-only + alarm tools",
+      "allowed_tools": [
+        "get_candles",
+        "get_account_status",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all"
+      },
+      "tier_tools": {
+        "all": ["*"]
+      },
+      "max_tool_turns": 5,
+      "max_tokens": 2048
+    }
+
+  ]
+}

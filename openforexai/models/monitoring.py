@@ -44,6 +44,15 @@ class MonitoringEventType(str, Enum):
     AGENT_DECISION_MADE = "agent_decision_made"
     AGENT_TOOL_CALLED = "agent_tool_called"
     AGENT_TOOL_RESULT = "agent_tool_result"
+    AGENT_ALARM = "agent_alarm"
+
+    # ── Tool dispatcher ───────────────────────────────────────────────────────
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
+    TOOL_CALL_FAILED = "tool_call_failed"
+    AGENT_QUEUE_FULL = "agent_queue_full"
+    ROUTING_RELOADED = "routing_reloaded"
+    ROUTING_RELOAD_FAILED = "routing_reload_failed"
 
     # ── LLM calls ─────────────────────────────────────────────────────────────
     LLM_REQUEST = "llm_request"

@@ -42,6 +42,9 @@ class EventType(str, Enum):
     OPTIMIZATION_COMPLETE = "optimization_complete"
     PROMPT_UPDATED = "prompt_updated"
 
+    # ── System / management ───────────────────────────────────────────────────
+    ROUTING_RELOAD_REQUESTED = "routing_reload_requested"
+
 
 class AgentMessage(BaseModel):
     id: UUID = Field(default_factory=uuid4)

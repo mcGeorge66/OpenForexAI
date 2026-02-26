@@ -1,0 +1,168 @@
+{
+  "_comment": "OpenForexAI — Event Routing Rules",
+  "_format_version": "1",
+  "_doc": [
+    "Rules are evaluated in ascending priority order (lower number = higher priority).",
+    "Multiple rules may match a single message — all matching targets receive it.",
+    "",
+    "Agent ID format: [BROKER(5)]_[PAIR(6)]_[TYPE(2)]_[NAME(1-5)]",
+    "  BROKER: 5 chars, '.' padding  e.g. OANDA, MT5.., GLOBL",
+    "  PAIR:   6 chars, '.' padding  e.g. EURUSD, ALL...",
+    "  TYPE:   AA (Adapter Agent) | BA (Broker Agent) | GA (Global Agent)",
+    "  NAME:   1-5 chars",
+    "",
+    "Special 'to' values:",
+    "  '@handlers'  — legacy handler-subscribers only (DataContainer, BrokerBase)",
+    "  '*'          — broadcast to ALL registered agents",
+    "  'PATTERN*'   — fan-out to all agents matching wildcard pattern",
+    "  '{sender.broker}_...' — template substitution from sender ID parts"
+  ],
+
+  "rules": [
+
+    {
+      "id": "m5_candle_to_handlers",
+      "description": "New M5 candle from any broker adapter → DataContainer (legacy handler)",
+      "event": "m5_candle_available",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 10
+    },
+
+    {
+      "id": "candle_gap_to_handlers",
+      "description": "Gap detected → DataContainer repair handler",
+      "event": "candle_gap_detected",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 10
+    },
+
+    {
+      "id": "candle_repair_requested_to_handlers",
+      "description": "Repair request → DataContainer handler",
+      "event": "candle_repair_requested",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 10
+    },
+
+    {
+      "id": "account_status_updated_to_handlers",
+      "description": "Account status update → DataContainer handler",
+      "event": "account_status_updated",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 10
+    },
+
+    {
+      "id": "signal_generated_to_supervisor",
+      "description": "Trading agent's signal → Broker-level supervisor (same broker)",
+      "event": "signal_generated",
+      "from":  "*_*_AA_TRD*",
+      "to":    "{sender.broker}_ALL..._BA_SUP1",
+      "priority": 20
+    },
+
+    {
+      "id": "signal_approved_to_originating_trading_agent",
+      "description": "Supervisor approval → back to the pair's trading agent",
+      "event": "signal_approved",
+      "from":  "*_ALL..._BA_SUP*",
+      "to":    "{sender.broker}_{sender.pair}_AA_TRD1",
+      "priority": 20
+    },
+
+    {
+      "id": "signal_rejected_to_originating_trading_agent",
+      "description": "Supervisor rejection → back to the pair's trading agent",
+      "event": "signal_rejected",
+      "from":  "*_ALL..._BA_SUP*",
+      "to":    "{sender.broker}_{sender.pair}_AA_TRD1",
+      "priority": 20
+    },
+
+    {
+      "id": "analysis_requested_to_ta_agent",
+      "description": "Trading agent requests deep TA → global TechnicalAnalysisAgent",
+      "event": "analysis_requested",
+      "from":  "*",
+      "to":    "GLOBL_ALL..._GA_TA__1",
+      "priority": 20
+    },
+
+    {
+      "id": "analysis_result_to_all_trading_agents",
+      "description": "TA result broadcast to all AAs — each filters by correlation_id",
+      "event": "analysis_result",
+      "from":  "GLOBL_ALL..._GA_TA__*",
+      "to":    "*_*_AA_TRD*",
+      "priority": 20
+    },
+
+    {
+      "id": "position_closed_to_optimization_agent",
+      "description": "Position closed → OptimizationAgent for pattern mining",
+      "event": "position_closed",
+      "from":  "*",
+      "to":    "GLOBL_ALL..._GA_OPT1",
+      "priority": 30
+    },
+
+    {
+      "id": "prompt_updated_to_trading_agents",
+      "description": "New optimized prompt → all trading agents",
+      "event": "prompt_updated",
+      "from":  "GLOBL_ALL..._GA_OPT*",
+      "to":    "*_*_AA_TRD*",
+      "priority": 30
+    },
+
+    {
+      "id": "order_book_sync_to_trading_agent",
+      "description": "Sync discrepancy for a pair → the pair's trading agent",
+      "event": "order_book_sync_discrepancy",
+      "from":  "*",
+      "to":    "{sender.broker}_{sender.pair}_AA_TRD1",
+      "priority": 30
+    },
+
+    {
+      "id": "order_book_close_reasoning_to_handlers",
+      "description": "Agent close reasoning → handler (OrderBook update)",
+      "event": "order_book_close_reasoning",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 30
+    },
+
+    {
+      "id": "routing_reload_requested_internal",
+      "description": "Management API or agent requests routing hot-reload → bus internal",
+      "event": "routing_reload_requested",
+      "from":  "*",
+      "to":    "@handlers",
+      "priority": 5
+    },
+
+    {
+      "id": "risk_breach_to_supervisor",
+      "description": "Risk breach alert → supervisor",
+      "event": "risk_breach",
+      "from":  "*",
+      "to":    "{sender.broker}_ALL..._BA_SUP1",
+      "priority": 25
+    },
+
+    {
+      "id": "optimization_complete_to_all",
+      "description": "Optimization cycle complete — broadcast to monitoring handlers",
+      "event": "optimization_complete",
+      "from":  "GLOBL_ALL..._GA_OPT*",
+      "to":    "@handlers",
+      "priority": 40
+    }
+
+  ]
+}
