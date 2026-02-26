@@ -88,7 +88,7 @@
       "description": "Trading agent requests deep TA → global TechnicalAnalysisAgent",
       "event": "analysis_requested",
       "from":  "*",
-      "to":    "GLOBL_ALL..._GA_TA__1",
+      "to":    "GLOBL_ALL..._GA_TA001",
       "priority": 20
     },
 
@@ -96,7 +96,7 @@
       "id": "analysis_result_to_all_trading_agents",
       "description": "TA result broadcast to all AAs — each filters by correlation_id",
       "event": "analysis_result",
-      "from":  "GLOBL_ALL..._GA_TA__*",
+      "from":  "GLOBL_*_GA_TA*",
       "to":    "*_*_AA_TRD*",
       "priority": 20
     },

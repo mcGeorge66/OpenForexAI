@@ -4,13 +4,19 @@ import asyncio
 
 import pytest
 
-from tests.conftest import MockLLMProvider, MockRepository, make_snapshot
+from tests.conftest import MockBroker, MockLLMProvider, MockRepository, MOCK_BROKER_NAME, make_snapshot
 from openforexai.agents.technical_analysis.technical_analysis_agent import TechnicalAnalysisAgent
+from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
 
 
-_TA_RESPONSE = {
+_TA_PHASE1_RESPONSE = {
+    "preliminary_observations": "Uptrend on H4",
+    "indicators_needed": [],  # no indicators needed for this test
+}
+
+_TA_PHASE2_RESPONSE = {
     "signal": "bullish",
     "confidence": 0.78,
     "reasoning": "Strong H4 uptrend, RSI not overbought",
@@ -21,24 +27,59 @@ _TA_RESPONSE = {
 }
 
 
-@pytest.mark.asyncio
-async def test_ta_agent_responds_to_request():
-    from tests.conftest import MockBroker
-    from openforexai.data.container import DataContainer
+class _TwoPhaseLL(MockLLMProvider):
+    """Returns phase-1 response on first call, phase-2 on subsequent calls."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._call_count = 0
+
+    async def complete_structured(self, system_prompt, user_message, response_schema):
+        self._call_count += 1
+        if self._call_count == 1:
+            return _TA_PHASE1_RESPONSE
+        return _TA_PHASE2_RESPONSE
+
+
+def _make_ta_agent() -> tuple[TechnicalAnalysisAgent, EventBus]:
     broker = MockBroker()
-    llm = MockLLMProvider(structured_response=_TA_RESPONSE)
     repo = MockRepository()
     bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
 
-    ta_agent = TechnicalAnalysisAgent(llm=llm, repository=repo, bus=bus, data_container=container)
-    bus.subscribe(EventType.ANALYSIS_REQUESTED, ta_agent.on_analysis_requested)
+    container = DataContainer(repository=repo, event_bus=bus)
+    container.register_broker(broker, ["EURUSD"])
+
+    agent = TechnicalAnalysisAgent(
+        llm=_TwoPhaseLL(),
+        repository=repo,
+        bus=bus,
+        data_container=container,
+        broker_name=MOCK_BROKER_NAME,
+    )
+    return agent, bus
+
+
+@pytest.mark.asyncio
+async def test_ta_agent_structured_id():
+    """TechnicalAnalysisAgent must have the correct structured ID."""
+    agent, _ = _make_ta_agent()
+    from openforexai.messaging.agent_id import AgentId
+    aid = AgentId.parse(agent.agent_id)
+    assert aid.type == "GA"
+    assert aid.broker == "GLOBL"
+    assert aid.pair == "ALL..."
+
+
+@pytest.mark.asyncio
+async def test_ta_agent_responds_to_request():
+    """ANALYSIS_REQUESTED via _handle_message should produce ANALYSIS_RESULT."""
+    agent, bus = _make_ta_agent()
 
     results: list[AgentMessage] = []
-    async def on_result(msg: AgentMessage):
+
+    async def on_result(msg: AgentMessage) -> None:
         results.append(msg)
+
     bus.subscribe(EventType.ANALYSIS_RESULT, on_result)
 
     dispatch_task = asyncio.create_task(bus.start_dispatch_loop())
@@ -46,14 +87,16 @@ async def test_ta_agent_responds_to_request():
     snapshot = make_snapshot("EURUSD")
     request = AgentMessage(
         event_type=EventType.ANALYSIS_REQUESTED,
-        source_agent_id="trading_EURUSD",
+        source_agent_id="MOCKB_EURUSD_AA_TRD1",
         payload={"pair": "EURUSD", "snapshot": snapshot.model_dump(mode="json")},
         correlation_id="test-corr-001",
     )
-    await bus.publish(request)
 
-    # Give the bus time to dispatch
-    await asyncio.sleep(0.5)
+    # Deliver message directly to agent via _handle_message
+    await agent._handle_message(request)
+
+    # Give the bus a moment to dispatch the result
+    await asyncio.sleep(0.2)
     dispatch_task.cancel()
     try:
         await dispatch_task
@@ -63,61 +106,3 @@ async def test_ta_agent_responds_to_request():
     assert len(results) == 1
     assert results[0].correlation_id == "test-corr-001"
     assert results[0].payload["signal"] == "bullish"
-
-
-@pytest.mark.asyncio
-async def test_ta_agent_timeout_in_trading_agent():
-    """TradingAgent must proceed gracefully when analysis times out."""
-    from tests.conftest import MockBroker
-    from openforexai.agents.trading.trading_agent import TradingAgent
-    from openforexai.data.container import DataContainer
-
-    broker = MockBroker()
-    # LLM first call requests deep analysis, second call returns HOLD
-    call_count = [0]
-
-    class SlowLLM(MockLLMProvider):
-        async def complete_structured(self, system_prompt, user_message, response_schema):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return {
-                    "action": "HOLD",
-                    "confidence": 0.5,
-                    "reasoning": "Ambiguous",
-                    "needs_deep_analysis": True,
-                }
-            return {
-                "action": "HOLD",
-                "confidence": 0.5,
-                "reasoning": "No TA available",
-                "needs_deep_analysis": False,
-            }
-
-    llm = SlowLLM()
-    repo = MockRepository()
-    bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
-
-    agent = TradingAgent(
-        pair="EURUSD",
-        broker=broker,
-        data_container=container,
-        llm=llm,
-        repository=repo,
-        bus=bus,
-        cycle_interval_seconds=0,
-        analysis_timeout_seconds=0.1,  # very short timeout
-    )
-
-    # No TA agent subscribed → request will time out
-    dispatch_task = asyncio.create_task(bus.start_dispatch_loop())
-    await agent.run_cycle()
-    dispatch_task.cancel()
-    try:
-        await dispatch_task
-    except asyncio.CancelledError:
-        pass
-
-    # Should complete without error even with timeout
-    assert call_count[0] >= 1

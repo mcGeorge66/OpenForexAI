@@ -8,6 +8,7 @@ from openforexai.agents.base import BaseAgent
 from openforexai.agents.supervisor.correlation_checker import CorrelationChecker
 from openforexai.agents.supervisor.risk_engine import RiskEngine
 from openforexai.data.container import DataContainer
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
 from openforexai.models.agent import AgentDecision, AgentRole
 from openforexai.models.messaging import AgentMessage, EventType
@@ -21,12 +22,17 @@ from openforexai.ports.llm import AbstractLLMProvider
 class SupervisorAgent(BaseAgent):
     """Orchestration + risk gate.
 
-    Reactive: does not tick on a timer.  Subscribes to SIGNAL_GENERATED,
-    evaluates risk, and either approves (places the order) or rejects.
+    Reactive: processes SIGNAL_GENERATED events via the EventBus queue and
+    runs a periodic background cycle to refresh the correlation matrix and
+    monitor open positions.
+
+    Agent ID format: ``{BROKER(5)}_ALL..._BA_SUP1``
+    Example:         ``OANDA_ALL..._BA_SUP1``
     """
 
     def __init__(
         self,
+        broker_name: str,
         risk_params: RiskParameters,
         broker: AbstractBroker,
         data_container: DataContainer,
@@ -35,8 +41,11 @@ class SupervisorAgent(BaseAgent):
         repository: AbstractRepository,
         bus: EventBus,
     ) -> None:
+        aid = AgentId.build(
+            broker=broker_name, pair="ALL...", agent_type="BA", name="SUP1"
+        )
         super().__init__(
-            agent_id="supervisor",
+            agent_id=aid.format(),
             llm=llm,
             repository=repository,
             bus=bus,
@@ -52,7 +61,7 @@ class SupervisorAgent(BaseAgent):
         """Periodic background task: refresh correlation matrix & monitor positions."""
         try:
             candle_sets = {
-                pair: self.data_container.get_candles(pair, "H1")
+                pair: self.data_container.get_candles(self.broker.short_name, pair, "H1")
                 for pair in self.pairs
             }
             self.correlation_checker.update(candle_sets)
@@ -61,9 +70,14 @@ class SupervisorAgent(BaseAgent):
             self._logger.exception("Supervisor cycle error", error=str(exc))
         await asyncio.sleep(300)  # refresh every 5 minutes
 
-    # ── Event handlers ────────────────────────────────────────────────────────
+    # ── Inbound message handler ───────────────────────────────────────────────
 
-    async def on_signal_generated(self, message: AgentMessage) -> None:
+    async def _handle_message(self, message: AgentMessage) -> None:
+        """Process messages delivered to this agent's inbox via the EventBus."""
+        if message.event_type == EventType.SIGNAL_GENERATED:
+            await self._on_signal_generated(message)
+
+    async def _on_signal_generated(self, message: AgentMessage) -> None:
         start = time.monotonic()
         payload = message.payload
         pair = payload.get("pair", "")
@@ -77,7 +91,8 @@ class SupervisorAgent(BaseAgent):
 
         try:
             positions = await self.broker.get_open_positions()
-            balance = await self.broker.get_account_balance()
+            account_status = await self.broker.get_account_status()
+            balance = account_status.balance
 
             assessment = self.risk_engine.assess(
                 signal=signal,
@@ -153,7 +168,9 @@ class SupervisorAgent(BaseAgent):
         try:
             positions = await self.broker.get_open_positions()
             for pos in positions:
-                snapshot = await self.data_container.get_snapshot(pos.pair)
+                snapshot = await self.data_container.get_snapshot(
+                    self.broker.short_name, pos.pair
+                )
                 current = float(snapshot.current_tick.mid)
                 if self._is_sl_hit(pos, current) or self._is_tp_hit(pos, current):
                     result = await self.broker.close_position(pos.broker_position_id)

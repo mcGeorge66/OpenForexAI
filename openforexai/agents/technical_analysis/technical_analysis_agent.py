@@ -8,6 +8,7 @@ from openforexai.agents.base import BaseAgent
 from openforexai.agents.technical_analysis.prompt_templates import get_system_prompt
 from openforexai.data.container import DataContainer
 from openforexai.data.indicator_tools import IndicatorToolset
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
 from openforexai.models.agent import AgentDecision, AgentRole
 from openforexai.models.analysis import (
@@ -44,20 +45,19 @@ _SNAPSHOT_KEY: dict[str, str] = {
 class TechnicalAnalysisAgent(BaseAgent):
     """Singleton reactive agent for deep technical analysis.
 
-    Does NOT run on a timer.  It subscribes exclusively to
-    ``ANALYSIS_REQUESTED`` events and responds with ``ANALYSIS_RESULT``
-    carrying the same ``correlation_id``.
+    Does NOT run on a timer.  It reacts exclusively to ``ANALYSIS_REQUESTED``
+    events delivered to its queue via the EventBus and responds with
+    ``ANALYSIS_RESULT`` carrying the same ``correlation_id``.
 
     Analysis uses a two-phase LLM call:
 
       Phase 1 — LLM receives candle data and declares which indicators it
                  needs, as ``{indicator, period, timeframe, pair}`` triples.
-                 Example: ``{"indicator": "ATR", "period": 14,
-                              "timeframe": "M15", "pair": "USDJPY"}``
 
-      Phase 2 — Agent computes those indicators via the shared
-                 IndicatorToolset (same tool used by every other agent)
-                 and feeds results back.  LLM returns the final analysis.
+      Phase 2 — Agent computes those indicators and feeds results back.
+                 LLM returns the final analysis.
+
+    Agent ID: ``GLOBL_ALL..._GA_TA001``
     """
 
     def __init__(
@@ -66,26 +66,30 @@ class TechnicalAnalysisAgent(BaseAgent):
         repository: AbstractRepository,
         bus: EventBus,
         data_container: DataContainer,
+        broker_name: str,
         max_concurrent_requests: int = 3,
     ) -> None:
+        aid = AgentId.build(broker="GLOBL", pair="ALL...", agent_type="GA", name="TA001")
         super().__init__(
-            agent_id="technical_analysis",
+            agent_id=aid.format(),
             llm=llm,
             repository=repository,
             bus=bus,
         )
-        self.indicators = IndicatorToolset(data_container)
+        self.indicators = IndicatorToolset(data_container, default_broker=broker_name)
         self._semaphore = asyncio.Semaphore(max_concurrent_requests)
 
     async def run_cycle(self) -> None:
         """No-op: purely reactive."""
         await asyncio.sleep(60)
 
-    # ── Event handler ────────────────────────────────────────────────────────
+    # ── Inbound message handler ───────────────────────────────────────────────
 
-    async def on_analysis_requested(self, message: AgentMessage) -> None:
-        async with self._semaphore:
-            await self._process_request(message)
+    async def _handle_message(self, message: AgentMessage) -> None:
+        """Process ANALYSIS_REQUESTED events from the EventBus queue."""
+        if message.event_type == EventType.ANALYSIS_REQUESTED:
+            async with self._semaphore:
+                await self._process_request(message)
 
     async def _process_request(self, message: AgentMessage) -> None:
         start = time.monotonic()
@@ -152,7 +156,7 @@ class TechnicalAnalysisAgent(BaseAgent):
             )
             output = _AnalysisLLMOutput(**raw2)
 
-            result = AnalysisResult(
+            analysis_result = AnalysisResult(
                 pair=pair,
                 correlation_id=correlation_id,
                 signal=SignalDirection(output.signal),
@@ -177,7 +181,7 @@ class TechnicalAnalysisAgent(BaseAgent):
                     pair=pair,
                     decision_type="analyze",
                     input_context={"pair": pair},
-                    output=result.model_dump(mode="json"),
+                    output=analysis_result.model_dump(mode="json"),
                     llm_model=self.llm.model_id,
                     tokens_used=0,
                     latency_ms=latency_ms,
@@ -190,7 +194,7 @@ class TechnicalAnalysisAgent(BaseAgent):
                     event_type=EventType.ANALYSIS_RESULT,
                     source_agent_id=self.agent_id,
                     target_agent_id=message.source_agent_id,
-                    payload=result.model_dump(mode="json"),
+                    payload=analysis_result.model_dump(mode="json"),
                     correlation_id=correlation_id,
                 )
             )

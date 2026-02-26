@@ -8,6 +8,7 @@ from openforexai.agents.optimization.backtester import backtest_prompt
 from openforexai.agents.optimization.pattern_detector import detect_patterns
 from openforexai.agents.optimization.prompt_evolver import evolve_prompt
 from openforexai.data.container import DataContainer
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.ports.database import AbstractRepository
@@ -23,6 +24,10 @@ class OptimizationAgent(BaseAgent):
       3. Evolve a new PromptCandidate via LLM (if enough patterns found).
       4. Backtest candidate against historical trades.
       5. If it outperforms the baseline: mark active, publish PROMPT_UPDATED.
+
+    Also listens for POSITION_CLOSED events to track trade accumulation.
+
+    Agent ID: ``GLOBL_ALL..._GA_OPT1``
     """
 
     def __init__(
@@ -35,8 +40,9 @@ class OptimizationAgent(BaseAgent):
         min_trades_before_run: int = 20,
         optimization_interval_hours: int = 6,
     ) -> None:
+        aid = AgentId.build(broker="GLOBL", pair="ALL...", agent_type="GA", name="OPT1")
         super().__init__(
-            agent_id="optimization",
+            agent_id=aid.format(),
             llm=llm,
             repository=repository,
             bus=bus,
@@ -46,11 +52,16 @@ class OptimizationAgent(BaseAgent):
         self.min_trades = min_trades_before_run
         self.interval_seconds = optimization_interval_hours * 3600
 
-    async def on_position_closed(self, message: AgentMessage) -> None:
-        """Accumulate closed trade count; no immediate action."""
-        self._logger.debug(
-            "Position closed event received", pair=message.payload.get("pair")
-        )
+    # ── Inbound message handler ───────────────────────────────────────────────
+
+    async def _handle_message(self, message: AgentMessage) -> None:
+        """Process messages delivered to this agent's inbox via the EventBus."""
+        if message.event_type == EventType.POSITION_CLOSED:
+            self._logger.debug(
+                "Position closed event received", pair=message.payload.get("pair")
+            )
+
+    # ── Cycle ─────────────────────────────────────────────────────────────────
 
     async def run_cycle(self) -> None:
         self._logger.info("Optimization cycle starting")
