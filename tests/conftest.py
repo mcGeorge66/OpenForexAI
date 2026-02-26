@@ -54,7 +54,6 @@ def make_snapshot(pair: str = "EURUSD") -> MarketSnapshot:
         candles_h1=candles,
         candles_h4=candles[:10],
         candles_d1=candles[:5],
-        indicators={"rsi_14": 55.0, "atr_14": 0.0012, "sma_20": 1.1005},
         session="london",
         snapshot_time=datetime.now(timezone.utc),
     )

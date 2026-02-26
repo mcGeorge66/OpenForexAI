@@ -38,6 +38,5 @@ class MarketSnapshot(BaseModel):
     candles_h1: list[Candle] = []
     candles_h4: list[Candle] = []
     candles_d1: list[Candle] = []
-    indicators: dict[str, float] = {}  # RSI, ATR, SMA20, EMA50, BB_upper, BB_lower, VWAP
     session: str  # london | new_york | tokyo | sydney | overlap | closed
     snapshot_time: datetime

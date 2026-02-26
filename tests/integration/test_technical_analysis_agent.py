@@ -23,11 +23,17 @@ _TA_RESPONSE = {
 
 @pytest.mark.asyncio
 async def test_ta_agent_responds_to_request():
+    from tests.conftest import MockBroker
+    from openforexai.data.container import DataContainer
+
+    broker = MockBroker()
     llm = MockLLMProvider(structured_response=_TA_RESPONSE)
     repo = MockRepository()
     bus = EventBus()
+    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
+    await container.initialize()
 
-    ta_agent = TechnicalAnalysisAgent(llm=llm, repository=repo, bus=bus)
+    ta_agent = TechnicalAnalysisAgent(llm=llm, repository=repo, bus=bus, data_container=container)
     bus.subscribe(EventType.ANALYSIS_REQUESTED, ta_agent.on_analysis_requested)
 
     results: list[AgentMessage] = []

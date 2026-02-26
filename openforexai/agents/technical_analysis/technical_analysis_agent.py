@@ -112,14 +112,28 @@ class TechnicalAnalysisAgent(BaseAgent):
                 period    = int(item.get("period", 14))
                 timeframe = item.get("timeframe", "H1").upper()
                 req_pair  = item.get("pair", pair).upper()
+                history   = int(item.get("history", 1))
 
-                label = f"{indicator.upper()}({period},{timeframe},{req_pair})"
+                base_label = f"{indicator.upper()}({period},{timeframe},{req_pair})"
+                label = f"{base_label}[hist={history}]" if history > 1 else base_label
                 try:
-                    result = self.indicators.calculate(indicator, period, timeframe, req_pair)
+                    result = self.indicators.calculate(
+                        indicator, period, timeframe, req_pair, history=history
+                    )
                     if result is None:
                         computed[label] = "N/A (not enough data)"
+                    elif isinstance(result, list):
+                        # history > 1: series of values
+                        if result and isinstance(result[0], dict):
+                            # BB series — expand each snapshot
+                            for i, entry in enumerate(result, 1):
+                                for k, v in entry.items():
+                                    computed[f"BB_{k}({period},{timeframe},{req_pair})[{i}]"] = f"{v:.6f}"
+                        else:
+                            formatted = ", ".join(f"{v:.6f}" for v in result)
+                            computed[label] = f"[{formatted}]"
                     elif isinstance(result, dict):
-                        # Bollinger Bands — expand into separate entries
+                        # BB single snapshot — expand into separate entries
                         for k, v in result.items():
                             computed[f"BB_{k}({period},{timeframe},{req_pair})"] = f"{v:.6f}"
                     else:
@@ -193,22 +207,18 @@ class TechnicalAnalysisAgent(BaseAgent):
     # ── Context builders ─────────────────────────────────────────────────────
 
     def _build_phase1_context(self, pair: str, snapshot: dict) -> str:
+        available = ", ".join(self.indicators.available_indicators())
         lines = [
             f"Pair: {pair}",
             "",
             "PHASE 1 — Declare the indicators you need to complete your analysis.",
             "For each indicator specify: indicator, period, timeframe, pair.",
-            "Available indicators: MA (SMA), EMA, RSI, ATR, BB",
+            "Optionally add 'history' (int) to request the last N values as a series",
+            "(oldest → newest) — useful for spotting trends or divergences.",
+            f"Available indicators: {available}",
             "Available timeframes: M5, M15, M30, H1, H4, D1",
             "",
         ]
-
-        # Pre-computed snapshot indicators (H1 basis, for orientation)
-        indicators = snapshot.get("indicators", {})
-        if indicators:
-            lines.append("Pre-computed indicators (H1):")
-            for k, v in indicators.items():
-                lines.append(f"  {k}: {v}")
 
         # Raw candle data per timeframe
         for tf, count in _TA_CONTEXT_CANDLES.items():
@@ -256,8 +266,12 @@ class _IndicatorRequest(BaseModel):
 
     preliminary_observations: str = ""
     indicators_needed: list[dict] = []
-    # Each entry: {"indicator": "ATR", "period": 14, "timeframe": "M15", "pair": "USDJPY"}
-    # `pair` is optional — defaults to the current pair when omitted.
+    # Each entry: {
+    #   "indicator": "ATR", "period": 14, "timeframe": "M15",
+    #   "pair": "USDJPY", "history": 5
+    # }
+    # `pair`    is optional — defaults to the current pair when omitted.
+    # `history` is optional — defaults to 1 (single latest value).
 
 
 class _AnalysisLLMOutput(BaseModel):

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 
-from openforexai.data.indicators import compute_all
 from openforexai.data.normalizer import pip_size
 from openforexai.data.resampler import resample_candles
 from openforexai.models.market import Candle, MarketSnapshot, Tick
@@ -53,10 +52,6 @@ class DataContainer:
         self._m5_store: dict[str, list[Candle]] = {p: [] for p in pairs}
         self._locks: dict[str, asyncio.Lock] = {p: asyncio.Lock() for p in pairs}
         self._latest_ticks: dict[str, Tick] = {}
-        # pair → tf → computed indicators
-        self._indicator_cache: dict[str, dict[str, dict[str, float]]] = {
-            p: {} for p in pairs
-        }
 
     async def initialize(self) -> None:
         """Fetch M5 history from the broker for all pairs."""
@@ -71,13 +66,11 @@ class DataContainer:
             self._m5_store[pair] = candles
 
     async def update(self, tick: Tick) -> None:
-        """Incorporate a new tick; invalidates the indicator cache."""
+        """Incorporate a new tick."""
         pair = tick.pair
         if pair not in self._locks:
             return
         self._latest_ticks[pair] = tick
-        async with self._locks[pair]:
-            self._indicator_cache[pair] = {}
 
     # ── Candle access (synchronous, no lock — read-only snapshots) ────────────
 
@@ -117,12 +110,6 @@ class DataContainer:
         h4  = resample_candles(m5, "H4")  if m5 else []
         d1  = resample_candles(m5, "D1")  if m5 else []
 
-        # Indicator cache (based on H1 for higher-TF context)
-        async with self._locks[pair]:
-            if "H1" not in self._indicator_cache[pair]:
-                self._indicator_cache[pair]["H1"] = compute_all(h1)
-            indicators = self._indicator_cache[pair]["H1"]
-
         return MarketSnapshot(
             pair=pair,
             current_tick=tick,
@@ -132,7 +119,6 @@ class DataContainer:
             candles_h1=h1[-_SNAPSHOT_LIMITS["H1"]:],
             candles_h4=h4[-_SNAPSHOT_LIMITS["H4"]:],
             candles_d1=d1[-_SNAPSHOT_LIMITS["D1"]:],
-            indicators=indicators,
             session=detect_session(),
             snapshot_time=utcnow(),
         )

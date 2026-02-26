@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 import numpy as np
 
 from openforexai.models.market import Candle
@@ -94,25 +92,4 @@ def vwap(candles: list[Candle]) -> float | None:
     return float(np.sum(typical_prices * volumes) / total_volume)
 
 
-def compute_all(candles: list[Candle]) -> dict[str, float]:
-    """Compute a standard set of indicators and return as a flat dict."""
-    result: dict[str, float] = {}
 
-    def _set(key: str, val: float | None) -> None:
-        if val is not None:
-            result[key] = round(val, 6)
-
-    _set("sma_20", sma(candles, 20))
-    _set("sma_50", sma(candles, 50))
-    _set("ema_50", ema(candles, 50))
-    _set("rsi_14", rsi(candles, 14))
-    _set("atr_14", atr(candles, 14))
-    _set("vwap", vwap(candles))
-
-    bb = bollinger_bands(candles)
-    if bb:
-        result["bb_upper"], result["bb_middle"], result["bb_lower"] = (
-            round(bb[0], 6), round(bb[1], 6), round(bb[2], 6)
-        )
-
-    return result
