@@ -686,18 +686,30 @@ cd OpenForexAI
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Install runtime dependencies
+# Install core runtime dependencies
 pip install -e .
+
+# Management API — FastAPI + uvicorn (recommended, required for HTTP control plane)
+pip install -e ".[api]"
 
 # MetaTrader 5 support (Windows only, optional)
 pip install -e ".[mt5]"
 
-# Management API (required for HTTP control plane)
-pip install -e ".[api]"
-
 # Development dependencies (tests, linter, type checker)
 pip install -e ".[dev]"
+
+# Everything at once (core + api + mt5)
+pip install -e ".[all]"
 ```
+
+**Optional extras defined in `pyproject.toml`:**
+
+| Extra | Packages | When needed |
+|---|---|---|
+| `api` | `fastapi`, `uvicorn[standard]` | Management HTTP API on `localhost:8765` |
+| `mt5` | `MetaTrader5` | MetaTrader 5 broker adapter (Windows only) |
+| `dev` | `pytest`, `ruff`, `mypy`, … | Development and testing |
+| `all` | `api` + `mt5` | Full installation |
 
 ---
 

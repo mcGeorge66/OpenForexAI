@@ -20,19 +20,19 @@ def detect_engulfing(candles: list[Candle]) -> str | None:
     if len(candles) < 2:
         return None
     prev, curr = candles[-2], candles[-1]
-    prev_bullish = curr.close > prev.open
+    prev_bullish = prev.close > prev.open
     curr_bullish = curr.close > curr.open
 
     if (
-        not curr_bullish  # previous was bearish
-        and prev_bullish   # current is bullish
+        not prev_bullish   # previous was bearish
+        and curr_bullish   # current is bullish
         and curr.open < prev.close
         and curr.close > prev.open
     ):
         return "bullish"
     if (
-        curr_bullish       # previous was bullish
-        and not prev_bullish  # current is bearish
+        prev_bullish       # previous was bullish
+        and not curr_bullish  # current is bearish
         and curr.open > prev.close
         and curr.close < prev.open
     ):

@@ -166,6 +166,19 @@ class EventBus:
     def stop(self) -> None:
         self._running = False
 
+    async def flush(self) -> None:
+        """Drain and dispatch all currently-pending inbound messages.
+
+        Intended for use in tests where no dispatch loop is running.
+        """
+        while not self._inbound.empty():
+            try:
+                message = self._inbound.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await self._dispatch(message)
+            self._inbound.task_done()
+
     async def _dispatch(self, message: AgentMessage) -> None:
         event_val = message.event_type.value if hasattr(message.event_type, "value") else str(message.event_type)
         sender_id = message.source_agent_id

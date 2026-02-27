@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from openforexai.agents.optimization.optimization_agent import OptimizationAgent
 from openforexai.agents.supervisor.supervisor_agent import SupervisorAgent
 from openforexai.agents.technical_analysis.technical_analysis_agent import TechnicalAnalysisAgent
 from openforexai.agents.trading.trading_agent import TradingAgent
 from openforexai.config.settings import Settings
 from openforexai.data.container import DataContainer
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
-from openforexai.messaging.handlers import wire_subscriptions
+from openforexai.messaging.routing import RoutingTable
 from openforexai.models.risk import RiskParameters
 from openforexai.registry.plugin_registry import PluginRegistry
+from openforexai.tools import DEFAULT_REGISTRY
+from openforexai.tools.base import ToolContext
+from openforexai.tools.config_loader import AgentToolConfig
+from openforexai.tools.dispatcher import ToolDispatcher
+
+_CONFIG_DIR = Path(__file__).parent / "config"
 
 
 async def bootstrap(settings: Settings) -> tuple[list, EventBus]:
@@ -61,23 +70,28 @@ async def bootstrap(settings: Settings) -> tuple[list, EventBus]:
         )
     await broker.connect()
 
+    # ── Event bus (with routing table) ────────────────────────────────────────
+    routing = RoutingTable()
+    routing_path = _CONFIG_DIR / "event_routing.json"
+    if routing_path.exists():
+        routing.load(routing_path)
+    bus = EventBus(routing=routing)
+
     # ── Data container ────────────────────────────────────────────────────────
-    data_container = DataContainer(
-        broker=broker,
-        repository=repository,
-        pairs=settings.pairs,
-        rolling_weeks=settings.data.rolling_weeks,
-        timeframes=settings.data.timeframes,
-    )
+    data_container = DataContainer(repository=repository, event_bus=bus)
+    data_container.register_broker(broker, settings.pairs)
+    data_container.subscribe_to_bus()
     await data_container.initialize()
 
-    # ── Event bus ─────────────────────────────────────────────────────────────
-    bus = EventBus()
+    # ── Per-agent tool configuration ──────────────────────────────────────────
+    tool_config = AgentToolConfig.load(_CONFIG_DIR / "agent_tools.json")
 
-    # ── Agents ────────────────────────────────────────────────────────────────
+    # ── Risk parameters ───────────────────────────────────────────────────────
     risk_params = RiskParameters(**settings.risk.model_dump())
 
+    # ── SupervisorAgent (one per broker) ─────────────────────────────────────
     supervisor = SupervisorAgent(
+        broker_name=broker.short_name,
         risk_params=risk_params,
         broker=broker,
         data_container=data_container,
@@ -87,31 +101,47 @@ async def bootstrap(settings: Settings) -> tuple[list, EventBus]:
         bus=bus,
     )
 
-    # One TradingAgent per configured pair (variabel, min. 1)
-    trading_agents: list[TradingAgent] = [
-        TradingAgent(
+    # ── TradingAgents — one per configured pair (min. 1) ─────────────────────
+    trading_agents: list[TradingAgent] = []
+    for pair in settings.pairs:
+        aid = AgentId.build(broker=broker.short_name, pair=pair, agent_type="AA", name="TRD1")
+        agent_id_str = aid.format()
+        context = ToolContext(
+            agent_id=agent_id_str,
+            broker_name=broker.short_name,
             pair=pair,
+            data_container=data_container,
+            repository=repository,
             broker=broker,
+            event_bus=bus,
+        )
+        dispatcher = ToolDispatcher(
+            registry=DEFAULT_REGISTRY,
+            context=context,
+            agent_tool_config=tool_config.for_agent(agent_id_str),
+        )
+        trading_agents.append(TradingAgent(
+            broker_name=broker.short_name,
+            pair=pair,
             data_container=data_container,
             llm=llm,
             repository=repository,
             bus=bus,
+            tool_dispatcher=dispatcher,
             cycle_interval_seconds=settings.agents.trading.cycle_interval_seconds,
-            analysis_timeout_seconds=settings.agents.trading.analysis_timeout_seconds,
-            context_candles=settings.agents.trading.context_candles or None,
-        )
-        for pair in settings.pairs
-    ]
+        ))
 
-    # Singleton technical analysis agent (needs DataContainer for cross-TF indicator calls)
+    # ── TechnicalAnalysisAgent (global singleton) ─────────────────────────────
     technical_analysis_agent = TechnicalAnalysisAgent(
         llm=llm,
         repository=repository,
         bus=bus,
         data_container=data_container,
+        broker_name=broker.short_name,
         max_concurrent_requests=settings.agents.technical_analysis.max_concurrent_requests,
     )
 
+    # ── OptimizationAgent (global singleton) ──────────────────────────────────
     optimization_agent = OptimizationAgent(
         pairs=settings.pairs,
         data_container=data_container,
@@ -122,14 +152,14 @@ async def bootstrap(settings: Settings) -> tuple[list, EventBus]:
         optimization_interval_hours=settings.optimization_interval_hours,
     )
 
-    # ── Wire subscriptions ────────────────────────────────────────────────────
-    wire_subscriptions(
-        bus=bus,
-        supervisor=supervisor,
-        trading_agents=trading_agents,
-        technical_analysis_agent=technical_analysis_agent,
-        optimization_agent=optimization_agent,
-    )
+    # ── Start broker background tasks (M5 streaming, account poll, sync) ──────
+    # One background-task set per pair (one adapter = one pair)
+    for pair in settings.pairs:
+        broker.start_background_tasks(
+            pair=pair,
+            event_bus=bus,
+            repository=repository,
+        )
 
     all_agents = [supervisor, *trading_agents, technical_analysis_agent, optimization_agent]
     return all_agents, bus

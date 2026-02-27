@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from tests.conftest import MockBroker, MockLLMProvider, MockRepository
+from tests.conftest import MockBroker, MockLLMProvider, MockRepository, MOCK_BROKER_NAME
 from openforexai.agents.supervisor.supervisor_agent import SupervisorAgent
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
@@ -25,11 +25,11 @@ def _signal_message(pair: str = "EURUSD") -> AgentMessage:
         confidence=0.80,
         reasoning="test",
         generated_at=datetime.now(timezone.utc),
-        agent_id="trading_EURUSD",
+        agent_id=f"MOCKB_{pair.ljust(6, '.')[:6]}_AA_TRD1",
     )
     return AgentMessage(
         event_type=EventType.SIGNAL_GENERATED,
-        source_agent_id="trading_EURUSD",
+        source_agent_id=f"MOCKB_{pair.ljust(6, '.')[:6]}_AA_TRD1",
         payload={
             "pair": pair,
             "signal_id": str(signal.id),
@@ -38,29 +38,53 @@ def _signal_message(pair: str = "EURUSD") -> AgentMessage:
     )
 
 
-@pytest.mark.asyncio
-async def test_supervisor_approves_valid_signal():
+def _make_supervisor(pairs: list[str] | None = None) -> tuple[SupervisorAgent, MockBroker, MockRepository]:
+    pairs = pairs or ["EURUSD"]
     broker = MockBroker()
     repo = MockRepository()
     bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
+
+    container = DataContainer(repository=repo, event_bus=bus)
+    container.register_broker(broker, pairs)
 
     supervisor = SupervisorAgent(
+        broker_name=MOCK_BROKER_NAME,
         risk_params=RiskParameters(),
         broker=broker,
         data_container=container,
-        pairs=["EURUSD"],
+        pairs=pairs,
         llm=MockLLMProvider(),
         repository=repo,
         bus=bus,
     )
+    return supervisor, broker, repo
+
+
+@pytest.mark.asyncio
+async def test_supervisor_structured_id():
+    """Supervisor agent_id must match the BA_SUP1 naming convention."""
+    supervisor, _, _ = _make_supervisor()
+    from openforexai.messaging.agent_id import AgentId
+    aid = AgentId.parse(supervisor.agent_id)
+    assert aid.type == "BA"
+    assert aid.name == "SUP1"
+    assert aid.pair == "ALL..."
+
+
+@pytest.mark.asyncio
+async def test_supervisor_approves_valid_signal():
+    """Supervisor should approve a valid signal and place an order."""
+    supervisor, broker, repo = _make_supervisor()
 
     approved: list[AgentMessage] = []
-    async def on_approved(msg): approved.append(msg)
-    bus.subscribe(EventType.SIGNAL_APPROVED, on_approved)
 
-    await supervisor.on_signal_generated(_signal_message())
+    async def on_approved(msg: AgentMessage) -> None:
+        approved.append(msg)
+
+    supervisor.bus.subscribe(EventType.SIGNAL_APPROVED, on_approved)
+
+    await supervisor._on_signal_generated(_signal_message())
+    await supervisor.bus.flush()
 
     assert len(approved) == 1
     assert approved[0].payload["pair"] == "EURUSD"
@@ -69,45 +93,51 @@ async def test_supervisor_approves_valid_signal():
 
 @pytest.mark.asyncio
 async def test_supervisor_rejects_at_position_limit():
+    """Supervisor should reject when the position limit is already reached."""
     from openforexai.models.trade import Position
 
-    broker = MockBroker()
+    supervisor, broker, _ = _make_supervisor()
 
-    async def too_many_positions():
-        return [
-            Position(
-                broker_position_id=str(i),
-                pair="USDJPY",
-                direction=TradeDirection.BUY,
-                units=1000,
-                open_price=Decimal("150.0"),
-                current_price=Decimal("150.5"),
-                unrealized_pnl=Decimal("50"),
-                opened_at=datetime.now(timezone.utc),
-            )
-            for i in range(6)  # already at max
-        ]
-
-    broker.get_open_positions = too_many_positions
-
-    repo = MockRepository()
-    bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
-
-    supervisor = SupervisorAgent(
-        risk_params=RiskParameters(max_open_positions=6),
-        broker=broker,
-        data_container=container,
-        pairs=["EURUSD"],
-        llm=MockLLMProvider(),
-        repository=repo,
-        bus=bus,
-    )
+    # Simulate broker already at max positions
+    broker._positions = [
+        Position(
+            broker_position_id=str(i),
+            pair="USDJPY",
+            direction=TradeDirection.BUY,
+            units=1000,
+            open_price=Decimal("150.0"),
+            current_price=Decimal("150.5"),
+            unrealized_pnl=Decimal("50"),
+            opened_at=datetime.now(timezone.utc),
+        )
+        for i in range(6)
+    ]
+    supervisor.risk_engine.params.max_open_positions = 6
 
     rejected: list[AgentMessage] = []
-    async def on_rejected(msg): rejected.append(msg)
-    bus.subscribe(EventType.SIGNAL_REJECTED, on_rejected)
 
-    await supervisor.on_signal_generated(_signal_message())
+    async def on_rejected(msg: AgentMessage) -> None:
+        rejected.append(msg)
+
+    supervisor.bus.subscribe(EventType.SIGNAL_REJECTED, on_rejected)
+
+    await supervisor._on_signal_generated(_signal_message())
+    await supervisor.bus.flush()
     assert len(rejected) == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_handle_message_routes_signal():
+    """SIGNAL_GENERATED delivered via _handle_message must trigger approval flow."""
+    supervisor, broker, _ = _make_supervisor()
+
+    approved: list = []
+
+    async def on_approved(msg: AgentMessage) -> None:
+        approved.append(msg)
+
+    supervisor.bus.subscribe(EventType.SIGNAL_APPROVED, on_approved)
+
+    await supervisor._handle_message(_signal_message())
+    await supervisor.bus.flush()
+    assert len(approved) == 1

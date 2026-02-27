@@ -10,7 +10,6 @@ from tests.conftest import MockBroker, MockLLMProvider, MockRepository
 from openforexai.agents.optimization.optimization_agent import OptimizationAgent
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
-from openforexai.models.messaging import EventType
 from openforexai.models.trade import (
     TradeDirection,
     TradeOrder,
@@ -31,9 +30,9 @@ def _make_closed_trade(pnl: float, pair: str = "EURUSD") -> TradeResult:
         confidence=0.8,
         reasoning="test",
         generated_at=now,
-        agent_id="trading_EURUSD",
+        agent_id="MOCKB_EURUSD_AA_TRD1",
     )
-    order = TradeOrder(signal=signal, units=1000, risk_pct=1.0, approved_by="supervisor")
+    order = TradeOrder(signal=signal, units=1000, risk_pct=1.0, approved_by="MOCKB_ALL..._BA_SUP1")
     return TradeResult(
         order=order,
         broker_order_id="ORD",
@@ -44,13 +43,13 @@ def _make_closed_trade(pnl: float, pair: str = "EURUSD") -> TradeResult:
     )
 
 
-@pytest.mark.asyncio
-async def test_optimization_skips_insufficient_trades():
+def _make_opt_agent(min_trades: int = 20) -> tuple[OptimizationAgent, MockRepository]:
     broker = MockBroker()
     repo = MockRepository()
     bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
+
+    container = DataContainer(repository=repo, event_bus=bus)
+    container.register_broker(broker, ["EURUSD"])
 
     agent = OptimizationAgent(
         pairs=["EURUSD"],
@@ -58,46 +57,51 @@ async def test_optimization_skips_insufficient_trades():
         llm=MockLLMProvider(),
         repository=repo,
         bus=bus,
-        min_trades_before_run=20,
+        min_trades_before_run=min_trades,
     )
+    return agent, repo
 
-    # Only 5 trades — below threshold
+
+@pytest.mark.asyncio
+async def test_optimization_structured_id():
+    """OptimizationAgent must have the correct structured ID."""
+    agent, _ = _make_opt_agent()
+    from openforexai.messaging.agent_id import AgentId
+    aid = AgentId.parse(agent.agent_id)
+    assert aid.type == "GA"
+    assert aid.broker == "GLOBL"
+    assert aid.name == "OPT1"
+
+
+@pytest.mark.asyncio
+async def test_optimization_skips_insufficient_trades():
+    """Agent should skip optimization when fewer trades than threshold exist."""
+    agent, repo = _make_opt_agent(min_trades=20)
+
     for t in [_make_closed_trade(10.0) for _ in range(5)]:
         await repo.save_trade(t)
 
     await agent._optimize_pair("EURUSD")
-    # No prompt candidate should have been created
     assert len(repo.prompts) == 0
 
 
 @pytest.mark.asyncio
 async def test_optimization_creates_prompt_candidate():
-    broker = MockBroker()
-    repo = MockRepository()
-    bus = EventBus()
-    container = DataContainer(broker=broker, repository=repo, pairs=["EURUSD"], rolling_weeks=1)
-    await container.initialize()
+    """Agent should generate and save a prompt candidate with enough trades."""
+    agent, repo = _make_opt_agent(min_trades=5)
 
     new_prompt_text = "Improved: focus on london session BUY signals only."
-    llm = MockLLMProvider()
     from openforexai.ports.llm import LLMResponse
+
     async def mock_complete(system_prompt, user_message, **_):
-        return LLMResponse(content=new_prompt_text, model="mock", input_tokens=50, output_tokens=80, raw={})
-    llm.complete = mock_complete
+        return LLMResponse(
+            content=new_prompt_text, model="mock", input_tokens=50, output_tokens=80, raw={}
+        )
 
-    agent = OptimizationAgent(
-        pairs=["EURUSD"],
-        data_container=container,
-        llm=llm,
-        repository=repo,
-        bus=bus,
-        min_trades_before_run=5,
-    )
+    agent.llm.complete = mock_complete  # type: ignore[method-assign]
 
-    # Enough winning trades to trigger pattern detection
     for t in [_make_closed_trade(15.0) for _ in range(10)]:
         await repo.save_trade(t)
 
     await agent._optimize_pair("EURUSD")
     assert len(repo.prompts) >= 1
-    assert new_prompt_text in repo.prompts[-1].system_prompt

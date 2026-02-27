@@ -22,7 +22,8 @@ def test_detect_doji_true():
         high=Decimal("1.1020"),
         low=Decimal("1.0980"),
         close=Decimal("1.1001"),  # tiny body
-        volume=500,
+        tick_volume=500,
+        spread=Decimal("0.0002"),
         timeframe="H1",
     )
     assert detect_doji([doji]) is True
@@ -44,7 +45,8 @@ def test_detect_engulfing_bullish():
         high=Decimal("1.1060"),
         low=Decimal("1.1020"),
         close=Decimal("1.1025"),  # bearish prev
-        volume=500,
+        tick_volume=500,
+        spread=Decimal("0.0002"),
         timeframe="H1",
     )
     curr = Candle(
@@ -53,7 +55,8 @@ def test_detect_engulfing_bullish():
         high=Decimal("1.1080"),
         low=Decimal("1.1000"),
         close=Decimal("1.1070"),  # bullish curr engulfs
-        volume=800,
+        tick_volume=800,
+        spread=Decimal("0.0002"),
         timeframe="H1",
     )
     result = detect_engulfing([prev, curr])

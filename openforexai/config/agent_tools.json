@@ -100,7 +100,7 @@
     },
 
     {
-      "pattern": "GLOBL_ALL..._GA_TA__*",
+      "pattern": "GLOBL_*_GA_TA*",
       "_comment": "TechnicalAnalysisAgent (Global Agent, singleton)",
       "allowed_tools": [
         "get_candles",
