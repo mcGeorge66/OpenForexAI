@@ -1,9 +1,0 @@
-system:
-  log_level: DEBUG
-  cycle_interval_seconds: 30
-
-agents:
-  trading:
-    cycle_interval_seconds: 30
-  optimization:
-    min_trades_before_run: 5

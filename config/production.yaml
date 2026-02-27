@@ -1,9 +1,0 @@
-system:
-  log_level: WARNING
-
-database:
-  backend: postgresql
-  pool_size: 20
-
-broker:
-  practice: false

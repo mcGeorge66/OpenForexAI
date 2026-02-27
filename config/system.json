@@ -1,0 +1,208 @@
+{
+  "_comment": "OpenForexAI — Central system configuration",
+  "_doc": [
+    "All parameters and settings live here — one source of truth.",
+    "LLM and Broker modules are referenced by name only.",
+    "Their internal connection details live in config/modules/.",
+    "Agent IDs: [BROKER(5)]_[PAIR(6)]_[TYPE(2)]_[NAME(1-5)]",
+    "  AA = Analysis Agent   (per broker + pair)",
+    "  BA = Broker Agent     (per broker, no pair)",
+    "  GA = Global Agent     (system-wide)",
+    "Environment variable substitution: ${VAR_NAME} or ${VAR_NAME:-default}"
+  ],
+
+  "system": {
+    "log_level": "${OPENFOREXAI_LOG_LEVEL:-INFO}",
+    "management_api": {
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  },
+
+  "data": {
+    "rolling_weeks": 4,
+    "timeframes": ["M5"],
+    "indicator_cache_ttl_seconds": 30
+  },
+
+  "database": {
+    "backend": "${OPENFOREXAI_DB_BACKEND:-sqlite}",
+    "sqlite_path": "${OPENFOREXAI_DB_PATH:-./data/openforexai.db}",
+    "pool_size": 5
+  },
+
+  "modules": {
+    "_doc": "Module names only — connection details are in config/modules/",
+    "llm": {
+      "anthropic_claude": "config/modules/llm/anthropic_claude.json"
+    },
+    "broker": {
+      "oanda": "config/modules/broker/oanda.json",
+      "mt5":   "config/modules/broker/mt5.json"
+    }
+  },
+
+  "agents": {
+
+    "OANDA_EURUSD_AA_ANLYS": {
+      "_comment": "Analysis Agent — OANDA / EURUSD",
+      "type":   "AA",
+      "llm":    "anthropic_claude",
+      "broker": "oanda",
+      "pair":   "EURUSD",
+      "timer": {
+        "enabled": true,
+        "interval_seconds": 300
+      },
+      "event_triggers": ["m5_candle_available", "prompt_updated"],
+      "system_prompt": "You are a professional Forex analysis agent for EURUSD. Analyse the current market data using your available tools and report your findings and any trading signals to the broker agent.",
+      "tool_config": {
+        "allowed_tools": [
+          "get_candles",
+          "calculate_indicator",
+          "get_order_book",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "context_tiers": {
+          "0":  "all",
+          "85": "safety"
+        },
+        "tier_tools": {
+          "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
+          "safety": ["raise_alarm"]
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      }
+    },
+
+    "OANDA_GBPUSD_AA_ANLYS": {
+      "_comment": "Analysis Agent — OANDA / GBPUSD",
+      "type":   "AA",
+      "llm":    "anthropic_claude",
+      "broker": "oanda",
+      "pair":   "GBPUSD",
+      "timer": {
+        "enabled": true,
+        "interval_seconds": 300
+      },
+      "event_triggers": ["m5_candle_available", "prompt_updated"],
+      "system_prompt": "You are a professional Forex analysis agent for GBPUSD. Analyse the current market data using your available tools and report your findings and any trading signals to the broker agent.",
+      "tool_config": {
+        "allowed_tools": [
+          "get_candles",
+          "calculate_indicator",
+          "get_order_book",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "context_tiers": {
+          "0":  "all",
+          "85": "safety"
+        },
+        "tier_tools": {
+          "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
+          "safety": ["raise_alarm"]
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      }
+    },
+
+    "OANDA_USDJPY_AA_ANLYS": {
+      "_comment": "Analysis Agent — OANDA / USDJPY",
+      "type":   "AA",
+      "llm":    "anthropic_claude",
+      "broker": "oanda",
+      "pair":   "USDJPY",
+      "timer": {
+        "enabled": true,
+        "interval_seconds": 300
+      },
+      "event_triggers": ["m5_candle_available", "prompt_updated"],
+      "system_prompt": "You are a professional Forex analysis agent for USDJPY. Analyse the current market data using your available tools and report your findings and any trading signals to the broker agent.",
+      "tool_config": {
+        "allowed_tools": [
+          "get_candles",
+          "calculate_indicator",
+          "get_order_book",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "context_tiers": {
+          "0":  "all",
+          "85": "safety"
+        },
+        "tier_tools": {
+          "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
+          "safety": ["raise_alarm"]
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      }
+    },
+
+    "OANDA_ALL..._BA_TRADE": {
+      "_comment": "Broker Agent — OANDA (all pairs)",
+      "type":   "BA",
+      "llm":    "anthropic_claude",
+      "broker": "oanda",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 0
+      },
+      "event_triggers": ["analysis_result", "signal_generated", "account_status_updated", "risk_breach", "order_book_sync_discrepancy"],
+      "system_prompt": "You are the broker agent for OANDA. You receive analysis and signals from the analysis agents, manage open positions, monitor account risk, and execute trades when conditions are met. Always verify account status and risk parameters before placing any order.",
+      "tool_config": {
+        "allowed_tools": [
+          "place_order",
+          "close_position",
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "raise_alarm"
+        ],
+        "context_tiers": {
+          "0":  "all",
+          "80": "decision",
+          "95": "safety"
+        },
+        "tier_tools": {
+          "all":      ["place_order", "close_position", "get_account_status", "get_open_positions", "get_order_book", "raise_alarm"],
+          "decision": ["place_order", "close_position", "raise_alarm"],
+          "safety":   ["close_position", "raise_alarm"]
+        },
+        "max_tool_turns": 8,
+        "max_tokens": 4096
+      }
+    },
+
+    "GLOBL_ALL..._GA_OPTIM": {
+      "_comment": "Global Optimization Agent",
+      "type":   "GA",
+      "llm":    "anthropic_claude",
+      "timer": {
+        "enabled": true,
+        "interval_seconds": 21600
+      },
+      "event_triggers": ["position_closed", "optimization_complete"],
+      "system_prompt": "You are the global optimization agent. You monitor trading outcomes, detect patterns, and propose improvements to analysis agent prompts when sufficient trade data is available.",
+      "tool_config": {
+        "allowed_tools": [
+          "get_order_book",
+          "raise_alarm"
+        ],
+        "context_tiers": {
+          "0": "all"
+        },
+        "tier_tools": {
+          "all": ["get_order_book", "raise_alarm"]
+        },
+        "max_tool_turns": 5,
+        "max_tokens": 8192
+      }
+    }
+
+  }
+}

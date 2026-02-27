@@ -39,6 +39,7 @@ class ManagementServer:
         routing_table=None,
         tool_registry=None,
         indicator_registry=None,
+        monitoring_bus=None,
         host: str = "127.0.0.1",
         port: int = 8765,
         log_level: str = "warning",
@@ -50,6 +51,7 @@ class ManagementServer:
         self._routing_table = routing_table
         self._tool_registry = tool_registry
         self._indicator_registry = indicator_registry
+        self._monitoring_bus = monitoring_bus
         self._server = None
 
     async def serve(self) -> None:
@@ -70,6 +72,7 @@ class ManagementServer:
             routing_table=self._routing_table,
             tool_registry=self._tool_registry,
             indicator_registry=self._indicator_registry,
+            monitoring_bus=self._monitoring_bus,
         )
 
         config = uvicorn.Config(

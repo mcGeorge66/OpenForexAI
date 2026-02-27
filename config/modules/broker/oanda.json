@@ -1,0 +1,8 @@
+{
+  "_comment": "OANDA broker module configuration",
+  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  "adapter":    "oanda",
+  "api_key":    "${OANDA_API_KEY}",
+  "account_id": "${OANDA_ACCOUNT_ID}",
+  "practice":   true
+}
