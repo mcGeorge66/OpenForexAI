@@ -1,0 +1,8 @@
+{
+  "_comment": "MetaTrader 5 broker module configuration",
+  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  "adapter":  "mt5",
+  "login":    "${MT5_LOGIN}",
+  "password": "${MT5_PASSWORD}",
+  "server":   "${MT5_SERVER}"
+}

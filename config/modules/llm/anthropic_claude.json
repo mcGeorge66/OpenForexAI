@@ -1,0 +1,11 @@
+{
+  "_comment": "Anthropic Claude LLM module configuration",
+  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  "adapter":         "anthropic",
+  "api_key":         "${ANTHROPIC_API_KEY}",
+  "model":           "${ANTHROPIC_MODEL:-claude-opus-4-6}",
+  "temperature":     0.1,
+  "max_tokens":      1024,
+  "timeout_seconds": 30,
+  "retry_attempts":  3
+}

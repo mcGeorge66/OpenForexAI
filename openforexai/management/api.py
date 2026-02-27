@@ -36,6 +36,7 @@ _bus = None
 _routing_table = None
 _tool_registry = None
 _indicator_registry = None
+_monitoring_bus = None
 _start_time: float = time.monotonic()
 
 _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -219,6 +220,47 @@ async def list_indicators() -> dict:
     return {"indicators": _indicator_registry.registered_names()}
 
 
+@router.get("/monitoring/events")
+async def monitoring_events(
+    since: str | None = None,
+    limit: int = 100,
+) -> list:
+    """Return recent monitoring events from the ring buffer.
+
+    ``since`` — ISO-8601 UTC timestamp; only events after this are returned.
+    ``limit`` — max number of events (default 100, max 1000).
+
+    This endpoint is designed for polling by ``tools/monitor.py``.
+    """
+    if _monitoring_bus is None:
+        return []
+    since_dt = None
+    if since:
+        from datetime import timezone
+        try:
+            from datetime import datetime as _dt
+            since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid 'since' timestamp: {since!r}")
+
+    limit = max(1, min(limit, 1000))
+    events = _monitoring_bus.recent_events(since=since_dt, limit=limit)
+    return [
+        {
+            "id":           str(e.id),
+            "timestamp":    e.timestamp.isoformat(),
+            "source":       e.source_module,
+            "event_type":   e.event_type.value,
+            "broker":       e.broker_name,
+            "pair":         e.pair,
+            "payload":      e.payload,
+        }
+        for e in events
+    ]
+
+
 @router.get("/tools")
 async def list_tools() -> dict:
     if _tool_registry is None:
@@ -242,14 +284,16 @@ def build_app(
     routing_table=None,
     tool_registry=None,
     indicator_registry=None,
+    monitoring_bus=None,
 ) -> FastAPI:
     """Build the FastAPI application and wire runtime dependencies."""
-    global _bus, _routing_table, _tool_registry, _indicator_registry, _start_time
+    global _bus, _routing_table, _tool_registry, _indicator_registry, _monitoring_bus, _start_time
 
     _bus = bus
     _routing_table = routing_table
     _tool_registry = tool_registry
     _indicator_registry = indicator_registry
+    _monitoring_bus = monitoring_bus
     _start_time = time.monotonic()
 
     app = FastAPI(

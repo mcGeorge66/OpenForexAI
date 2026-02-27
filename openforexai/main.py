@@ -4,33 +4,45 @@ import asyncio
 from pathlib import Path
 
 from openforexai.bootstrap import bootstrap
-from openforexai.config.loader import load_yaml_config, merge_configs
-from openforexai.config.settings import Settings
+from openforexai.config.json_loader import load_json_config
+from openforexai.management.server import ManagementServer
+from openforexai.monitoring.bus import MonitoringBus
+from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.utils.logging import configure_logging
+
+_CONFIG_PATH = Path(__file__).parent.parent / "config" / "system.json"
 
 
 async def main() -> None:
-    # ── Config loading ────────────────────────────────────────────────────────
-    base_config = load_yaml_config(Path(__file__).parent.parent / "config" / "default.yaml")
-    settings = Settings(**base_config)
-
-    configure_logging(settings.log_level)
+    # ── Load config ───────────────────────────────────────────────────────────
+    cfg = load_json_config(_CONFIG_PATH)
+    sys_cfg = cfg.get("system", {})
+    configure_logging(sys_cfg.get("log_level", "INFO"))
 
     from openforexai.utils.logging import get_logger
     logger = get_logger("main")
-    logger.info(
-        "Starting OpenForexAI",
-        pairs=settings.pairs,
-        broker=settings.broker.name,
-        llm=settings.llm.provider,
-    )
+    logger.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
 
     # ── Bootstrap ─────────────────────────────────────────────────────────────
-    agents, bus = await bootstrap(settings)
+    agents, config_service, bus = await bootstrap(cfg)
 
-    # ── Run all agents + event bus concurrently ───────────────────────────────
+    # ── Monitoring bus + Management API ───────────────────────────────────────
+    monitoring_bus = MonitoringBus()
+    api_cfg = sys_cfg.get("management_api", {})
+    mgmt_server = ManagementServer(
+        bus=bus,
+        routing_table=bus._routing,
+        tool_registry=DEFAULT_REGISTRY,
+        monitoring_bus=monitoring_bus,
+        host=api_cfg.get("host", "127.0.0.1"),
+        port=api_cfg.get("port", 8765),
+    )
+
+    # ── Run everything concurrently ───────────────────────────────────────────
     async with asyncio.TaskGroup() as tg:
         tg.create_task(bus.start_dispatch_loop(), name="event-bus")
+        tg.create_task(config_service.run(), name="config-service")
+        tg.create_task(mgmt_server.serve(), name="mgmt-api")
         for agent in agents:
             tg.create_task(agent.start(), name=agent.agent_id)
 

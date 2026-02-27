@@ -197,7 +197,25 @@ class EventBus:
                         event_val, sender_id, r,
                     )
 
-        # ── 2. Routing-table resolution for queue-based delivery ───────────────
+        # ── 2. Direct targeting — bypasses routing table ───────────────────────
+        if message.target_agent_id is not None:
+            queue = self._agent_queues.get(message.target_agent_id)
+            if queue is not None:
+                try:
+                    queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    _log.warning(
+                        "Agent queue full for %s — dropping direct event %s from %s",
+                        message.target_agent_id, event_val, sender_id,
+                    )
+            else:
+                _log.debug(
+                    "Direct target %r not registered — dropping event %s",
+                    message.target_agent_id, event_val,
+                )
+            return  # skip routing table for direct messages
+
+        # ── 3. Routing-table resolution for queue-based delivery ───────────────
         target_ids, _has_handler_rule, matched = self._routing.resolve(
             event_val, sender_id, self._agent_queues  # type: ignore[arg-type]
         )

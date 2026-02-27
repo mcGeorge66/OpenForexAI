@@ -42,6 +42,10 @@ class EventType(str, Enum):
     OPTIMIZATION_COMPLETE = "optimization_complete"
     PROMPT_UPDATED = "prompt_updated"
 
+    # ── Agent config bootstrap ────────────────────────────────────────────────
+    AGENT_CONFIG_REQUESTED = "agent_config_requested"   # agent → ConfigService
+    AGENT_CONFIG_RESPONSE  = "agent_config_response"    # ConfigService → agent
+
     # ── System / management ───────────────────────────────────────────────────
     ROUTING_RELOAD_REQUESTED = "routing_reload_requested"
 
