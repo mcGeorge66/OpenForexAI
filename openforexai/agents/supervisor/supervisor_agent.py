@@ -92,7 +92,7 @@ class SupervisorAgent(BaseAgent):
         try:
             positions = await self.broker.get_open_positions()
             account_status = await self.broker.get_account_status()
-            balance = account_status.balance
+            balance = float(account_status.balance)
 
             assessment = self.risk_engine.assess(
                 signal=signal,

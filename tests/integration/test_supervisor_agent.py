@@ -84,6 +84,7 @@ async def test_supervisor_approves_valid_signal():
     supervisor.bus.subscribe(EventType.SIGNAL_APPROVED, on_approved)
 
     await supervisor._on_signal_generated(_signal_message())
+    await supervisor.bus.flush()
 
     assert len(approved) == 1
     assert approved[0].payload["pair"] == "EURUSD"
@@ -121,6 +122,7 @@ async def test_supervisor_rejects_at_position_limit():
     supervisor.bus.subscribe(EventType.SIGNAL_REJECTED, on_rejected)
 
     await supervisor._on_signal_generated(_signal_message())
+    await supervisor.bus.flush()
     assert len(rejected) == 1
 
 
@@ -137,4 +139,5 @@ async def test_supervisor_handle_message_routes_signal():
     supervisor.bus.subscribe(EventType.SIGNAL_APPROVED, on_approved)
 
     await supervisor._handle_message(_signal_message())
+    await supervisor.bus.flush()
     assert len(approved) == 1
