@@ -59,6 +59,9 @@ class MonitoringEventType(str, Enum):
     LLM_RESPONSE = "llm_response"
     LLM_ERROR = "llm_error"
 
+    # ── Data container ────────────────────────────────────────────────────────
+    DATA_CONTAINER_ACCESS = "data_container_access"  # get_candles / get_snapshot
+
     # ── Inter-agent bus ───────────────────────────────────────────────────────
     EVENT_BUS_MESSAGE = "event_bus_message"
 

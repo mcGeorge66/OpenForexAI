@@ -11,11 +11,22 @@ class PluginRegistry:
     Adapters self-register at import time via their package ``__init__.py``::
 
         PluginRegistry.register_broker("oanda", OANDABroker)
+
+    Data storage
+    ------------
+    Use ``register_data_container`` / ``get_data_container`` for the unified
+    persistent data store (``AbstractDataContainer``).  The old
+    ``register_repository`` / ``get_repository`` methods remain for backward
+    compatibility and delegate to the same internal dict.
     """
 
     _brokers: dict[str, type[AbstractBroker]] = {}
     _llm_providers: dict[str, type[AbstractLLMProvider]] = {}
     _repositories: dict[str, type[AbstractRepository]] = {}
+    # _data_containers shares the same dict as _repositories so that
+    # register_data_container() and register_repository() are interchangeable.
+    # AbstractDataContainer IS-A AbstractRepository, so both registries are compatible.
+    _data_containers = _repositories  # alias
 
     # ── Brokers ──────────────────────────────────────────────────────────────
 
@@ -53,7 +64,7 @@ class PluginRegistry:
     def list_llm_providers(cls) -> list[str]:
         return list(cls._llm_providers)
 
-    # ── Repositories ─────────────────────────────────────────────────────────
+    # ── Repositories (backward compat) ───────────────────────────────────────
 
     @classmethod
     def register_repository(cls, name: str, klass: type[AbstractRepository]) -> None:
@@ -69,4 +80,27 @@ class PluginRegistry:
 
     @classmethod
     def list_repositories(cls) -> list[str]:
+        return list(cls._repositories)
+
+    # ── DataContainers (preferred API) ────────────────────────────────────────
+
+    @classmethod
+    def register_data_container(cls, name: str, klass) -> None:
+        """Register a concrete AbstractDataContainer implementation."""
+        cls._repositories[name] = klass  # shared dict — also accessible via get_repository
+
+    @classmethod
+    def get_data_container(cls, name: str):
+        """Return the AbstractDataContainer class for *name*.
+
+        Falls back to the repository dict so both registries are interchangeable.
+        """
+        if name not in cls._repositories:
+            raise ValueError(
+                f"Unknown data container backend '{name}'. Registered: {list(cls._repositories)}"
+            )
+        return cls._repositories[name]
+
+    @classmethod
+    def list_data_containers(cls) -> list[str]:
         return list(cls._repositories)

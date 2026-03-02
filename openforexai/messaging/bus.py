@@ -183,6 +183,17 @@ class EventBus:
         event_val = message.event_type.value if hasattr(message.event_type, "value") else str(message.event_type)
         sender_id = message.source_agent_id
 
+        # ── 0. Emit every bus message to monitoring ────────────────────────────
+        self._emit_monitoring(
+            "eventbus",
+            "EVENT_BUS_MESSAGE",
+            event=event_val,
+            sender=sender_id,
+            target=message.target_agent_id,
+            correlation_id=str(message.correlation_id) if message.correlation_id else None,
+            payload_keys=list(message.payload.keys()) if message.payload else [],
+        )
+
         # ── 1. Legacy handlers (always evaluated, bypass routing rules) ────────
         handler_list = list(self._handlers.get(message.event_type, []))
         if handler_list:

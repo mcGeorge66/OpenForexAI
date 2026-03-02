@@ -103,20 +103,31 @@ class Agent:
             return
 
         # Phase 3: initialise from config
-        self._apply_config(config_payload)
+        try:
+            self._apply_config(config_payload)
+        except Exception as exc:
+            self._logger.exception("Agent init failed — _apply_config raised", error=str(exc))
+            self._emit_system_error(f"Init failed: {type(exc).__name__}: {exc}")
+            return
         self._logger.info("Config received — agent initialised")
 
         # Phase 4: run
         self._running = True
         timer_cfg = self._config.get("timer", {})
 
-        async with asyncio.TaskGroup() as tg:
-            if timer_cfg.get("enabled"):
-                tg.create_task(
-                    self._run_timer_loop(timer_cfg.get("interval_seconds", 300)),
-                    name=f"{self.agent_id}:timer",
-                )
-            tg.create_task(self._run_message_loop(), name=f"{self.agent_id}:messages")
+        try:
+            async with asyncio.TaskGroup() as tg:
+                if timer_cfg.get("enabled"):
+                    tg.create_task(
+                        self._run_timer_loop(timer_cfg.get("interval_seconds", 300)),
+                        name=f"{self.agent_id}:timer",
+                    )
+                tg.create_task(self._run_message_loop(), name=f"{self.agent_id}:messages")
+        except* Exception as eg:
+            for exc in eg.exceptions:
+                self._logger.exception("Agent run-loop crashed", error=str(exc))
+                self._emit_system_error(f"Run-loop crash: {type(exc).__name__}: {exc}")
+            # Do NOT re-raise — one crashing agent must not bring down the whole system
 
     async def stop(self) -> None:
         self._running = False
@@ -208,6 +219,7 @@ class Agent:
                 raise
             except Exception as exc:
                 self._logger.exception("Timer cycle error", error=str(exc))
+                self._emit_system_error(f"Timer cycle: {type(exc).__name__}: {exc}")
 
     async def _run_message_loop(self) -> None:
         """Deliver EventBus messages; invoke run_cycle for trigger events."""
@@ -219,26 +231,27 @@ class Agent:
             except asyncio.CancelledError:
                 raise
 
-            event_val = (
-                msg.event_type.value
-                if hasattr(msg.event_type, "value")
-                else str(msg.event_type)
-            )
+            try:
+                event_val = (
+                    msg.event_type.value
+                    if hasattr(msg.event_type, "value")
+                    else str(msg.event_type)
+                )
 
-            if event_val in self._event_triggers:
-                try:
+                if event_val in self._event_triggers:
                     await self._run_cycle(
                         trigger=event_val,
                         payload=msg.payload,
                         source=msg.source_agent_id,
                         correlation_id=msg.correlation_id,
                     )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    self._logger.exception(
-                        "Message cycle error", event=event_val, error=str(exc)
-                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._logger.exception(
+                    "Message loop error", error=str(exc)
+                )
+                self._emit_system_error(f"Message loop: {type(exc).__name__}: {exc}")
 
     # ── Core cycle ────────────────────────────────────────────────────────────
 
@@ -288,6 +301,7 @@ class Agent:
                 else []
             )
 
+            self._emit_llm_request(messages, tool_specs, turn)
             response: LLMResponseWithTools = await self._llm.complete_with_tools(
                 system_prompt=self._system_prompt,
                 messages=messages,
@@ -364,7 +378,58 @@ class Agent:
             ],
         }
 
+    def _emit_system_error(self, message: str) -> None:
+        """Emit a SYSTEM_ERROR to the MonitoringBus.  Never raises."""
+        if self._monitoring_bus is None:
+            return
+        try:
+            from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+            self._monitoring_bus.emit(MonitoringEvent(
+                timestamp=datetime.now(timezone.utc),
+                source_module=f"agent:{self.agent_id}",
+                event_type=MonitoringEventType.SYSTEM_ERROR,
+                payload={"agent_id": self.agent_id, "message": message},
+            ))
+        except Exception:
+            pass  # monitoring must never mask a real problem
+
+    def _emit_llm_request(self, messages: list, tool_specs: list, turn: int) -> None:
+        """Emit LLM_REQUEST with COMPLETE prompt context before each API call.
+
+        No truncation is applied — the full system prompt, complete message history,
+        and full tool definitions are stored for audit/evidence purposes.
+        """
+        if self._monitoring_bus is None:
+            return
+        try:
+            from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+            ctx = self._tool_dispatcher._context if self._tool_dispatcher else None
+
+            self._monitoring_bus.emit(MonitoringEvent(
+                timestamp=datetime.now(timezone.utc),
+                source_module=f"agent:{self.agent_id}",
+                event_type=MonitoringEventType.LLM_REQUEST,
+                broker_name=ctx.broker_name if ctx else None,
+                pair=ctx.pair if ctx else None,
+                payload={
+                    "turn": turn,
+                    "system_prompt": self._system_prompt,   # complete — no truncation
+                    "messages": messages,                    # complete history — no truncation
+                    "message_count": len(messages),
+                    "tool_count": len(tool_specs),
+                    "tool_names": [t.get("name", "") for t in tool_specs],
+                    "tool_specs": tool_specs,                # complete definitions — no truncation
+                },
+            ))
+        except Exception:
+            pass
+
     def _emit_llm_monitoring(self, response, turn: int) -> None:
+        """Emit LLM_RESPONSE with COMPLETE response data.
+
+        No truncation is applied — the full response content and all tool call
+        inputs are stored for audit/evidence purposes.
+        """
         if self._tool_dispatcher is None:
             return
         ctx = self._tool_dispatcher._context
@@ -372,6 +437,15 @@ class Agent:
             return
         try:
             from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+            content = response.content or ""   # complete — no truncation
+            tool_call_details = [
+                {
+                    "id":        tc.id,
+                    "name":      tc.name,
+                    "arguments": tc.arguments,  # complete inputs — no truncation
+                }
+                for tc in response.tool_calls
+            ]
             ctx.monitoring_bus.emit(MonitoringEvent(
                 timestamp=datetime.now(timezone.utc),
                 source_module=f"agent:{self.agent_id}",
@@ -384,7 +458,10 @@ class Agent:
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "tool_calls": len(response.tool_calls),
+                    "tool_names": [tc.name for tc in response.tool_calls],
+                    "tool_call_details": tool_call_details,  # complete — no truncation
                     "model": response.model,
+                    "content": content,                      # complete — no truncation
                 },
             ))
         except Exception:

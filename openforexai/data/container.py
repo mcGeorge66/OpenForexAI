@@ -1,27 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from datetime import datetime, timezone
 
 from openforexai.data.resampler import resample_candles
 from openforexai.models.market import Candle, MarketSnapshot, Tick
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEventType
 from openforexai.ports.broker import AbstractBroker
-from openforexai.ports.database import AbstractRepository
+from openforexai.ports.data_container import AbstractDataContainer
 from openforexai.utils.logging import get_logger
 from openforexai.utils.time_utils import detect_session, utcnow
 
 _log = get_logger(__name__)
 
-# How many M5 candles to keep in the rolling in-memory window (~4 weeks)
-_M5_ROLLING = 4 * 7 * 24 * 12   # 8 064
+# How many M5 candles to back-fill from the broker when DB is empty (~4 weeks)
+_M5_BACKFILL = 4 * 7 * 24 * 12   # 8 064
 
-# How many candles to inspect when checking for gaps
+# How many candles to inspect when checking/repairing gaps
 _GAP_CHECK_COUNT = 200
 
-# Snapshot window sizes per derived timeframe
+# Max candles returned per timeframe by get_snapshot() and default for get_candles()
 _SNAPSHOT_LIMITS: dict[str, int] = {
     "M5":  300,
     "M15": 150,
@@ -31,12 +30,21 @@ _SNAPSHOT_LIMITS: dict[str, int] = {
     "D1":   60,
 }
 
-# All timeframes derived from M5
+# Number of M5 bars that make up one bar of each derived timeframe
+_TF_M5_MULTIPLIER: dict[str, int] = {
+    "M15":   3,
+    "M30":   6,
+    "H1":   12,
+    "H4":   48,
+    "D1":  288,
+}
+
+# All timeframes that are derived on-demand from M5
 _DERIVED_TIMEFRAMES = ("M15", "M30", "H1", "H4", "D1")
 
 
 class DataContainer:
-    """Multi-broker, event-driven rolling data store.
+    """Multi-broker, event-driven, fully-persistent data store.
 
     Architecture
     ------------
@@ -44,135 +52,159 @@ class DataContainer:
     * Each broker registers its pairs via ``register_broker()``.
     * Data is keyed by ``(broker_name, pair)`` throughout.
     * M5 candles arrive via ``EventType.M5_CANDLE_AVAILABLE`` on the EventBus.
-      The container writes them to the repository and updates the in-memory store.
-    * Higher timeframes (M15, M30, H1, H4, D1) are derived on-demand from
-      the M5 store via the resampler — no separate API calls needed.
+      Each candle is written **directly** to the ``AbstractDataContainer`` (DB)
+      — there is no in-memory rolling window.  A power outage cannot cause data
+      loss.
+    * Higher timeframes (M15, M30, H1, H4, D1) are derived on-demand by
+      reading M5 data from the DB and passing it through the resampler — no
+      separate broker API calls are needed.
     * Gap detection triggers a repair workflow that back-fills missing M5 bars
-      from the broker and then recalculates affected higher timeframes.
+      from the broker and persists them to the DB.
+    * A tiny per-pair ``_last_ts`` dict caches only the last known timestamp
+      (not candle data) to allow cheap duplicate detection on incoming M5 bars.
 
-    Table naming in the repository (handled by the repository adapter)::
+    Table naming in the store (handled by the adapter)::
 
-        {broker_name}_{pair}_{timeframe}  →  OANDA_DEMO_EURUSD_M5
+        {broker_name}_{pair}_{timeframe}  →  OAPR1_EURUSD_M5
 
     Usage
     -----
     ::
 
-        container = DataContainer(repository, event_bus, monitoring_bus)
+        container = DataContainer(store=data_container, event_bus=bus, monitoring_bus=mon)
         container.register_broker(oanda_broker, ["EURUSD", "USDJPY"])
-        container.register_broker(mt5_broker,   ["EURUSD", "GBPUSD"])
         container.subscribe_to_bus()   # wires EventBus subscriptions
-        await container.initialize()   # loads history from DB / broker
+        await container.initialize()   # back-fills from broker if DB is empty
     """
 
     def __init__(
         self,
-        repository: AbstractRepository,
-        event_bus,                    # EventBus — avoid circular import
+        store: AbstractDataContainer | None = None,
+        event_bus=None,
         monitoring_bus=None,
+        *,
+        # Backward-compat: old code passed repository=... as a keyword arg
+        repository: AbstractDataContainer | None = None,
     ) -> None:
-        self._repository = repository
+        effective_store = store if store is not None else repository
+        if effective_store is None:
+            raise ValueError(
+                "DataContainer requires a store (AbstractDataContainer). "
+                "Pass it as the first positional argument or as store=... / repository=..."
+            )
+        self._store = effective_store
+        # Backward-compat alias: code that accesses self._repository still works
+        self._repository = effective_store
         self._event_bus = event_bus
         self._monitoring = monitoring_bus
 
-        # (broker_name, pair) → list[Candle M5]  (oldest first, rolling window)
-        self._m5_store: dict[tuple[str, str], list[Candle]] = {}
-        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Tracks which (broker_name, pair) tuples have been registered
+        self._registered: set[tuple[str, str]] = set()
 
-        # broker short_name → AbstractBroker  (for repair requests)
+        # Per-pair asyncio locks guard concurrent DB writes
+        self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+        # Lightweight dedup cache: only the last persisted timestamp per pair.
+        # No candle data is cached — all reads go directly to the DB.
+        self._last_ts: dict[tuple[str, str], datetime | None] = {}
+
+        # broker short_name → AbstractBroker instance (for repair / back-fill)
         self._brokers: dict[str, AbstractBroker] = {}
 
     # ── Registration ──────────────────────────────────────────────────────────
 
     def register_broker(self, broker: AbstractBroker, pairs: list[str]) -> None:
-        """Register a broker and its pairs.  Must be called before initialize()."""
+        """Register a broker and its tracked pairs.  Call before ``initialize()``."""
         self._brokers[broker.short_name] = broker
         for pair in pairs:
             key = (broker.short_name, pair)
-            if key not in self._m5_store:
-                self._m5_store[key] = []
-                self._locks[key] = asyncio.Lock()
+            if key not in self._registered:
+                self._registered.add(key)
+                self._write_locks[key] = asyncio.Lock()
+                self._last_ts[key] = None
 
     def subscribe_to_bus(self) -> None:
-        """Wire this container to the EventBus.  Call once after register_broker()."""
-        self._event_bus.subscribe(EventType.M5_CANDLE_AVAILABLE, self._on_m5_candle)
-        self._event_bus.subscribe(EventType.CANDLE_GAP_DETECTED, self._on_gap_detected)
+        """Wire EventBus subscriptions.  Call once after ``register_broker()``."""
+        self._event_bus.subscribe(EventType.M5_CANDLE_AVAILABLE,    self._on_m5_candle)
+        self._event_bus.subscribe(EventType.CANDLE_GAP_DETECTED,    self._on_gap_detected)
         self._event_bus.subscribe(EventType.CANDLE_REPAIR_REQUESTED, self._on_repair_requested)
 
     # ── Initialisation ────────────────────────────────────────────────────────
 
     async def initialize(self) -> None:
-        """Load M5 history for all registered (broker, pair) combinations.
+        """Ensure the DB has M5 history for every registered (broker, pair).
 
-        Load order: repository first (fast, persistent), then fill any gap
-        from the broker if the repository is empty or stale.
+        If the DB is empty for a pair, the last ``_M5_BACKFILL`` M5 candles are
+        fetched from the broker and persisted.  If the DB already has data, no
+        broker call is made.
         """
         tasks = [
             self._init_pair(broker_name, pair)
-            for (broker_name, pair) in self._m5_store
+            for (broker_name, pair) in self._registered
         ]
         await asyncio.gather(*tasks)
 
     async def _init_pair(self, broker_name: str, pair: str) -> None:
         key = (broker_name, pair)
-        async with self._locks[key]:
-            # Try to load from repository first
-            stored = await self._repository.get_candles(
-                broker_name, pair, "M5", limit=_M5_ROLLING
-            )
-            if stored:
-                # Repository returns newest-first; reverse to oldest-first
-                self._m5_store[key] = list(reversed(stored))
-                _log.info(
-                    "Loaded M5 from repository",
-                    broker=broker_name, pair=pair, count=len(stored),
-                )
-                return
 
-            # Repository empty — fetch from broker
-            broker = self._brokers.get(broker_name)
-            if broker is None:
-                _log.warning("No broker registered for %s", broker_name)
-                return
-
-            candles = await broker.get_historical_m5_candles(pair, _M5_ROLLING)
-            self._m5_store[key] = candles
-            if candles:
-                await self._repository.save_candles_bulk(broker_name, pair, candles)
+        # Probe DB: get the most recent candle (returns newest-first, limit 1)
+        recent = await self._store.get_candles(broker_name, pair, "M5", limit=1)
+        if recent:
+            # DB already has data — record last known timestamp for dedup
+            self._last_ts[key] = recent[0].timestamp
             _log.info(
-                "Loaded M5 from broker",
-                broker=broker_name, pair=pair, count=len(candles),
+                "DB has M5 data — skipping back-fill",
+                broker=broker_name, pair=pair,
+                latest=recent[0].timestamp.isoformat(),
             )
+            return
+
+        # DB empty — back-fill from broker
+        broker = self._brokers.get(broker_name)
+        if broker is None:
+            _log.warning(
+                "No broker registered for %s — cannot back-fill %s", broker_name, pair
+            )
+            return
+
+        candles = await broker.get_historical_m5_candles(pair, _M5_BACKFILL)
+        if candles:
+            await self._store.save_candles_bulk(broker_name, pair, candles)
+            # Broker returns oldest-first; last element is the most recent
+            self._last_ts[key] = candles[-1].timestamp
+        _log.info(
+            "Back-filled M5 from broker",
+            broker=broker_name, pair=pair, count=len(candles),
+        )
 
     # ── EventBus handlers ─────────────────────────────────────────────────────
 
     async def _on_m5_candle(self, message: AgentMessage) -> None:
-        """Handle a new M5 candle arriving from a broker adapter."""
+        """Persist a new M5 candle arriving from a broker adapter."""
         payload = message.payload
         broker_name = payload.get("broker_name", "")
         pair = payload.get("pair", "")
         candle_data = payload.get("candle", {})
 
         key = (broker_name, pair)
-        if key not in self._m5_store:
+        if key not in self._registered:
             _log.debug("Ignoring candle for unregistered key %s/%s", broker_name, pair)
             return
 
         candle = Candle(**candle_data)
 
-        async with self._locks[key]:
-            store = self._m5_store[key]
-            # Dedup: only append if this timestamp is newer than the last stored
-            if store and candle.timestamp <= store[-1].timestamp:
-                return
+        lock = self._write_locks.get(key)
+        if lock is None:
+            return
 
-            store.append(candle)
-            # Trim to rolling window
-            if len(store) > _M5_ROLLING:
-                self._m5_store[key] = store[-_M5_ROLLING:]
+        async with lock:
+            # Cheap dedup using the cached last timestamp — no extra DB call
+            last_ts = self._last_ts.get(key)
+            if last_ts is not None and candle.timestamp <= last_ts:
+                return  # already stored or stale
 
-        # Persist asynchronously (outside the lock to avoid blocking)
-        await self._repository.save_candle(broker_name, pair, candle)
+            await self._store.save_candle(broker_name, pair, candle)
+            self._last_ts[key] = candle.timestamp
 
         self._emit(
             "data_container",
@@ -184,11 +216,7 @@ class DataContainer:
         )
 
     async def _on_gap_detected(self, message: AgentMessage) -> None:
-        """Handle a gap-detected notification from a broker adapter.
-
-        Publishes CANDLE_REPAIR_REQUESTED on the bus so the same handler
-        path (``_on_repair_requested``) runs the repair.
-        """
+        """Forward a gap-detected notification as a repair request on the bus."""
         payload = message.payload
         await self._event_bus.publish(AgentMessage(
             event_type=EventType.CANDLE_REPAIR_REQUESTED,
@@ -200,7 +228,7 @@ class DataContainer:
         ))
 
     async def _on_repair_requested(self, message: AgentMessage) -> None:
-        """Back-fill missing M5 candles and recalculate higher timeframes."""
+        """Back-fill missing M5 candles and persist them to the DB."""
         payload = message.payload
         broker_name = payload.get("broker_name", "")
         pair = payload.get("pair", "")
@@ -209,8 +237,7 @@ class DataContainer:
     # ── Gap repair ────────────────────────────────────────────────────────────
 
     async def _repair(self, broker_name: str, pair: str) -> None:
-        """Fetch the last _GAP_CHECK_COUNT M5 candles, fill any gaps, persist."""
-        key = (broker_name, pair)
+        """Fetch the last ``_GAP_CHECK_COUNT`` M5 candles, fill any gaps, persist."""
         broker = self._brokers.get(broker_name)
         if broker is None:
             _log.warning("Cannot repair %s/%s: broker not registered", broker_name, pair)
@@ -226,23 +253,29 @@ class DataContainer:
             if not fresh:
                 return
 
-            async with self._locks[key]:
-                store = self._m5_store[key]
-                existing_ts = {c.timestamp for c in store}
+            key = (broker_name, pair)
+            lock = self._write_locks.get(key)
+            new_candles: list[Candle] = []
+
+            async with lock:
+                # Load existing timestamps from DB (newest-first, same window)
+                existing = await self._store.get_candles(
+                    broker_name, pair, "M5", limit=_GAP_CHECK_COUNT
+                )
+                existing_ts = {c.timestamp for c in existing}
                 new_candles = [c for c in fresh if c.timestamp not in existing_ts]
 
                 if new_candles:
-                    store.extend(new_candles)
-                    store.sort(key=lambda c: c.timestamp)
-                    # Trim
-                    if len(store) > _M5_ROLLING:
-                        self._m5_store[key] = store[-_M5_ROLLING:]
-                    await self._repository.save_candles_bulk(broker_name, pair, new_candles)
+                    await self._store.save_candles_bulk(broker_name, pair, new_candles)
+                    # Update dedup cache with the newest repaired candle
+                    max_ts = max(c.timestamp for c in new_candles)
+                    current_last = self._last_ts.get(key)
+                    if current_last is None or max_ts > current_last:
+                        self._last_ts[key] = max_ts
 
             self._emit(
                 "data_container", MonitoringEventType.CANDLE_REPAIR_COMPLETED,
-                broker_name=broker_name, pair=pair,
-                filled=len(new_candles),
+                broker_name=broker_name, pair=pair, filled=len(new_candles),
             )
             _log.info(
                 "Candle repair complete",
@@ -258,40 +291,89 @@ class DataContainer:
 
     # ── Data access API ───────────────────────────────────────────────────────
 
-    def get_candles(
+    async def get_candles(
         self,
         broker_name: str,
         pair: str,
         timeframe: str,
+        limit: int | None = None,
     ) -> list[Candle]:
-        """Return candles for *broker_name/pair* at *timeframe*.
+        """Return candles for *broker_name/pair* at *timeframe*, **oldest first**.
 
-        M5 is returned directly from the rolling store.
-        All other timeframes are derived on-demand via the resampler.
+        All data is read directly from the DB (no in-memory cache).
+        M5 candles are returned as-is (after reversing the DB's newest-first
+        order).  Derived timeframes (M15 … D1) are computed on-demand from M5
+        by the resampler.
+
+        Parameters
+        ----------
+        limit:
+            Maximum number of *timeframe* candles to return.  Defaults to
+            ``_SNAPSHOT_LIMITS[timeframe]`` (300 for M5, 150 for M15, etc.).
         """
-        key = (broker_name, pair)
-        m5 = list(self._m5_store.get(key, []))
+        effective_limit = limit if limit is not None else _SNAPSHOT_LIMITS.get(timeframe, 300)
+
         if timeframe == "M5":
-            return m5
-        if timeframe in _DERIVED_TIMEFRAMES:
-            return resample_candles(m5, timeframe)
-        return []
+            # DB returns newest-first — reverse for oldest-first convention
+            raw = await self._store.get_candles(
+                broker_name, pair, "M5", limit=effective_limit
+            )
+            result = list(reversed(raw))
+
+        elif timeframe in _DERIVED_TIMEFRAMES:
+            # Fetch enough M5 bars to produce the requested number of TF bars.
+            # Add one extra multiplier as a safety buffer for boundary alignment.
+            multiplier = _TF_M5_MULTIPLIER[timeframe]
+            m5_limit = effective_limit * multiplier + multiplier
+            raw_m5 = await self._store.get_candles(
+                broker_name, pair, "M5", limit=m5_limit
+            )
+            m5 = list(reversed(raw_m5))   # oldest first for resampler
+            result = resample_candles(m5, timeframe)[-effective_limit:]
+
+        else:
+            _log.warning("Unknown timeframe %r requested for %s/%s", timeframe, broker_name, pair)
+            result = []
+
+        first_ts = result[0].timestamp.isoformat() if result else None
+        last_ts  = result[-1].timestamp.isoformat() if result else None
+        self._emit(
+            "data_container",
+            MonitoringEventType.DATA_CONTAINER_ACCESS,
+            broker_name=broker_name,
+            pair=pair,
+            method="get_candles",
+            timeframe=timeframe,
+            candle_count=len(result),
+            first_ts=first_ts,
+            last_ts=last_ts,
+        )
+        return result
 
     async def get_snapshot(self, broker_name: str, pair: str) -> MarketSnapshot:
-        """Assemble a complete MarketSnapshot for *broker_name/pair*.
+        """Assemble a complete ``MarketSnapshot`` for *broker_name/pair*.
 
-        The ``current_tick`` is derived from the last M5 candle close price
-        and spread — no live tick data required.
+        All data is read directly from the DB — no in-memory cache is used.
+        The ``current_tick`` is derived from the last M5 candle close price and
+        spread — no separate live-tick API call is needed.
         """
         key = (broker_name, pair)
-        if key not in self._locks:
+        if key not in self._registered:
             raise ValueError(
                 f"Pair {pair!r} is not tracked for broker {broker_name!r}. "
                 "Call register_broker() first."
             )
 
-        async with self._locks[key]:
-            m5 = list(self._m5_store.get(key, []))
+        # Fetch enough M5 bars to derive D1 (the most expensive TF):
+        #   60 D1 bars × 288 M5/D1 = 17 280 M5 bars.
+        max_m5_needed = (
+            _SNAPSHOT_LIMITS["D1"] * _TF_M5_MULTIPLIER["D1"]
+            + _TF_M5_MULTIPLIER["D1"]   # one extra for boundary alignment
+        )
+        raw_m5 = await self._store.get_candles(
+            broker_name, pair, "M5", limit=max_m5_needed
+        )
+        m5 = list(reversed(raw_m5))   # oldest first for resampler
 
         if not m5:
             raise ValueError(
@@ -301,8 +383,7 @@ class DataContainer:
 
         last = m5[-1]
 
-        # Derive current_tick from last M5 close bid + spread
-        # spread is stored as raw price difference (ask - bid)
+        # Build current_tick from the last M5 close + spread
         tick = Tick(
             pair=pair,
             bid=last.close,
@@ -310,26 +391,44 @@ class DataContainer:
             timestamp=last.timestamp,
         )
 
-        # Derive higher timeframes (outside the lock — pure computation)
+        # Derive all higher timeframes from the fetched M5 data
         m15 = resample_candles(m5, "M15") if m5 else []
         m30 = resample_candles(m5, "M30") if m5 else []
         h1  = resample_candles(m5, "H1")  if m5 else []
         h4  = resample_candles(m5, "H4")  if m5 else []
         d1  = resample_candles(m5, "D1")  if m5 else []
 
-        return MarketSnapshot(
+        snapshot = MarketSnapshot(
             pair=pair,
             broker_name=broker_name,
             current_tick=tick,
-            candles_m5=m5[-_SNAPSHOT_LIMITS["M5"]:],
+            candles_m5= m5[ -_SNAPSHOT_LIMITS["M5"]: ],
             candles_m15=m15[-_SNAPSHOT_LIMITS["M15"]:],
             candles_m30=m30[-_SNAPSHOT_LIMITS["M30"]:],
-            candles_h1=h1[-_SNAPSHOT_LIMITS["H1"]:],
-            candles_h4=h4[-_SNAPSHOT_LIMITS["H4"]:],
-            candles_d1=d1[-_SNAPSHOT_LIMITS["D1"]:],
+            candles_h1= h1[ -_SNAPSHOT_LIMITS["H1"]: ],
+            candles_h4= h4[ -_SNAPSHOT_LIMITS["H4"]: ],
+            candles_d1= d1[ -_SNAPSHOT_LIMITS["D1"]: ],
             session=detect_session(),
             snapshot_time=utcnow(),
         )
+
+        self._emit(
+            "data_container",
+            MonitoringEventType.DATA_CONTAINER_ACCESS,
+            broker_name=broker_name,
+            pair=pair,
+            method="get_snapshot",
+            bid=str(tick.bid),
+            ask=str(tick.ask),
+            m5_count=len(snapshot.candles_m5),
+            m15_count=len(snapshot.candles_m15),
+            m30_count=len(snapshot.candles_m30),
+            h1_count=len(snapshot.candles_h1),
+            h4_count=len(snapshot.candles_h4),
+            d1_count=len(snapshot.candles_d1),
+            session=str(snapshot.session),
+        )
+        return snapshot
 
     # ── Monitoring helper ─────────────────────────────────────────────────────
 

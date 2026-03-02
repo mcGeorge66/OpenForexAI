@@ -175,11 +175,23 @@ class ToolDispatcher:
                 )
 
         # Execute
-        self._emit_monitoring("TOOL_CALL_STARTED", tool_name=tc.name, agent=self._context.agent_id)
+        self._emit_monitoring(
+            "TOOL_CALL_STARTED",
+            tool_name=tc.name,
+            agent=self._context.agent_id,
+            arguments=tc.arguments,
+        )
         try:
             raw_result = await tool.execute(tc.arguments, self._context)
             content = json.dumps(raw_result, default=str)
-            self._emit_monitoring("TOOL_CALL_COMPLETED", tool_name=tc.name, agent=self._context.agent_id)
+            # No truncation — complete result stored for audit/evidence purposes
+            self._emit_monitoring(
+                "TOOL_CALL_COMPLETED",
+                tool_name=tc.name,
+                agent=self._context.agent_id,
+                result=content,               # complete — no truncation
+                result_length=len(content),   # metric: how large the result is
+            )
             return ToolResult(
                 tool_call_id=tc.id,
                 name=tc.name,

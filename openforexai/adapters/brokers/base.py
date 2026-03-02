@@ -169,7 +169,11 @@ class BrokerBase(AbstractBroker):
                         source, MonitoringEventType.M5_CANDLE_FETCHED,
                         broker_name=self.short_name, pair=pair,
                         timestamp=candle.timestamp.isoformat(),
-                        close=str(candle.close), spread=str(candle.spread),
+                        open=str(candle.open),
+                        high=str(candle.high),
+                        low=str(candle.low),
+                        close=str(candle.close),
+                        spread=str(candle.spread),
                         tick_volume=candle.tick_volume,
                     )
 
