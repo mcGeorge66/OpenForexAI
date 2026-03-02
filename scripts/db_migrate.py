@@ -2,7 +2,7 @@
 """CLI: run database migrations.
 
 Usage:
-    python scripts/db_migrate.py [--config config/default.yaml]
+    python scripts/db_migrate.py [--config config/system.json]
 """
 
 from __future__ import annotations
@@ -14,26 +14,37 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run DB migrations.")
-    parser.add_argument("--config", default="config/default.yaml")
+    parser.add_argument("--config", default="config/system.json")
     return parser.parse_args()
 
 
 async def main(args: argparse.Namespace) -> None:
-    from openforexai.config.loader import load_yaml_config
-    from openforexai.config.settings import Settings
-    from openforexai.adapters.database.sqlite import SQLiteRepository
+    import aiosqlite
+    from openforexai.config.json_loader import load_json_config
 
-    config = load_yaml_config(Path(args.config))
-    settings = Settings(**config)
+    config = load_json_config(Path(args.config))
+    db_cfg = config["database"]
 
-    if settings.database.backend != "sqlite":
-        print(f"[migrate] Backend '{settings.database.backend}' migrations not yet automated.")
+    if db_cfg["backend"] != "sqlite":
+        print(f"[migrate] Backend '{db_cfg['backend']}' migrations not yet automated.")
         return
 
-    repo = SQLiteRepository(db_path=settings.database.sqlite_path)
-    await repo.initialize()
-    await repo.close()
-    print(f"[migrate] Migrations applied to {settings.database.sqlite_path}")
+    db_path = db_cfg["sqlite_path"]
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    migrations_dir = Path(__file__).parent.parent / "migrations"
+    sql_files = sorted(migrations_dir.glob("*.sql"))
+    if not sql_files:
+        print(f"[migrate] No migration files found in {migrations_dir}")
+        return
+
+    async with aiosqlite.connect(db_path) as conn:
+        for sql_file in sql_files:
+            await conn.executescript(sql_file.read_text())
+            print(f"[migrate] Applied {sql_file.name}")
+        await conn.commit()
+
+    print(f"[migrate] Migrations applied to {db_path}")
 
 
 if __name__ == "__main__":

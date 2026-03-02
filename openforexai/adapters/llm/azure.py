@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import openai as _openai
+from openai import AsyncAzureOpenAI
 
 from openforexai.adapters.llm.base import llm_retry
 from openforexai.ports.llm import (
@@ -27,28 +27,38 @@ def _to_openai_tool(spec: ToolSpec) -> dict:
     }
 
 
-class OpenAILLMProvider(AbstractLLMProvider):
-    """OpenAI GPT adapter (also compatible with LM Studio's OpenAI-compatible endpoint)."""
+class AzureOpenAILLMProvider(AbstractLLMProvider):
+    """Azure OpenAI adapter using the OpenAI SDK's AzureOpenAI client."""
 
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
-        base_url: str | None = None,
+        endpoint: str,
+        deployment: str,
+        api_version: str = "2024-12-01-preview",
+        model: str | None = None,
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
     ) -> None:
-        self._model = model
+        # Azure routes requests by deployment name; model_id is used for logging only
+        self._deployment = deployment
+        self._model = model or deployment
         self._retry_attempts = retry_attempts
         self._retry_base_delay = retry_base_delay
-        self._client = _openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._client = AsyncAzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=api_version,
+        )
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "OpenAILLMProvider":
+    def from_config(cls, cfg: dict) -> "AzureOpenAILLMProvider":
         return cls(
             api_key=cfg.get("api_key", ""),
-            model=cfg.get("model", "gpt-4o"),
-            base_url=cfg.get("base_url") or None,
+            endpoint=cfg.get("endpoint", ""),
+            deployment=cfg.get("deployment", ""),
+            api_version=cfg.get("api_version", "2024-12-01-preview"),
+            model=cfg.get("model") or cfg.get("deployment", ""),
             retry_attempts=cfg.get("retry_attempts", 3),
             retry_base_delay=cfg.get("retry_base_delay", 1.0),
         )
@@ -68,9 +78,9 @@ class OpenAILLMProvider(AbstractLLMProvider):
     ) -> LLMResponse:
         async def _call() -> LLMResponse:
             resp = await self._client.chat.completions.create(
-                model=self._model,
+                model=self._deployment,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
@@ -118,17 +128,15 @@ class OpenAILLMProvider(AbstractLLMProvider):
         temperature: float = 0.1,
         max_tokens: int = 4096,
     ) -> LLMResponseWithTools:
-        """Single turn using OpenAI's native function-calling API."""
+        """Single turn using Azure OpenAI's native function-calling API."""
         openai_tools = [_to_openai_tool(t) for t in tools]
-
-        # Prepend system message
         full_messages = [{"role": "system", "content": system_prompt}] + messages
 
         async def _call() -> LLMResponseWithTools:
             resp = await self._client.chat.completions.create(
-                model=self._model,
+                model=self._deployment,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
                 messages=full_messages,
                 tools=openai_tools,
                 tool_choice="auto",
@@ -176,7 +184,6 @@ class OpenAILLMProvider(AbstractLLMProvider):
         text: str | None,
         tool_calls: list[ToolCall],
     ) -> dict:
-        """Build the assistant turn to append after a tool-use response."""
         openai_tool_calls = [
             {
                 "id": tc.id,
@@ -196,7 +203,6 @@ class OpenAILLMProvider(AbstractLLMProvider):
 
     @staticmethod
     def tool_result_message(tool_results: list) -> list[dict]:
-        """Build tool-result turns (OpenAI uses one message per result)."""
         return [
             {
                 "role": "tool",
@@ -205,26 +211,3 @@ class OpenAILLMProvider(AbstractLLMProvider):
             }
             for r in tool_results
         ]
-
-
-class LMStudioLLMProvider(OpenAILLMProvider):
-    """LM Studio adapter (uses the OpenAI-compatible local endpoint)."""
-
-    def __init__(
-        self,
-        base_url: str = "http://localhost:1234/v1",
-        model: str = "local-model",
-        retry_attempts: int = 3,
-        retry_base_delay: float = 1.0,
-    ) -> None:
-        super().__init__(api_key="lm-studio", model=model, base_url=base_url,
-                         retry_attempts=retry_attempts, retry_base_delay=retry_base_delay)
-
-    @classmethod
-    def from_config(cls, cfg: dict) -> "LMStudioLLMProvider":
-        return cls(
-            base_url=cfg.get("base_url", "http://localhost:1234/v1"),
-            model=cfg.get("model", "local-model"),
-            retry_attempts=cfg.get("retry_attempts", 3),
-            retry_base_delay=cfg.get("retry_base_delay", 1.0),
-        )

@@ -23,11 +23,11 @@ async def main() -> None:
     logger = get_logger("main")
     logger.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
 
-    # ── Bootstrap ─────────────────────────────────────────────────────────────
-    agents, config_service, bus = await bootstrap(cfg)
-
-    # ── Monitoring bus + Management API ───────────────────────────────────────
+    # ── Monitoring bus (created first so bootstrap can wire it through) ───────
     monitoring_bus = MonitoringBus()
+
+    # ── Bootstrap ─────────────────────────────────────────────────────────────
+    agents, config_service, bus = await bootstrap(cfg, monitoring_bus=monitoring_bus)
     api_cfg = sys_cfg.get("management_api", {})
     mgmt_server = ManagementServer(
         bus=bus,

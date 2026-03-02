@@ -38,10 +38,14 @@ _ROUTING_PATH = Path(__file__).parent / "config" / "event_routing.json"
 _log = get_logger("bootstrap")
 
 
-async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigService, EventBus]:
+async def bootstrap(
+    system_config: dict[str, Any],
+    monitoring_bus=None,
+) -> tuple[list[Agent], ConfigService, EventBus]:
     """Wire all components from *system_config* and return (agents, config_service, bus).
 
     Pass the result of ``load_json_config('config/system.json')``.
+    Optionally pass a *monitoring_bus* so broker tasks and agents can emit events.
     """
     # ── Trigger adapter self-registration ────────────────────────────────────
     import openforexai.adapters.brokers   # noqa: F401
@@ -70,21 +74,7 @@ async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigS
         llm_mod = load_json_config(_ROOT / cfg_path)
         adapter  = llm_mod.get("adapter", llm_name)
         LLMClass = PluginRegistry.get_llm_provider(adapter)
-        if adapter == "anthropic":
-            llm_instance = LLMClass(
-                api_key=llm_mod.get("api_key", ""),
-                model=llm_mod.get("model", "claude-opus-4-6"),
-            )
-        elif adapter == "lmstudio":
-            llm_instance = LLMClass(
-                base_url=llm_mod.get("base_url", "http://localhost:1234"),
-                model=llm_mod.get("model", "local-model"),
-            )
-        else:  # openai
-            llm_instance = LLMClass(
-                api_key=llm_mod.get("api_key", ""),
-                model=llm_mod.get("model", "gpt-4o"),
-            )
+        llm_instance = LLMClass.from_config(llm_mod)
         RuntimeRegistry.register_llm(llm_name, llm_instance)
         _log.info("LLM module loaded", name=llm_name, adapter=adapter)
 
@@ -101,21 +91,7 @@ async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigS
             _log.warning("Broker adapter %r not registered — skipping %r", adapter, broker_name)
             continue
 
-        if adapter == "oanda":
-            broker_instance = BrokerClass(
-                api_key=broker_mod.get("api_key", ""),
-                account_id=broker_mod.get("account_id", ""),
-                practice=broker_mod.get("practice", True),
-            )
-        elif adapter == "mt5":
-            broker_instance = BrokerClass(
-                login=int(broker_mod.get("login", 0)),
-                password=broker_mod.get("password", ""),
-                server=broker_mod.get("server", ""),
-            )
-        else:
-            _log.warning("Unknown broker adapter %r — skipping", adapter)
-            continue
+        broker_instance = BrokerClass.from_config(broker_mod)
 
         await broker_instance.connect()
         RuntimeRegistry.register_broker(broker_name, broker_instance)
@@ -130,7 +106,7 @@ async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigS
 
     # ── DataContainer ─────────────────────────────────────────────────────────
     data_cfg = system_config.get("data", {})
-    data_container = DataContainer(repository=repository, event_bus=bus)
+    data_container = DataContainer(repository=repository, event_bus=bus, monitoring_bus=monitoring_bus)
 
     # Register each unique broker + its pairs (derived from agent configs)
     broker_pairs: dict[str, set[str]] = {}
@@ -161,6 +137,7 @@ async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigS
             bus=bus,
             data_container=data_container,
             repository=repository,
+            monitoring_bus=monitoring_bus,
         )
         agents.append(agent)
         _log.info("Agent created", agent_id=agent_id)
@@ -175,6 +152,7 @@ async def bootstrap(system_config: dict[str, Any]) -> tuple[list[Agent], ConfigS
                 pair=pair,
                 event_bus=bus,
                 repository=repository,
+                monitoring_bus=monitoring_bus,
             )
 
     return agents, config_service, bus

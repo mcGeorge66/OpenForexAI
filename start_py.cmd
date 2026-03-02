@@ -1,0 +1,1 @@
+"M:\OpenForexAI\.venv\Scripts\activate.bat"

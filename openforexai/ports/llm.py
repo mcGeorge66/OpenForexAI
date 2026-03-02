@@ -90,6 +90,17 @@ ToolSpec = dict[str, Any]
 class AbstractLLMProvider(ABC):
     """Port: every LLM adapter must implement this contract."""
 
+    @classmethod
+    @abstractmethod
+    def from_config(cls, cfg: dict[str, Any]) -> "AbstractLLMProvider":
+        """Instantiate the adapter from a module config dict.
+
+        Each adapter reads the fields it needs from *cfg* — no caller-side
+        branching required.  This is the only sanctioned way to create an
+        LLM adapter instance outside of unit tests.
+        """
+        ...
+
     # ── Simple completions ────────────────────────────────────────────────────
 
     @abstractmethod

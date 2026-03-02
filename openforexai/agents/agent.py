@@ -61,11 +61,13 @@ class Agent:
         bus: EventBus,
         data_container: DataContainer,
         repository: AbstractRepository,
+        monitoring_bus=None,
     ) -> None:
         self.agent_id = agent_id
         self._bus = bus
         self._data_container = data_container
         self._repository = repository
+        self._monitoring_bus = monitoring_bus
 
         self._inbox: asyncio.Queue[AgentMessage] = bus.register_agent(agent_id)
         self._running = False
@@ -164,14 +166,21 @@ class Agent:
                 self._logger.warning("Broker %r not in RuntimeRegistry", broker_name)
 
         # ToolDispatcher
+        # Use broker.short_name so DataContainer / DB lookups match the stored key.
+        # The config module name (e.g. "oanda") differs from the runtime short_name
+        # (e.g. "OAPR1") which is what register_broker() uses as the storage key.
+        runtime_broker_name = (
+            self._broker.short_name if self._broker is not None else broker_name
+        )
         if self._llm is not None:
             context = ToolContext(
                 agent_id=self.agent_id,
-                broker_name=broker_name,
+                broker_name=runtime_broker_name,
                 pair=cfg.get("pair"),
                 data_container=self._data_container,
                 repository=self._repository,
                 broker=self._broker,
+                monitoring_bus=self._monitoring_bus,
                 event_bus=self._bus,
             )
             self._tool_dispatcher = ToolDispatcher(
@@ -183,9 +192,16 @@ class Agent:
     # ── Run loops ─────────────────────────────────────────────────────────────
 
     async def _run_timer_loop(self, interval: int) -> None:
-        """Trigger run_cycle() every ``interval`` seconds."""
+        """Trigger run_cycle() every ``interval`` seconds.
+
+        Fires immediately on first call so agents analyse on startup,
+        then waits *interval* seconds between subsequent cycles.
+        """
+        first_run = True
         while self._running:
-            await asyncio.sleep(interval)
+            if not first_run:
+                await asyncio.sleep(interval)
+            first_run = False
             try:
                 await self._run_cycle(trigger="timer", payload={})
             except asyncio.CancelledError:

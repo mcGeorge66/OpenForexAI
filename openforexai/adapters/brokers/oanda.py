@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -18,8 +18,8 @@ from openforexai.models.trade import (
     TradeStatus,
 )
 
-_PRACTICE_REST = "https://api-fxpractice.oanda.com"
-_LIVE_REST = "https://api-fxtrade.oanda.com"
+# OANDA v20 API hard limit for candles per request
+_OANDA_MAX_CANDLES = 5000
 
 # OANDA granularity codes for M5 only (higher TFs derived by DataContainer)
 _TF_MAP = {
@@ -67,6 +67,10 @@ class OANDABroker(BrokerBase):
         )
         await broker.connect()
         broker.start_background_tasks(pairs, event_bus, repository)
+
+    When *api_url* is supplied it overrides the practice/live URL selection.
+    The value may include or omit a trailing ``/v3`` segment — it is stripped
+    automatically because every request path already begins with ``/v3/``.
     """
 
     def __init__(
@@ -74,15 +78,49 @@ class OANDABroker(BrokerBase):
         short_name: str,
         api_key: str,
         account_id: str,
+        api_url: str,
         practice: bool = True,
         monitoring_bus=None,
     ) -> None:
+        if not short_name or len(short_name) > 5:
+            raise ValueError(
+                f"short_name must be 1–5 characters (got {len(short_name)!r}: {short_name!r}). "
+                "The first 5 chars are used as the routing ID — keep it short and unique."
+            )
+        if not api_url:
+            raise ValueError(
+                "api_url is required — set it in the broker module config. "
+                "Practice: https://api-fxpractice.oanda.com/v3  "
+                "Live:     https://api-fxtrade.oanda.com/v3"
+            )
         super().__init__(monitoring_bus=monitoring_bus)
         self._short_name = short_name
         self._api_key = api_key
         self._account_id = account_id
-        self._base_url = _PRACTICE_REST if practice else _LIVE_REST
+        self._practice = practice
+
+        # Strip trailing /v3 — internal paths already begin with /v3/
+        base = api_url.rstrip("/")
+        self._base_url = base[:-3] if base.endswith("/v3") else base
+
         self._client: httpx.AsyncClient | None = None
+
+    @classmethod
+    def from_config(cls, cfg: dict) -> "OANDABroker":
+        api_url = cfg.get("api_url", "")
+        if not api_url:
+            raise ValueError(
+                "Missing 'api_url' in broker config. "
+                "Practice: https://api-fxpractice.oanda.com/v3  "
+                "Live:     https://api-fxtrade.oanda.com/v3"
+            )
+        return cls(
+            short_name=cfg.get("short_name", "OANDA"),
+            api_key=cfg.get("api_key", ""),
+            account_id=cfg.get("account_id", ""),
+            api_url=api_url,
+            practice=cfg.get("practice", True),
+        )
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
@@ -122,13 +160,50 @@ class OANDABroker(BrokerBase):
         return candles[-1]
 
     async def get_historical_m5_candles(self, pair: str, count: int) -> list[Candle]:
-        """Fetch up to *count* completed M5 candles (oldest first)."""
+        """Fetch up to *count* completed M5 candles (oldest first).
+
+        Paginates automatically when *count* exceeds OANDA's 5000-candle limit.
+        """
+        if count <= _OANDA_MAX_CANDLES:
+            return await self._fetch_m5_chunk(pair, count=count, from_time=None)
+
+        # Paginate: estimate start time and walk forward in 5000-candle pages.
+        # M5 bars are 5 min each; forex is ~5/7 days, so use a 1.6× time buffer
+        # to account for weekends and bank holidays.
+        now = datetime.now(timezone.utc)
+        from_time = now - timedelta(minutes=int(count * 5 * 1.6))
+
+        all_candles: list[Candle] = []
+        while len(all_candles) < count:
+            chunk = await self._fetch_m5_chunk(
+                pair, count=_OANDA_MAX_CANDLES, from_time=from_time
+            )
+            if not chunk:
+                break
+            all_candles.extend(chunk)
+            if len(chunk) < _OANDA_MAX_CANDLES:
+                break  # reached present; no more pages
+            from_time = chunk[-1].timestamp + timedelta(minutes=1)
+
+        # Return at most *count* candles, oldest first
+        return all_candles[-count:] if len(all_candles) > count else all_candles
+
+    async def _fetch_m5_chunk(
+        self,
+        pair: str,
+        count: int,
+        from_time: datetime | None,
+    ) -> list[Candle]:
+        """Single OANDA candle request (≤ 5000 bars).  Returns candles oldest-first."""
         client = self._c()
         instrument = _instrument(pair)
+        params: dict = {"granularity": "M5", "count": count, "price": "BA"}
+        if from_time is not None:
+            params["from"] = from_time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
         resp = await retry_async(
             lambda: client.get(
                 f"/v3/instruments/{instrument}/candles",
-                params={"granularity": "M5", "count": count, "price": "BA"},
+                params=params,
             ),
             attempts=3,
         )
@@ -140,11 +215,9 @@ class OANDABroker(BrokerBase):
                 continue  # skip the still-forming candle
             bid = c.get("bid", {})
             ask = c.get("ask", {})
-            # Spread in pips: (ask_close - bid_close) / pip_size
-            # For simplicity we store raw price difference; DataContainer knows pip size
             bid_close = Decimal(bid.get("c", "0"))
             ask_close = Decimal(ask.get("c", "0"))
-            spread_pips = ask_close - bid_close  # raw spread; agents receive in model units
+            spread_pips = ask_close - bid_close
 
             result.append(normalize_candle(
                 {

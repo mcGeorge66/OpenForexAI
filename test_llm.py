@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import traceback
 from pathlib import Path
 
 _ROOT = Path(__file__).parent
@@ -40,13 +41,7 @@ def _create_llm(name: str, cfg: dict):
 
     adapter = cfg.get("adapter", name)
     LLMClass = PluginRegistry.get_llm_provider(adapter)
-
-    if adapter == "anthropic":
-        return LLMClass(api_key=cfg.get("api_key", ""), model=cfg.get("model", "claude-opus-4-6"))
-    elif adapter == "lmstudio":
-        return LLMClass(base_url=cfg.get("base_url", "http://localhost:1234"), model=cfg.get("model", "local"))
-    else:
-        return LLMClass(api_key=cfg.get("api_key", ""), model=cfg.get("model", "gpt-4o"))
+    return LLMClass.from_config(cfg)
 
 
 async def _run_tests(name: str) -> bool:
@@ -77,6 +72,9 @@ async def _run_tests(name: str) -> bool:
         print(f"  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
+        if e.__cause__:
+            print(f"  caused by: {type(e.__cause__).__name__}: {e.__cause__}")
+        traceback.print_exc()
         passed = False
 
     # ── Test 2: tool-use completion ───────────────────────────────────────────
@@ -100,6 +98,9 @@ async def _run_tests(name: str) -> bool:
         print(f"  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
+        if e.__cause__:
+            print(f"  caused by: {type(e.__cause__).__name__}: {e.__cause__}")
+        traceback.print_exc()
         passed = False
 
     return passed

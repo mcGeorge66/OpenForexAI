@@ -2,7 +2,10 @@
   "_comment": "OANDA broker module configuration",
   "_doc": "This file is managed by the module owner. The system only loads it by name.",
   "adapter":    "oanda",
-  "api_key":    "${OANDA_API_KEY}",
-  "account_id": "${OANDA_ACCOUNT_ID}",
-  "practice":   true
+  "short_name": "OAPR1",
+  "api_key":    "3d307d799fa5eafd9e6ec3fa2e46f73d-721cd67bbfd522cbb58b3394f64ca582",
+  "account_id": "101-001-29475175-001",
+  "api_url":    "https://api-fxpractice.oanda.com/v3",
+  "practice":   true,
+  "pair":       "EURUSD"
 }

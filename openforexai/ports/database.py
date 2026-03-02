@@ -104,11 +104,12 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     async def get_open_order_book_entries(
-        self, broker_name: str
+        self, broker_name: str, pair: str | None = None
     ) -> list[OrderBookEntry]:
         """Return all entries with status PENDING or OPEN for a given broker.
 
-        Used by the sync loop to detect positions that were closed broker-side.
+        Optionally filter by *pair*.  Used by the sync loop to detect positions
+        that were closed broker-side.
         """
         ...
 

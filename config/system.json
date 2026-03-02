@@ -34,20 +34,20 @@
   "modules": {
     "_doc": "Module names only — connection details are in config/modules/",
     "llm": {
-      "anthropic_claude": "config/modules/llm/anthropic_claude.json"
+      "azure_openai":  "config/modules/llm/azure_openai.json",
+      "openai":        "config/modules/llm/openai.json"
     },
     "broker": {
-      "oanda": "config/modules/broker/oanda.json",
-      "mt5":   "config/modules/broker/mt5.json"
+      "oanda": "config/modules/broker/oanda.json"
     }
   },
 
   "agents": {
 
-    "OANDA_EURUSD_AA_ANLYS": {
-      "_comment": "Analysis Agent — OANDA / EURUSD",
+    "OAPR1_EURUSD_AA_ANLYS": {
+      "_comment": "Analysis Agent — OANDA Practice / EURUSD",
       "type":   "AA",
-      "llm":    "anthropic_claude",
+      "llm":    "azure_openai",
       "broker": "oanda",
       "pair":   "EURUSD",
       "timer": {
@@ -77,76 +77,10 @@
       }
     },
 
-    "OANDA_GBPUSD_AA_ANLYS": {
-      "_comment": "Analysis Agent — OANDA / GBPUSD",
-      "type":   "AA",
-      "llm":    "anthropic_claude",
-      "broker": "oanda",
-      "pair":   "GBPUSD",
-      "timer": {
-        "enabled": true,
-        "interval_seconds": 300
-      },
-      "event_triggers": ["m5_candle_available", "prompt_updated"],
-      "system_prompt": "You are a professional Forex analysis agent for GBPUSD. Analyse the current market data using your available tools and report your findings and any trading signals to the broker agent.",
-      "tool_config": {
-        "allowed_tools": [
-          "get_candles",
-          "calculate_indicator",
-          "get_order_book",
-          "raise_alarm",
-          "trigger_sync"
-        ],
-        "context_tiers": {
-          "0":  "all",
-          "85": "safety"
-        },
-        "tier_tools": {
-          "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-          "safety": ["raise_alarm"]
-        },
-        "max_tool_turns": 10,
-        "max_tokens": 4096
-      }
-    },
-
-    "OANDA_USDJPY_AA_ANLYS": {
-      "_comment": "Analysis Agent — OANDA / USDJPY",
-      "type":   "AA",
-      "llm":    "anthropic_claude",
-      "broker": "oanda",
-      "pair":   "USDJPY",
-      "timer": {
-        "enabled": true,
-        "interval_seconds": 300
-      },
-      "event_triggers": ["m5_candle_available", "prompt_updated"],
-      "system_prompt": "You are a professional Forex analysis agent for USDJPY. Analyse the current market data using your available tools and report your findings and any trading signals to the broker agent.",
-      "tool_config": {
-        "allowed_tools": [
-          "get_candles",
-          "calculate_indicator",
-          "get_order_book",
-          "raise_alarm",
-          "trigger_sync"
-        ],
-        "context_tiers": {
-          "0":  "all",
-          "85": "safety"
-        },
-        "tier_tools": {
-          "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-          "safety": ["raise_alarm"]
-        },
-        "max_tool_turns": 10,
-        "max_tokens": 4096
-      }
-    },
-
-    "OANDA_ALL..._BA_TRADE": {
-      "_comment": "Broker Agent — OANDA (all pairs)",
+    "OAPR1_ALL..._BA_TRADE": {
+      "_comment": "Broker Agent — OANDA Practice (all pairs)",
       "type":   "BA",
-      "llm":    "anthropic_claude",
+      "llm":    "azure_openai",
       "broker": "oanda",
       "timer": {
         "enabled": false,
@@ -175,32 +109,6 @@
         },
         "max_tool_turns": 8,
         "max_tokens": 4096
-      }
-    },
-
-    "GLOBL_ALL..._GA_OPTIM": {
-      "_comment": "Global Optimization Agent",
-      "type":   "GA",
-      "llm":    "anthropic_claude",
-      "timer": {
-        "enabled": true,
-        "interval_seconds": 21600
-      },
-      "event_triggers": ["position_closed", "optimization_complete"],
-      "system_prompt": "You are the global optimization agent. You monitor trading outcomes, detect patterns, and propose improvements to analysis agent prompts when sufficient trade data is available.",
-      "tool_config": {
-        "allowed_tools": [
-          "get_order_book",
-          "raise_alarm"
-        ],
-        "context_tiers": {
-          "0": "all"
-        },
-        "tier_tools": {
-          "all": ["get_order_book", "raise_alarm"]
-        },
-        "max_tool_turns": 5,
-        "max_tokens": 8192
       }
     }
 

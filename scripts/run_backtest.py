@@ -19,21 +19,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
     parser.add_argument(
         "--config",
-        default="config/default.yaml",
-        help="Path to config YAML (default: config/default.yaml)",
+        default="config/system.json",
+        help="Path to config JSON (default: config/system.json)",
     )
     return parser.parse_args()
 
 
 async def main(args: argparse.Namespace) -> None:
-    from openforexai.config.loader import load_yaml_config
-    from openforexai.config.settings import Settings
+    from openforexai.config.json_loader import load_json_config
 
-    config = load_yaml_config(Path(args.config))
-    settings = Settings(**config)
+    config = load_json_config(Path(args.config))
 
     print(f"[backtest] pair={args.pair}  start={args.start}  end={args.end}")
-    print(f"[backtest] db={settings.database.sqlite_path}")
+    print(f"[backtest] db={config['database']['sqlite_path']}")
 
     # TODO: implement full historical replay using stored candles + prompt candidates
     print("[backtest] Full historical replay not yet implemented.")

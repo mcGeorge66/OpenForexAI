@@ -50,6 +50,11 @@ class MT5Broker(BrokerBase):
         server: str,
         monitoring_bus=None,
     ) -> None:
+        if not short_name or len(short_name) > 5:
+            raise ValueError(
+                f"short_name must be 1–5 characters (got {len(short_name)!r}: {short_name!r}). "
+                "The first 5 chars are used as the routing ID — keep it short and unique."
+            )
         if sys.platform != "win32":
             raise RuntimeError("MT5Broker is only supported on Windows.")
         super().__init__(monitoring_bus=monitoring_bus)
@@ -58,6 +63,15 @@ class MT5Broker(BrokerBase):
         self._password = password
         self._server = server
         self._mt5 = None  # set in connect()
+
+    @classmethod
+    def from_config(cls, cfg: dict) -> "MT5Broker":
+        return cls(
+            short_name=cfg.get("short_name", "MT5"),
+            login=int(cfg.get("login", 0)),
+            password=cfg.get("password", ""),
+            server=cfg.get("server", ""),
+        )
 
     # ── Identity ──────────────────────────────────────────────────────────────
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -11,9 +10,10 @@ from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEventType
 from openforexai.ports.broker import AbstractBroker
 from openforexai.ports.database import AbstractRepository
+from openforexai.utils.logging import get_logger
 from openforexai.utils.time_utils import detect_session, utcnow
 
-_log = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 # How many M5 candles to keep in the rolling in-memory window (~4 weeks)
 _M5_ROLLING = 4 * 7 * 24 * 12   # 8 064

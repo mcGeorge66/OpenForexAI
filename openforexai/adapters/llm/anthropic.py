@@ -18,9 +18,26 @@ from openforexai.ports.llm import (
 class AnthropicLLMProvider(AbstractLLMProvider):
     """Claude adapter using the native Anthropic SDK (tool_use API)."""
 
-    def __init__(self, api_key: str, model: str = "claude-opus-4-6") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "claude-opus-4-6",
+        retry_attempts: int = 3,
+        retry_base_delay: float = 1.0,
+    ) -> None:
         self._model = model
+        self._retry_attempts = retry_attempts
+        self._retry_base_delay = retry_base_delay
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    @classmethod
+    def from_config(cls, cfg: dict) -> "AnthropicLLMProvider":
+        return cls(
+            api_key=cfg.get("api_key", ""),
+            model=cfg.get("model", "claude-opus-4-6"),
+            retry_attempts=cfg.get("retry_attempts", 3),
+            retry_base_delay=cfg.get("retry_base_delay", 1.0),
+        )
 
     @property
     def model_id(self) -> str:
@@ -51,7 +68,7 @@ class AnthropicLLMProvider(AbstractLLMProvider):
                 raw=msg.model_dump(),
             )
 
-        return await llm_retry(_call)
+        return await llm_retry(_call, attempts=self._retry_attempts, base_delay=self._retry_base_delay)
 
     async def complete_structured(
         self,
@@ -122,7 +139,7 @@ class AnthropicLLMProvider(AbstractLLMProvider):
                 raw=msg.model_dump(),
             )
 
-        return await llm_retry(_call)
+        return await llm_retry(_call, attempts=self._retry_attempts, base_delay=self._retry_base_delay)
 
     # ── Message-builder helpers ───────────────────────────────────────────────
 
