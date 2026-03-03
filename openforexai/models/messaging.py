@@ -46,6 +46,10 @@ class EventType(str, Enum):
     AGENT_CONFIG_REQUESTED = "agent_config_requested"   # agent → ConfigService
     AGENT_CONFIG_RESPONSE  = "agent_config_response"    # ConfigService → agent
 
+    # ── Agent query (external → agent → external) ────────────────────────────
+    AGENT_QUERY          = "agent_query"           # management API → specific agent
+    AGENT_QUERY_RESPONSE = "agent_query_response"  # agent → management API handler
+
     # ── System / management ───────────────────────────────────────────────────
     ROUTING_RELOAD_REQUESTED = "routing_reload_requested"
 

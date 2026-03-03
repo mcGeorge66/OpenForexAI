@@ -238,7 +238,20 @@ class Agent:
                     else str(msg.event_type)
                 )
 
-                if event_val in self._event_triggers:
+                # agent_query is delivered directly (target_agent_id set on the
+                # message), so no routing rule is needed.  Guard here is a
+                # belt-and-suspenders check in case a broadcast reaches us.
+                if event_val == EventType.AGENT_QUERY.value:
+                    if (msg.target_agent_id is not None
+                            and msg.target_agent_id != self.agent_id):
+                        continue   # not addressed to us
+                    await self._run_cycle(
+                        trigger=event_val,
+                        payload=msg.payload,
+                        source=msg.source_agent_id,
+                        correlation_id=msg.correlation_id,
+                    )
+                elif event_val in self._event_triggers:
                     await self._run_cycle(
                         trigger=event_val,
                         payload=msg.payload,
@@ -270,6 +283,12 @@ class Agent:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         if trigger == "timer":
             user_msg = f"[{now}] Periodic analysis cycle. Review current market conditions and act if appropriate."
+        elif trigger == EventType.AGENT_QUERY.value:
+            question = payload.get("question", "").strip()
+            user_msg = (
+                f"[{now}] External query from {source or 'management_api'}:\n\n"
+                f"{question}"
+            )
         else:
             user_msg = (
                 f"[{now}] Event received: {trigger}\n"
@@ -278,7 +297,16 @@ class Agent:
             )
 
         self._logger.debug("Starting cycle", trigger=trigger)
-        await self._run_with_tools(user_msg, correlation_id=correlation_id)
+        final_text, _ = await self._run_with_tools(user_msg, correlation_id=correlation_id)
+
+        # For agent_query cycles: publish the LLM response back to the caller
+        if trigger == EventType.AGENT_QUERY.value and correlation_id:
+            await self._bus.publish(AgentMessage(
+                event_type=EventType.AGENT_QUERY_RESPONSE,
+                source_agent_id=self.agent_id,
+                payload={"response": final_text, "agent_id": self.agent_id},
+                correlation_id=correlation_id,
+            ))
 
     async def _run_with_tools(
         self,

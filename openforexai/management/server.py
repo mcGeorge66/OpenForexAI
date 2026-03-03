@@ -65,7 +65,7 @@ class ManagementServer:
             )
             return
 
-        from openforexai.management.api import build_app
+        from openforexai.management.api import build_app, setup_query_handler
 
         app = build_app(
             bus=self._bus,
@@ -74,6 +74,10 @@ class ManagementServer:
             indicator_registry=self._indicator_registry,
             monitoring_bus=self._monitoring_bus,
         )
+
+        # Wire AGENT_QUERY_RESPONSE handler so POST /agents/{id}/ask
+        # can receive responses from agents via the EventBus.
+        setup_query_handler(self._bus)
 
         config = uvicorn.Config(
             app=app,

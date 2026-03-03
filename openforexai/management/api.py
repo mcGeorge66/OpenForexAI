@@ -20,14 +20,44 @@ A simple static API key via ``X-API-Key`` header.  Set via
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+
+# ── Agent-query response registry ────────────────────────────────────────────
+# Maps correlation_id → asyncio.Future.  Populated by ask_agent(); resolved by
+# _on_agent_query_response() when the agent publishes AGENT_QUERY_RESPONSE.
+_pending_queries: dict[str, asyncio.Future] = {}
+
+
+async def _on_agent_query_response(msg) -> None:
+    """Bus handler: resolve the pending Future for the given correlation_id."""
+    cid = msg.correlation_id
+    if not cid:
+        return
+    fut = _pending_queries.pop(cid, None)
+    if fut is not None and not fut.done():
+        fut.set_result(msg.payload)
+
+
+def setup_query_handler(bus) -> None:
+    """Subscribe the AGENT_QUERY_RESPONSE handler to the EventBus.
+
+    Called once by ManagementServer after the app is built.  Safe to call
+    with bus=None (no-op) so startup code never has to guard against it.
+    """
+    if bus is None:
+        return
+    from openforexai.models.messaging import EventType
+    bus.subscribe(EventType.AGENT_QUERY_RESPONSE, _on_agent_query_response)
+
 
 # ── Dependency injection stubs (populated by ManagementServer) ────────────────
 # These are set at startup via ManagementServer.build_app(); the API module
@@ -66,6 +96,20 @@ class EventInjectRequest(BaseModel):
 class EventInjectResponse(BaseModel):
     message_id: str
     status: str = "queued"
+
+
+class AgentQueryRequest(BaseModel):
+    question: str = Field(..., description="Free-text question or instruction for the agent")
+    timeout: float = Field(
+        default=120.0, ge=5.0, le=300.0,
+        description="Seconds to wait for the agent's response (5–300)",
+    )
+
+
+class AgentQueryResponse(BaseModel):
+    correlation_id: str
+    agent_id: str
+    response: str
 
 
 class HealthResponse(BaseModel):
@@ -147,6 +191,59 @@ async def get_agent(agent_id: str) -> AgentInfo:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} not registered")
     q = _bus._agent_queues[agent_id]
     return AgentInfo(agent_id=agent_id, queue_size=q.qsize(), queue_maxsize=q.maxsize)
+
+
+@router.post("/agents/{agent_id}/ask", response_model=AgentQueryResponse)
+async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse:
+    """Send a free-text question to a specific agent and wait for its response.
+
+    The question is delivered directly to the target agent's inbox as an
+    ``AGENT_QUERY`` event (``target_agent_id`` set → routing table bypassed).
+    The endpoint blocks until the agent publishes ``AGENT_QUERY_RESPONSE`` with
+    the matching ``correlation_id``, or until *timeout* seconds have elapsed.
+
+    Typical round-trip time is the agent's LLM latency (2–15 s depending on
+    how many tool calls the agent makes to answer the question).
+
+    Example::
+
+        POST /agents/OAPR1_EURUSD_AA_ANLYS/ask
+        {"question": "What is the current EURUSD trend on H1?", "timeout": 60}
+    """
+    if _bus is None:
+        raise HTTPException(status_code=503, detail="EventBus not initialised")
+
+    if agent_id not in _bus.registered_agents():
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} not registered")
+
+    from openforexai.models.messaging import AgentMessage, EventType
+
+    correlation_id = str(uuid4())
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future = loop.create_future()
+    _pending_queries[correlation_id] = fut
+
+    await _bus.publish(AgentMessage(
+        event_type=EventType.AGENT_QUERY,
+        source_agent_id="MGMT._ALL..._GA_MGMT",
+        target_agent_id=agent_id,
+        payload={"question": req.question, "source": "management_api"},
+        correlation_id=correlation_id,
+    ))
+
+    try:
+        result = await asyncio.wait_for(asyncio.shield(fut), timeout=req.timeout)
+        return AgentQueryResponse(
+            correlation_id=correlation_id,
+            agent_id=result.get("agent_id", agent_id),
+            response=result.get("response", ""),
+        )
+    except asyncio.TimeoutError:
+        _pending_queries.pop(correlation_id, None)
+        raise HTTPException(
+            status_code=504,
+            detail=f"Agent {agent_id!r} did not respond within {req.timeout:.0f}s",
+        )
 
 
 @router.get("/routing/rules", response_model=list[RoutingRuleInfo])

@@ -1,11 +1,27 @@
-# OpenForexAI Console Monitor
+# OpenForexAI CLI Tools
+
+Command-line utilities for monitoring and interacting with a running OpenForexAI system.
+All tools communicate with the Management API (default `http://127.0.0.1:8765`) and
+require only Python stdlib — no extra packages needed.
+
+**Prerequisites:** The main system must be running first:
+```
+python -m openforexai.main
+```
+
+| Tool | Purpose |
+|---|---|
+| [`monitor.py`](#monitorpy--console-monitor) | Real-time event stream — observe everything the system does |
+| [`ask.py`](#askpy--agent-query-tool) | Query any agent directly and get its response |
+
+---
+
+## monitor.py — Console Monitor
 
 A terminal-based monitoring tool that polls the OpenForexAI management API and displays
 everything that happens inside the running system in real time.
 
----
-
-## Purpose
+### Purpose
 
 The monitor provides **full observability** into all internal system activity:
 
@@ -30,22 +46,17 @@ Events are stored in a ring buffer of 1 000 entries on the server side.
 
 ---
 
-## Usage
+### Usage
 
 ```
 python tools/monitor.py [OPTIONS]
 ```
 
-**Prerequisites:** The main system must be running first:
-```
-python -m openforexai.main
-```
-
 ---
 
-## Parameters
+### Parameters
 
-### Connection
+#### Connection
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -54,7 +65,7 @@ python -m openforexai.main
 | `--interval SECS` | `2.0` | Poll interval in seconds |
 | `--limit N` | `100` | Max events fetched per poll (ring buffer holds 1 000) |
 
-### Event filters (can be combined)
+#### Event filters (can be combined)
 
 | Parameter | Shows |
 |---|---|
@@ -68,64 +79,66 @@ python -m openforexai.main
 | `--filter TYPE1,TYPE2` | Custom comma-separated list of event types |
 | `--pair EURUSD` | Only events for a specific currency pair |
 
-### Display & logging
+#### Display & logging
 
 | Parameter | Description |
 |---|---|
 | `--no-colour` | Disable ANSI colours (useful for log files or non-TTY output) |
-| `--log FILE` | Append **all** events as JSONL to FILE (full payload, no truncation, runs in background). Independent of display filters — every event is logged regardless of what the display shows. |
+| `--log FILE` | Write **all** events as a JSON array to FILE (full payload, no truncation). Independent of display filters — every event is logged regardless of what the display shows. File is written on clean exit (Ctrl+C). |
 
 ---
 
-## Audit log file (`--log`)
+### Audit log file (`--log`)
 
-The `--log FILE` option writes every event received from the API to a JSONL file
-(one JSON object per line).  Key properties:
+The `--log FILE` option collects every event received from the API and writes them
+as a **single valid JSON array** when the monitor exits cleanly (Ctrl+C).  Key properties:
 
 - **All events are logged** — the display filter (`--llm`, `--errors`, etc.) does NOT
   affect the log file.  Every event that arrives goes to the file.
 - **Full payload, no truncation** — `messages`, `system_prompt`, `content`, `result`,
   `arguments`, `tool_call_details` etc. are written in their entirety.
-- **Runs in background** — a dedicated thread handles file writes; the polling loop
-  is never blocked.
-- **Append mode** — restarting the monitor appends to an existing log file.
-- **Crash-safe** — `flush()` is called after every line.
+- **Valid JSON** — the file is a proper JSON array `[...]`, readable by any JSON editor.
+- **Write mode** — the file is overwritten on each monitor start.
+- **Written on clean exit** — the file is saved when you press Ctrl+C. If the process
+  is killed hard (e.g. `kill -9`), the file may not be written.
 
-### Log format
+#### Log format
 
-Each line is a JSON object:
+The file is a JSON array; each element is an event object:
 
 ```json
-{
-  "id": "uuid",
-  "timestamp": "2026-03-02T12:34:56.123456+00:00",
-  "source": "agent:OAPR1_EURUSD_AA_ANLYS",
-  "event_type": "llm_response",
-  "broker": "OAPR1",
-  "pair": "EURUSD",
-  "payload": {
-    "turn": 2,
-    "content": "...full LLM response text without any truncation...",
-    "messages": [...complete conversation history...],
-    "tool_call_details": [...complete tool call inputs...]
+[
+  {
+    "id": "uuid",
+    "timestamp": "2026-03-02T12:34:56.123456+00:00",
+    "source": "agent:OAPR1_EURUSD_AA_ANLYS",
+    "event_type": "llm_response",
+    "broker": "OAPR1",
+    "pair": "EURUSD",
+    "payload": {
+      "turn": 2,
+      "content": "...full LLM response text without any truncation...",
+      "messages": ["...complete conversation history..."],
+      "tool_call_details": ["...complete tool call inputs..."]
+    }
   }
-}
+]
 ```
 
-### Verifying completeness
+#### Verifying completeness
 
 To verify that payloads are truly stored without truncation:
 
 ```bash
 # Start monitor with log file
-python tools/monitor.py --llm --log audit.jsonl
+python tools/monitor.py --llm --log audit.json
 
-# In another terminal: inspect the log
+# In another terminal: inspect the log after Ctrl+C
 python -c "
 import json
-with open('audit.jsonl') as f:
-    for line in f:
-        e = json.loads(line)
+with open('audit.json') as f:
+    events = json.load(f)
+    for e in events:
         if e['event_type'] == 'llm_response':
             content = e['payload'].get('content', '')
             print(f'content length: {len(content)} chars')
@@ -136,7 +149,7 @@ with open('audit.jsonl') as f:
 
 ---
 
-## Examples
+### Examples
 
 ```bash
 # Show everything
@@ -167,15 +180,15 @@ python tools/monitor.py --filter llm_response,tool_call_completed,account_status
 python tools/monitor.py --interval 0.5 --limit 200
 
 # Write complete audit log (all events, full payload) while showing LLM events on screen
-python tools/monitor.py --llm --log audit.jsonl
+python tools/monitor.py --llm --log audit.json
 
 # Save display output to file (no colour codes) AND write audit log
-python tools/monitor.py --no-colour --log audit.jsonl > display.log
+python tools/monitor.py --no-colour --log audit.json > display.log
 ```
 
 ---
 
-## Display format
+### Display format
 
 **Error events** (`system_error`, `broker_error`, `tool_call_failed`, etc.) are rendered as
 a prominent multi-line block with all payload fields:
@@ -219,7 +232,7 @@ an item count only — the full JSON is always written to the `--log` file.
 
 ---
 
-## Reconnect behaviour
+### Reconnect behaviour
 
 If the connection to the management API is lost (e.g. system restart), the monitor:
 1. Prints `Connection lost — retrying...` and keeps polling
@@ -228,7 +241,7 @@ If the connection to the management API is lost (e.g. system restart), the monit
 
 ---
 
-## Notes
+### Notes
 
 - The ring buffer on the server holds **1 000 events**. At high activity (many tool calls,
   fast polling) older events may be overwritten. Use `--limit 500` or higher if needed.
@@ -236,3 +249,147 @@ If the connection to the management API is lost (e.g. system restart), the monit
   fire-and-forget on the server side.
 - This tool is the **first stage** of the observability stack. A graphical dashboard
   with agent timelines and decision traces is planned for a future release.
+
+---
+
+## ask.py — Agent Query Tool
+
+A command-line tool for sending questions or instructions to any running agent and
+receiving its response directly in the terminal.
+
+### Purpose
+
+`ask.py` lets you interact with any agent (AA, BA, GA) as if you were another agent
+on the EventBus.  The question is delivered directly to the target agent's inbox,
+the agent runs a full LLM + tool cycle to answer it, and the response is returned
+to your terminal.
+
+Useful for:
+- Ad-hoc market analysis without waiting for the next timer cycle
+- Querying agent state ("what are your open positions?")
+- Testing agent behaviour and system prompt responses
+- Debugging tool availability and data access
+
+### How it works
+
+```
+ask.py  →  POST /agents/{id}/ask  →  Management API
+                                           │
+                                    AGENT_QUERY event
+                                    (direct to agent inbox)
+                                           │
+                                        Agent
+                                    (LLM + tool calls)
+                                           │
+                                    AGENT_QUERY_RESPONSE
+                                           │
+                                    Management API  →  ask.py
+```
+
+The Management API blocks until the agent publishes its response, then returns it
+to `ask.py`.  The agent runs a complete decision cycle — it can use all its configured
+tools (candles, indicators, account status, etc.) to answer the question.
+
+---
+
+### Usage
+
+```
+python tools/ask.py --list
+python tools/ask.py --agent <AGENT_ID> --request "<question>"
+```
+
+---
+
+### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--list` | — | List all currently registered agents |
+| `--agent AGENT_ID` | — | Target agent ID (use `--list` to see available IDs) |
+| `--request QUESTION` | — | Question or instruction to send to the agent |
+| `--timeout SECS` | `120` | Seconds to wait for the agent's response (5–300) |
+| `--host HOST` | `127.0.0.1` | Management API host |
+| `--port PORT` | `8765` | Management API port |
+| `--api-key KEY` | `$MANAGEMENT_API_KEY` | API key for authenticated deployments |
+| `--no-colour` | — | Disable ANSI colours |
+
+`--list` and `--agent` are mutually exclusive. `--request` is required when `--agent` is used.
+
+---
+
+### Examples
+
+```bash
+# See which agents are currently running
+python tools/ask.py --list
+
+# Ask the Analysis Agent for a market assessment
+python tools/ask.py --agent OAPR1_EURUSD_AA_ANLYS \
+    --request "What is the current EURUSD trend on H1?"
+
+# Ask the Broker Agent for open positions
+python tools/ask.py --agent OAPR1_ALL..._BA_TRADE \
+    --request "Show me all open positions and their current P&L."
+
+# Quick check with short timeout
+python tools/ask.py --agent OAPR1_EURUSD_AA_ANLYS \
+    --request "Give me a one-line directional bias for EURUSD." \
+    --timeout 30
+
+# With API key
+python tools/ask.py --api-key mysecret \
+    --agent OAPR1_EURUSD_AA_ANLYS --request "RSI status?"
+```
+
+---
+
+### Output
+
+**`--list`:**
+
+```
+Agent ID                                  Queue   MaxQueue
+────────────────────────────────────────────────────────────
+  OAPR1_EURUSD_AA_ANLYS                       0       1000
+  OAPR1_ALL..._BA_TRADE                       0       1000
+  SYSTM_ALL..._GA_CFGSV                       0       1000
+```
+
+Colour coding: cyan = AA (Analysis), green = BA (Broker), yellow = GA (Global).
+
+**`--agent ... --request ...`:**
+
+```
+[12:34:56 UTC] Sending query to OAPR1_EURUSD_AA_ANLYS
+────────────────────────────────────────────────────────────
+  What is the current EURUSD trend on H1?
+────────────────────────────────────────────────────────────
+Waiting up to 120s for response…
+
+[12:35:09 UTC] Response from OAPR1_EURUSD_AA_ANLYS
+────────────────────────────────────────────────────────────
+  {
+    "bias": "BIAS_LONG",
+    "reasoning": "EMA50 above EMA200, RSI at 61, H1 structure bullish",
+    "trade_management": "HOLD"
+  }
+────────────────────────────────────────────────────────────
+correlation_id: 3f2a1c8e-...
+```
+
+JSON responses are automatically pretty-printed. Plain-text responses are shown as-is.
+
+---
+
+### Notes
+
+- **Any agent can be queried** — AA, BA, and GA agents all support `agent_query`.
+- **Response time** = agent LLM latency + tool call time. Typically 3–20 seconds
+  depending on how many tools the agent calls to formulate its answer.
+- **Set `--timeout` generously** — if the agent needs to fetch candles, calculate
+  indicators, and call the LLM multiple times, a 30s timeout may be too short.
+- **The query is visible in `monitor.py`** — use `python tools/monitor.py --bus`
+  or `--llm` in a second terminal to watch the agent process your question in real time.
+- **The agent uses its full tool set** — it has access to all configured tools
+  (market data, indicators, account info, etc.) when answering your question.
