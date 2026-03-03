@@ -63,7 +63,7 @@ class IndicatorToolset:
         """Set the default broker_name used when calculate() is called without one."""
         self._default_broker = broker_name
 
-    def calculate(
+    async def calculate(
         self,
         indicator: str,
         period: int,
@@ -110,7 +110,7 @@ class IndicatorToolset:
                 "before calling calculate()."
             )
 
-        candles = self._dc.get_candles(resolved_broker, pair.upper(), timeframe.upper())
+        candles = await self._dc.get_candles(resolved_broker, pair.upper(), timeframe.upper())
         if not candles:
             return None
 

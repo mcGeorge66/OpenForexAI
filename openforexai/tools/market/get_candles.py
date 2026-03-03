@@ -46,7 +46,7 @@ class GetCandlesTool(BaseTool):
         if not context.pair:
             raise RuntimeError("pair not set in tool context")
 
-        candles = context.data_container.get_candles(
+        candles = await context.data_container.get_candles(
             context.broker_name, context.pair, timeframe
         )
         candles = candles[-count:]

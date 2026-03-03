@@ -227,10 +227,27 @@ class BrokerBase(AbstractBroker):
                     )
 
                 except Exception as exc:
-                    _log.exception(
-                        "M5 fetch error broker=%s pair=%s: %s",
-                        self.short_name, pair, exc,
+                    # Transient server/network errors (502/503/504, connection
+                    # resets, timeouts) are logged at WARNING without a traceback
+                    # — they are expected during broker maintenance windows,
+                    # weekends, or system shutdown and do not need investigation.
+                    _TRANSIENT_MARKERS = (
+                        "502", "503", "504",
+                        "bad gateway", "service unavailable", "gateway timeout",
+                        "connection", "timeout",
                     )
+                    err_lower = str(exc).lower()
+                    is_transient = any(m in err_lower for m in _TRANSIENT_MARKERS)
+                    if is_transient:
+                        _log.warning(
+                            "M5 fetch transient error broker=%s pair=%s: %s",
+                            self.short_name, pair, exc,
+                        )
+                    else:
+                        _log.exception(
+                            "M5 fetch error broker=%s pair=%s: %s",
+                            self.short_name, pair, exc,
+                        )
                     self._emit(
                         source, MonitoringEventType.BROKER_ERROR,
                         broker_name=self.short_name, pair=pair, error=str(exc),

@@ -50,10 +50,77 @@ class SQLiteRepository(AbstractRepository):
         return self._conn
 
     async def _run_migrations(self) -> None:
+        await self._db().executescript(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                filename TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+        await self._db().commit()
+
+        # Bootstrap: if schema_migrations is empty but the DB already has tables
+        # from prior runs (before migration tracking was introduced), detect which
+        # migrations have already been applied and register them without re-running.
+        cursor = await self._db().execute("SELECT COUNT(*) FROM schema_migrations")
+        row = await cursor.fetchone()
+        if row and row[0] == 0:
+            await self._bootstrap_migration_history()
+
         migrations_dir = Path(__file__).parent.parent.parent.parent / "migrations"
         for sql_file in sorted(migrations_dir.glob("*.sql")):
+            cursor = await self._db().execute(
+                "SELECT 1 FROM schema_migrations WHERE filename=?",
+                (sql_file.name,),
+            )
+            already_applied = await cursor.fetchone()
+            if already_applied:
+                continue
+
             sql = sql_file.read_text()
             await self._db().executescript(sql)
+            await self._db().execute(
+                "INSERT INTO schema_migrations (filename) VALUES (?)",
+                (sql_file.name,),
+            )
+            await self._db().commit()
+
+    async def _bootstrap_migration_history(self) -> None:
+        """Pre-register migrations that were applied before tracking was introduced.
+
+        Checks for observable proof that each migration was applied (table or
+        column existence) and records it in schema_migrations without re-running.
+        """
+        # 001_initial_schema.sql — trades + agent_decisions tables
+        cursor = await self._db().execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='trades'"
+        )
+        if await cursor.fetchone():
+            await self._db().execute(
+                "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+                ("001_initial_schema.sql",),
+            )
+
+        # 002_optimization_tables.sql — trade_patterns + prompt_candidates + backtest_results
+        cursor = await self._db().execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='trade_patterns'"
+        )
+        if await cursor.fetchone():
+            await self._db().execute(
+                "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+                ("002_optimization_tables.sql",),
+            )
+
+        # 003_agent_memory.sql — reasoning column + agent_conversations + agent_performance
+        cursor = await self._db().execute("PRAGMA table_info(agent_decisions)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "reasoning" in columns:
+            await self._db().execute(
+                "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+                ("003_agent_memory.sql",),
+            )
+
         await self._db().commit()
 
     # ── Trades ──────────────────────────────────────────────────────────────

@@ -69,7 +69,7 @@ class CalculateIndicatorTool(BaseTool):
             registry=DEFAULT_REGISTRY,
             default_broker=context.broker_name,
         )
-        result = toolset.calculate(
+        result = await toolset.calculate(
             indicator=indicator,
             period=period,
             timeframe=timeframe,

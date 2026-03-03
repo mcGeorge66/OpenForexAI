@@ -19,8 +19,8 @@ Usage::
     python tools/monitor.py --llm             # show only LLM communication
     python tools/monitor.py --tools           # show only tool calls
     python tools/monitor.py --bus             # show only agent-to-agent messages
-    python tools/monitor.py --log audit.jsonl # write full payloads to log file
-    python tools/monitor.py --llm --log llm.jsonl  # display LLM events + log everything
+    python tools/monitor.py --log audit.json  # write full payloads as JSON array on exit
+    python tools/monitor.py --llm --log llm.json   # display LLM events + log everything
 """
 from __future__ import annotations
 
@@ -354,20 +354,36 @@ def _show_missed_errors(base_url: str, limit: int, since_ts: str | None) -> None
 # ── Background log writer ──────────────────────────────────────────────────────
 
 def _log_writer_thread(log_path: str, q: "queue.Queue[str | None]") -> None:
-    """Background thread: writes JSONL lines from the queue to the log file.
+    """Background thread: writes events as a streaming JSON array.
 
-    Receives full event JSON strings (one per line).
-    Stops when it receives None as a sentinel value.
+    Each event is flushed to disk immediately — no in-memory accumulation.
+    The file is a valid JSON array when the monitor exits cleanly (Ctrl+C).
+
+    Format on disk during a live session:
+        [
+          {...},
+          {...},
+          {...}     ← no trailing comma on the last written entry
+                    ← closing ] not yet written
+    On clean exit the closing ] is appended, producing a fully valid JSON file.
     """
+    first = True
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("[\n")
+            f.flush()
             while True:
                 item = q.get()
-                if item is None:     # shutdown sentinel
+                if item is None:     # shutdown sentinel — close the array
+                    f.write("\n]\n")
+                    f.flush()
                     break
                 try:
-                    f.write(item + "\n")
-                    f.flush()        # flush after every event — no data loss on crash
+                    if not first:
+                        f.write(",\n")
+                    f.write(f"  {item}")
+                    f.flush()
+                    first = False
                 except Exception:
                     pass
     except Exception as exc:
@@ -425,8 +441,8 @@ def main() -> None:
                         help="Show all events (overrides other filters)")
     parser.add_argument("--no-colour", action="store_true")
     parser.add_argument("--log",     metavar="FILE", default="",
-                        help="Append ALL events as JSONL to FILE (full payload, no truncation). "
-                             "Runs in the background; independent of display filters.")
+                        help="Write ALL events as a JSON array to FILE (full payload, no truncation). "
+                             "File is written on clean exit (Ctrl+C). Independent of display filters.")
     args = parser.parse_args()
 
     global _NO_COLOUR
@@ -472,7 +488,7 @@ def main() -> None:
     if pair_filter:
         print(_c(_DIM, f"Pair filter: {pair_filter}"))
     if args.log:
-        print(_c(_BGREEN, f"Log file: {args.log}  (ALL events, full payload, JSONL format)"))
+        print(_c(_BGREEN, f"Log file: {args.log}  (ALL events, full payload, JSON array — written on exit)"))
     print("─" * 80)
 
     last_ts: str | None = None
