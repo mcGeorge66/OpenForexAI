@@ -12,6 +12,7 @@
   ],
 
   "system": {
+    "version": "0.4",
     "log_level": "${OPENFOREXAI_LOG_LEVEL:-INFO}",
     "management_api": {
       "host": "127.0.0.1",

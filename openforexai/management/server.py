@@ -10,6 +10,8 @@ Usage (from bootstrap.py)::
         routing_table=routing_table,
         tool_registry=tool_registry,
         indicator_registry=indicator_registry,
+        monitoring_bus=monitoring_bus,
+        system_config=system_config,
         host="127.0.0.1",
         port=8765,
     )
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 _log = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class ManagementServer:
         tool_registry=None,
         indicator_registry=None,
         monitoring_bus=None,
+        system_config: dict[str, Any] | None = None,
         host: str = "127.0.0.1",
         port: int = 8765,
         log_level: str = "warning",
@@ -52,6 +56,7 @@ class ManagementServer:
         self._tool_registry = tool_registry
         self._indicator_registry = indicator_registry
         self._monitoring_bus = monitoring_bus
+        self._system_config = system_config or {}
         self._server = None
 
     async def serve(self) -> None:
@@ -73,6 +78,7 @@ class ManagementServer:
             tool_registry=self._tool_registry,
             indicator_registry=self._indicator_registry,
             monitoring_bus=self._monitoring_bus,
+            system_config=self._system_config,
         )
 
         # Wire AGENT_QUERY_RESPONSE handler so POST /agents/{id}/ask

@@ -69,6 +69,7 @@ async def main() -> None:
         routing_table=bus._routing,
         tool_registry=DEFAULT_REGISTRY,
         monitoring_bus=monitoring_bus,
+        system_config=cfg,
         host=api_cfg.get("host", "127.0.0.1"),
         port=api_cfg.get("port", 8765),
     )
