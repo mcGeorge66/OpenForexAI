@@ -739,10 +739,19 @@ def build_app(
     app.include_router(ws_router)   # WebSocket routes (no auth dependency)
 
     # Serve the compiled React UI from ui/dist/ if it exists.
-    # Must be mounted AFTER the API router so API routes take precedence.
+    # NOTE: app.mount("/", StaticFiles(...)) is intentionally avoided here because
+    # Starlette's Mount matches WebSocket scopes too, causing StaticFiles to crash
+    # with AssertionError("scope['type'] == 'http'") on WS /ws/monitoring.
+    # A plain GET catch-all route only ever matches HTTP — WebSocket routes are safe.
     _ui_dist = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
     if _ui_dist.exists():
-        from fastapi.staticfiles import StaticFiles
-        app.mount("/", StaticFiles(directory=_ui_dist, html=True), name="ui")
+        from fastapi.responses import FileResponse as _FileResponse
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def _serve_spa(full_path: str) -> _FileResponse:  # type: ignore[return]
+            target = _ui_dist / full_path
+            if target.is_file():
+                return _FileResponse(str(target))
+            return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
