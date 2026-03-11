@@ -1,1 +1,0 @@
-python -m openforexai.main
