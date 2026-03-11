@@ -1,10 +1,10 @@
 {
-  "_comment": "OpenAI GPT LLM module configuration",
-  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  // OpenAI GPT LLM module configuration
+  // This file is managed by the module owner. The system only loads it by name.
   "adapter": "openai",
-  "api_key": "sk-lm-eNrtIJlk:A9ZxTXVPrh12cHxoOf73",
-  "model": "openai/gpt-oss-20b",
-  "base_url": "http://rtx3090:1234/v1",
+  "base_url": "${LMS-BASE-URL}",
+  "api_key": "${LMS-API-KEY}",
+  "model": "${LMS-OSS-MODEL}",
   "retry_attempts": 3,
   "retry_base_delay": 1.0,
   "temperature": 0.1,

@@ -3,9 +3,9 @@
   "_doc": "This file is managed by the module owner. The system only loads it by name.",
   "adapter":    "oanda",
   "short_name": "OAPR1",
-  "api_key":    "3d307d799fa5eafd9e6ec3fa2e46f73d-721cd67bbfd522cbb58b3394f64ca582",
-  "account_id": "101-001-29475175-001",
-  "api_url":    "https://api-fxpractice.oanda.com/v3",
+  "api_url":    "${OAPR1-API-URL}",
+  "api_key":    "${OAPR1-API-KEY}",
+  "account_id": "${OAPR1-ACCOUNT-ID}",
   "practice":   true,
   "pair":       "EURUSD",
   "background_tasks": {

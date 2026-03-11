@@ -4,13 +4,33 @@
 
 OpenForexAI uses configurable AI agents for market analysis, risk-aware trade execution, and strategy optimization.
 
+![Status](https://img.shields.io/badge/status-beta-orange)
+![Safety](https://img.shields.io/badge/trading-practice%20only-red)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Architecture](https://img.shields.io/badge/architecture-multi--agent-teal)
+
+## Project Status
+
+> [!WARNING]
+> This project is in **beta**.  
+> Do not run with unattended real-money trading.
+
+- The system is not yet considered production-ready.
+- LLMs can make mistakes; autonomous execution can cause significant losses.
+- Use practice/demo environments first.
+
 ## Documentation Map
 
-- Architecture and runtime design: [`architecture.md`](./architecture.md)
+**Getting Started**
 - Setup, configuration, installation, quick start: [`setup.md`](./setup.md)
-- Developer-oriented reference (tests, layout, stack): [`developer.md`](./developer.md)
-- Contribution baseline and process template: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - Detailed package/module documentation: [`docs/README.md`](./docs/README.md)
+
+**Project Internals**
+- Architecture and runtime design: [`architecture.md`](./architecture.md)
+- Developer-oriented reference (tests, layout, stack): [`developer.md`](./developer.md)
+
+**Contributing**
+- Contribution baseline and process template: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
 ## Quick Start
 
@@ -22,6 +42,28 @@ python -m venv .venv
 pip install -e ".[all]"
 python -m openforexai.main
 ```
+
+Notes:
+- SQLite is created automatically on startup (default setup).
+- If you use broker/LLM modules, ensure required credentials are set in your environment or `.env`.
+
+## Why This Project Exists
+
+This project started from a simple observation: in Forex trading, discipline and risk management are often harder than analysis itself.  
+The core idea was to let an LLM-based system apply rules consistently without emotional pressure, then expand it into a modular multi-agent platform.
+
+OpenForexAI is designed to be highly configurable:
+- flexible agent behavior via config
+- adapter/plugin architecture for brokers, LLMs, and tools
+- support for users with and without direct broker API access (including MT5 integration)
+
+## Help Wanted
+
+To move the project from beta to a robust production-grade platform, contributions are welcome in:
+- prompt engineering and evaluation workflows
+- testing (especially end-to-end reliability)
+- adapters/plugins and interoperability
+- bug fixing and documentation
 
 > **Disclaimer:** This software is provided for educational and research purposes.
 > Forex trading involves substantial risk of loss. Always test with a practice
