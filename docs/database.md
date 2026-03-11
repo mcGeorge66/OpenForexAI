@@ -1,4 +1,6 @@
-# DATABASE.md — OpenForexAI Database Reference
+[Back to Documentation Index](./README.md)
+
+# database.md — OpenForexAI Database Reference
 
 Complete description of all tables: purpose, population timing, writers, readers, and possible analyses.
 

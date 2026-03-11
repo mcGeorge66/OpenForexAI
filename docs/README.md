@@ -5,8 +5,9 @@ This folder contains the consolidated technical documentation. Use this index as
 ## Table of Contents
 
 ### Config
+The folder [config] contains the Central configuration files for OpenForexAI and is the **single source of truth** for all system settings.
 
-- [config.md](../config/README.md)
+- [config.md](config.md.md)
 
 ### Core
 High-level and cross-cutting documents for project-wide setup, operations, tooling, UI, and migration workflows.
@@ -16,6 +17,7 @@ High-level and cross-cutting documents for project-wide setup, operations, tooli
 - [scripts.md](./scripts.md)
 - [tools.md](./tools.md)
 - [ui.md](./ui.md)
+- [database.md](./database.md)
 
 ### OpenForexAI Packages
 Technical reference for internal `openforexai` modules, including adapters, agents, data flow, messaging, models, ports, registry, and tooling internals.
