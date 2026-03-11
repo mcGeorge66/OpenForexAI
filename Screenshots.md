@@ -1,6 +1,6 @@
 [Back to README](./README.md)
 
-- **Agent Chat**: Interactive chat with a selected running agent. It sends a direct query to that agent, shows responses, and can display related market candles for analysis agents.![ALT-TEXT](image/agentchat-1.jpg)![ALT-TEXT](image/agentchat.jpg)
+- **Agent Chat**: Interactive chat with a selected running agent. It sends a direct query to that agent, shows responses, and can display related market candles for analysis agents.![ALT-TEXT](image/agentchat-1.jpg)
     
 - **Agent Wizard**: Form-based editor for agent definitions in system config. You create/update/delete agents, set model/broker/pair, triggers, prompts, tools, and runtime behavior.![ALT-TEXT](image/agentwizard.jpg)
     
