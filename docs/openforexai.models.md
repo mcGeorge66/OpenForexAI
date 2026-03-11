@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/models — Domain Models
 
 Pydantic v2 data models for all system data. These are the canonical data structures used throughout the application — from market data to trade orders, agent decisions, and observability events.

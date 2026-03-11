@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # scripts — CLI Utilities
 
 Standalone command-line scripts for database management, data export, and backtesting. These scripts operate independently of the running system — they don't require the main application to be running.

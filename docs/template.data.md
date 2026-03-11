@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # Data Adapter Templates
 
 This folder contains templates and helper scripts for data container adapter development.

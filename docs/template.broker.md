@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # Broker Adapter Templates
 
 This folder contains templates and helper scripts for broker adapter development.

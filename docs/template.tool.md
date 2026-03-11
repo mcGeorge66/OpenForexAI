@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # Tool Development Template (OpenForexAI)
 
 This folder is a practical starting point for building new tools.

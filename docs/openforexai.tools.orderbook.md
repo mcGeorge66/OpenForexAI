@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tools/orderbook — Order Book Tools
 
 Tools for accessing the order book state — pending orders and their positions relative to current price.

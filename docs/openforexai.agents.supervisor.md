@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # agents/supervisor — Risk Management
 
 Risk management components used by Broker Agents to validate trade signals before execution. The supervisor acts as a safety gate between analysis and execution.

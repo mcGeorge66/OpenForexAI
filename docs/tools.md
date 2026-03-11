@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # OpenForexAI CLI Tools
 
 Command-line utilities for monitoring and interacting with a running OpenForexAI system.

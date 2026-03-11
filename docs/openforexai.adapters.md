@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/adapters — Pluggable Adapters
 
 Concrete implementations of the abstract ports defined in `openforexai/ports/`. This package provides all external integrations: LLM providers, broker APIs, and database backends.

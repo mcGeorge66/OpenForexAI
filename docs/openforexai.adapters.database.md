@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # adapters/database — Database Adapters
 
 Concrete implementations of `AbstractRepository` for persistent storage. Handles all database I/O: candles, trades, agent decisions, optimization results.

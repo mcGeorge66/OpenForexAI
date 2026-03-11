@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tools/account — Account Tools
 
 Tools that give agents visibility into the live account state: balance, equity, margin, and open positions.

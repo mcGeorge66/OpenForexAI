@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai — Main Application Package
 
 The root package of the OpenForexAI system. This is the entry point for the entire autonomous multi-agent forex trading platform.
@@ -117,14 +119,14 @@ The system exposes a REST API on `http://127.0.0.1:8765` by default.
 | `POST /routing/reload` | Hot-reload routing rules |
 | `GET /tools` | List registered tool plugins |
 
-See the [`management/` README](management/README.md) for full API documentation.
+See the [`management/` README](./openforexai.management.md) for full API documentation.
 
 ## See Also
 
-- [`agents/`](agents/README.md) — How agents work
-- [`messaging/`](messaging/README.md) — EventBus and routing
-- [`data/`](data/README.md) — Market data management
-- [`tools/`](tools/README.md) — LLM tool plugins
-- [`ports/`](ports/README.md) — Abstract interfaces
-- [`../tools/README.md`](../tools/README.md) — CLI monitoring and query tools
+- [`agents/`](./openforexai.agents.md) — How agents work
+- [`messaging/`](./openforexai.messaging.md) — EventBus and routing
+- [`data/`](./openforexai.data.md) — Market data management
+- [`tools/`](./openforexai.tools.md) — LLM tool plugins
+- [`ports/`](./openforexai.ports.md) — Abstract interfaces
+- [`../tools/README.md`](./openforexai.tools.md) — CLI monitoring and query tools
 

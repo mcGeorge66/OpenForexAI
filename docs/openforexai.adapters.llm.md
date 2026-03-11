@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # adapters/llm — LLM Provider Adapters
 
 Concrete implementations of `AbstractLLMProvider` for all supported LLM services. Each adapter translates the system's internal canonical format to the provider's specific API format.

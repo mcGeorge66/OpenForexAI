@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/utils — Utilities
 
 Shared helper utilities used throughout the codebase. No business logic — pure infrastructure helpers.

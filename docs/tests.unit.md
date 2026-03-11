@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tests/unit — Unit Tests
 
 Fast, isolated unit tests. No file I/O, no network access, no asyncio event loops running. Tests execute in milliseconds.
