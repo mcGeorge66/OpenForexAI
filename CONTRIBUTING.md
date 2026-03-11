@@ -4,6 +4,13 @@
 
 Thank you for your interest in contributing to OpenForexAI.
 
+## Contributor Agreement (Required)
+
+All external contributions require acceptance of [`CLA.md`](./CLA.md).
+
+- Pull requests are only eligible for review/merge after CLA acceptance.
+- By contributing, you confirm the contribution is voluntary and without any compensation or future profit participation claim.
+
 ## Scope
 
 Contributions are welcome for:
@@ -38,6 +45,7 @@ If your change touches only a specific area, run the most relevant subset in add
 ## Commit and PR Guidelines
 
 - Use clear commit messages in imperative form.
+- Confirm CLA acceptance before requesting review (see [`CLA.md`](./CLA.md)).
 - Include a concise PR description:
   - What changed
   - Why it changed
@@ -52,6 +60,8 @@ If your change touches only a specific area, run the most relevant subset in add
 - Avoid reducing existing test coverage.
 
 ## Documentation Expectations
+
+Repository license: [`LICENSE`](LICENSE.md)
 
 - Update docs when changing behavior, configuration, or APIs.
 - Keep `README.md` and topic files (`architecture.md`, `setup.md`, `developer.md`) consistent.
