@@ -15,3 +15,4 @@ PluginRegistry.register_repository("sqlite",      SQLiteDataContainer)
 PluginRegistry.register_repository("postgresql",  PostgreSQLDataContainer)
 
 __all__ = ["SQLiteDataContainer", "PostgreSQLDataContainer"]
+

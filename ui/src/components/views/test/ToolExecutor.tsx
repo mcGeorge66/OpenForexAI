@@ -3,7 +3,7 @@
  * and inspect the result.  Uses GET /tools for the manifest and POST /tools/execute.
  */
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, type ToolInfo, type JsonSchemaProperty } from '@/api/client'
 import { useTools } from '@/hooks/useTools'
 import { Play, ChevronDown, ChevronRight } from 'lucide-react'
@@ -109,12 +109,70 @@ export function ToolExecutor() {
   const { tools, loading: toolsLoading } = useTools()
   const [selectedTool, setSelectedTool] = useState<string>('')
   const [values, setValues] = useState<Record<string, string>>({})
+  const [agentOptions, setAgentOptions] = useState<string[]>([])
+  const [brokerOptions, setBrokerOptions] = useState<string[]>([])
+  const [llmOptions, setLlmOptions] = useState<string[]>([])
+  const [agentId, setAgentId] = useState<string>('')
+  const [brokerName, setBrokerName] = useState<string>('')
+  const [llmName, setLlmName] = useState<string>('')
+  const [contextError, setContextError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<unknown>(null)
   const [isError, setIsError] = useState(false)
   const [schemaOpen, setSchemaOpen] = useState(false)
 
+  useEffect(() => {
+    api.getAgents()
+      .then(resp => setAgentOptions(resp.map(a => a.agent_id)))
+      .catch(err => setContextError(String(err)))
+    api.getModuleNames('broker')
+      .then(resp => setBrokerOptions(resp.names))
+      .catch(err => setContextError(String(err)))
+    api.getModuleNames('llm')
+      .then(resp => setLlmOptions(resp.names))
+      .catch(err => setContextError(String(err)))
+  }, [])
+
   const tool = tools.find(t => t.name === selectedTool)
+  const isPlaceOrder = tool?.name === 'place_order'
+
+  useEffect(() => {
+    if (!tool) return
+    const hasAgentArg = Boolean(tool.input_schema.properties?.agent)
+    if (!hasAgentArg) return
+    const nextAgent = agentId.trim()
+    setValues(prev => {
+      if ((prev.agent ?? '') === nextAgent) return prev
+      return { ...prev, agent: nextAgent }
+    })
+  }, [agentId, tool])
+
+  const placeOrderIssues = useMemo(() => {
+    if (!isPlaceOrder) return [] as string[]
+    const issues: string[] = []
+    const orderType = (values.order_type || '').toUpperCase()
+    const units = Number(values.units)
+    if (!brokerName && !agentId) {
+      issues.push('Select a Broker adapter or an Agent context for realistic execution tests.')
+    }
+    if (!values.direction) issues.push('direction is required.')
+    if (!orderType) issues.push('order_type is required.')
+    if (!values.units) {
+      issues.push('units is required.')
+    } else if (!Number.isFinite(units) || units <= 0 || !Number.isInteger(units)) {
+      issues.push('units must be a positive integer.')
+    }
+    if (orderType === 'LIMIT' && !values.limit_price) issues.push('LIMIT requires limit_price.')
+    if (orderType === 'STOP' && !values.stop_price) issues.push('STOP requires stop_price.')
+    if (orderType === 'STOP_LIMIT') {
+      if (!values.stop_price) issues.push('STOP_LIMIT requires stop_price.')
+      if (!values.limit_price) issues.push('STOP_LIMIT requires limit_price.')
+    }
+    if (orderType === 'TRAILING_STOP' && !values.trailing_stop_distance) {
+      issues.push('TRAILING_STOP requires trailing_stop_distance.')
+    }
+    return issues
+  }, [isPlaceOrder, values, brokerName, agentId])
 
   const handleToolChange = (name: string) => {
     setSelectedTool(name)
@@ -127,13 +185,45 @@ export function ToolExecutor() {
     setValues(prev => ({ ...prev, [key]: value }))
   }
 
+  const applyPlaceOrderPreset = (preset: 'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT') => {
+    const base: Record<string, string> = {
+      direction: 'buy',
+      order_type: preset,
+      units: '10000',
+      risk_pct: '1.0',
+      confidence: '0.6',
+      reasoning: 'ToolExecutor smoke test',
+      entry_price: '1.10000',
+      stop_loss: '1.09850',
+      take_profit: '1.10200',
+      limit_price: '',
+      stop_price: '',
+      trailing_stop_distance: '',
+    }
+    if (preset === 'LIMIT') base.limit_price = '1.09950'
+    if (preset === 'STOP') base.stop_price = '1.10050'
+    if (preset === 'STOP_LIMIT') {
+      base.stop_price = '1.10050'
+      base.limit_price = '1.10070'
+    }
+    setValues(base)
+    setResult(null)
+    setIsError(false)
+  }
+
   const execute = async () => {
     if (!tool || running) return
     setRunning(true)
     setResult(null)
     try {
       const args = coerceArguments(values, tool.input_schema)
-      const resp = await api.executeTool(tool.name, args)
+      const resp = await api.executeTool(
+        tool.name,
+        args,
+        agentId.trim() || null,
+        brokerName.trim() || null,
+        llmName.trim() || null,
+      )
       setResult(resp.result)
       setIsError(resp.is_error)
     } catch (err) {
@@ -148,7 +238,7 @@ export function ToolExecutor() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 min-h-0 p-4 flex flex-col gap-4 overflow-hidden">
         {/* Tool selector */}
         <div>
           <label className="block text-xs text-gray-400 mb-1">Tool</label>
@@ -165,26 +255,69 @@ export function ToolExecutor() {
           </select>
         </div>
 
+        {/* Context: agent + broker adapter + llm */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">
+              Agent
+              <span className="text-gray-600 ml-1">(optional)</span>
+            </label>
+            <select
+              value={agentId}
+              onChange={e => setAgentId(e.target.value)}
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+            >
+              <option value="">— none —</option>
+              {agentOptions.map(id => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">
+              Broker adapter
+              <span className="text-gray-600 ml-1">(optional)</span>
+            </label>
+            <select
+              value={brokerName}
+              onChange={e => setBrokerName(e.target.value)}
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+            >
+              <option value="">— none —</option>
+              {brokerOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">
+              LLM
+              <span className="text-gray-600 ml-1">(optional)</span>
+            </label>
+            <select
+              value={llmName}
+              onChange={e => setLlmName(e.target.value)}
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+            >
+              <option value="">— none —</option>
+              {llmOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {contextError && (
+          <p className="text-red-400 text-xs">Error loading context options: {contextError}</p>
+        )}
+
         {tool && (
-          <>
+          <div className="flex flex-col gap-4 flex-1 min-h-0">
             {/* Tool description */}
             <div className="bg-gray-900 rounded p-3 border border-gray-700">
-              <p className="text-xs text-gray-300">{tool.description}</p>
+              <p className="text-sm leading-6 text-gray-200">{tool.description}</p>
               {tool.requires_approval && (
                 <p className="text-xs text-orange-400 mt-1">⚠ This tool requires approval</p>
               )}
-            </div>
-
-            {/* Arguments form */}
-            <div>
-              <h3 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
-                Arguments
-              </h3>
-              <SchemaForm
-                schema={tool.input_schema}
-                values={values}
-                onChange={handleChange}
-              />
             </div>
 
             {/* Raw schema toggle */}
@@ -208,34 +341,74 @@ export function ToolExecutor() {
               )}
             </div>
 
-            {/* Execute button */}
-            <button
-              onClick={execute}
-              disabled={running}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors"
-            >
-              <Play className="w-4 h-4" />
-              {running ? 'Executing…' : 'Execute'}
-            </button>
-          </>
-        )}
+            <hr className="border-gray-700" />
 
-        {/* Result */}
-        {resultJson !== null && (
-          <div>
-            <h3 className={`text-xs font-semibold uppercase tracking-wider mb-2 ${
-              isError ? 'text-red-400' : 'text-emerald-400'
-            }`}>
-              {isError ? 'Error' : 'Result'}
-            </h3>
-            <pre
-              className={`text-xs font-mono p-3 rounded border overflow-auto max-h-80 ${
-                isError
-                  ? 'bg-red-950/30 border-red-800'
-                  : 'bg-gray-900 border-gray-700'
-              }`}
-              dangerouslySetInnerHTML={{ __html: highlight(resultJson) }}
-            />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0 items-stretch">
+              {/* Arguments form */}
+              <div className="flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                    Arguments
+                  </h3>
+                  <button
+                    onClick={execute}
+                    disabled={running}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs rounded transition-colors"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    {running ? 'Executing…' : 'Execute'}
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-auto pr-1">
+                  {isPlaceOrder && (
+                    <div className="mb-3 p-2 border border-gray-700 rounded bg-gray-900/50 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-gray-400 uppercase tracking-wide">Quick presets:</span>
+                        <button onClick={() => applyPlaceOrderPreset('MARKET')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Market</button>
+                        <button onClick={() => applyPlaceOrderPreset('LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Limit</button>
+                        <button onClick={() => applyPlaceOrderPreset('STOP')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop</button>
+                        <button onClick={() => applyPlaceOrderPreset('STOP_LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop-Limit</button>
+                      </div>
+                      {placeOrderIssues.length > 0 ? (
+                        <ul className="text-xs text-amber-300 space-y-1">
+                          {placeOrderIssues.map(issue => <li key={issue}>- {issue}</li>)}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-emerald-400">Smoke-check OK: required place_order fields are present.</p>
+                      )}
+                    </div>
+                  )}
+                  <SchemaForm
+                    schema={tool.input_schema}
+                    values={values}
+                    onChange={handleChange}
+                  />
+                </div>
+              </div>
+
+              {/* Result */}
+              <div className="flex flex-col min-h-0 h-full">
+                <h3 className={`text-xs font-semibold uppercase tracking-wider mb-2 ${
+                  isError ? 'text-red-400' : 'text-emerald-400'
+                }`}>
+                  {isError ? 'Error' : 'Result'}
+                </h3>
+                {resultJson === null ? (
+                  <div className="text-xs text-gray-500 border border-gray-700 rounded p-3 bg-gray-900 flex-1 overflow-auto">
+                    No result yet.
+                  </div>
+                ) : (
+                  <pre
+                    className={`text-xs font-mono p-3 rounded border overflow-auto flex-1 ${
+                      isError
+                        ? 'bg-red-950/30 border-red-800'
+                        : 'bg-gray-900 border-gray-700'
+                    }`}
+                    dangerouslySetInnerHTML={{ __html: highlight(resultJson) }}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

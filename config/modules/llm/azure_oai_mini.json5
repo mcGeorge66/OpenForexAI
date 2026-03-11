@@ -1,0 +1,12 @@
+{
+  "adapter": "azure",
+  "api_key": "Axvdx7JsLkDvKl0uxJJd4dp0WyDH7rFJiueA4Y4FZSQIQ4ajXGhKJQQJ99CAACHYHv6XJ3w3AAAAACOGH0T2",
+  "endpoint": "https://agge-ml1iurv5-eastus2.cognitiveservices.azure.com",
+  "deployment": "gpt-5-mini",
+  "model": "gpt-5-mini",
+  "api_version": "2025-04-01-preview",
+  "retry_attempts": 3,
+  "retry_base_delay": 1.0,
+  "temperature": 1.0,
+  "max_tokens": 2048
+}

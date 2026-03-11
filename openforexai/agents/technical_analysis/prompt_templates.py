@@ -53,3 +53,4 @@ Output format (JSON only, no markdown):
 
 def get_system_prompt(pair: str) -> str:
     return TECHNICAL_ANALYSIS_SYSTEM_PROMPT.format(pair=pair)
+

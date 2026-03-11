@@ -72,7 +72,7 @@ Atomically swaps the routing table. Safe to call while the system is running.
 
 ```python
 routing = RoutingTable()
-routing.load(Path("config/event_routing.json"))
+routing.load(Path("config/RunTime/event_routing.json5"))
 bus = EventBus(routing)
 
 # Agent registers its inbox
@@ -96,7 +96,7 @@ await bus.publish(AgentMessage(
 
 ## `routing.py` — RoutingTable
 
-Loads and evaluates routing rules from `config/event_routing.json`.
+Loads and evaluates routing rules from `config/RunTime/event_routing.json5`.
 
 ### Rule Format
 
@@ -197,3 +197,5 @@ bus.publish(ORDER_PLACED)
 ## Unmatched Events
 
 If no routing rule matches AND no handler is registered for an event, the message is **silently discarded** and a `UNMATCHED_EVENT` monitoring entry is emitted (at DEBUG level). This is expected for events that are intentionally local (e.g., `AGENT_CONFIG_RESPONSE` is direct-targeted and never goes through routing rules).
+
+

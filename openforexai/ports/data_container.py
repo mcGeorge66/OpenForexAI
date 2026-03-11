@@ -36,7 +36,7 @@ class AbstractDataContainer(AbstractRepository):
 
         PluginRegistry.register_data_container("sqlite", SQLiteDataContainer)
 
-    Bootstrap selects the implementation via system.json ``database.backend``.
+    Bootstrap selects the implementation via system.json5 ``database.backend``.
     """
 
     # ── Agent decision memory ──────────────────────────────────────────────────
@@ -61,7 +61,7 @@ class AbstractDataContainer(AbstractRepository):
 
         Parameters
         ----------
-        agent_id:        Canonical agent ID (e.g. ``OAPR1_EURUSD_AA_ANLYS``)
+        agent_id:        Canonical agent ID (e.g. ``OAPR1-EURUSD-AA-ANLYS``)
         pair:            Currency pair or None for broker-wide decisions
         decision_type:   One of: ``no_action`` | ``signal_buy`` | ``signal_sell``
                          | ``close_position`` | ``analysis`` | ``other``
@@ -164,3 +164,4 @@ class AbstractDataContainer(AbstractRepository):
         ``period_end``, and ``recorded_at`` as ISO strings.
         """
         ...
+

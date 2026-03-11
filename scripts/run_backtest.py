@@ -19,8 +19,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
     parser.add_argument(
         "--config",
-        default="config/system.json",
-        help="Path to config JSON (default: config/system.json)",
+        default="config/system.json5",
+        help="Path to config JSON5 (default: config/system.json5)",
     )
     return parser.parse_args()
 
@@ -39,3 +39,5 @@ async def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     asyncio.run(main(parse_args()))
+
+

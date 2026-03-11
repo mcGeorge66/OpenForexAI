@@ -87,3 +87,4 @@ class MonitoringEvent(BaseModel):
     broker_name: str | None = None         # set when event relates to a specific broker
     pair: str | None = None                # set when event relates to a specific pair
     payload: dict = Field(default_factory=dict)
+

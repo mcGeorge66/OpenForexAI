@@ -1,6 +1,6 @@
-"""Event routing table — loads rules from JSON, resolves message targets.
+"""Event routing table — loads rules from JSON5, resolves message targets.
 
-Rule file format (``config/event_routing.json``)::
+Rule file format (``config/RunTime/event_routing.json5``)::
 
     {
       "rules": [
@@ -8,8 +8,8 @@ Rule file format (``config/event_routing.json``)::
           "id":          "unique_rule_id",
           "description": "Human-readable comment",
           "event":       "m5_candle_available",   // EventType.value or "*"
-          "from":        "OANDA_*_AA_*",          // sender agent-id pattern or "*"
-          "to":          "SYSTM_ALL..._GA_DATA1", // target (see below)
+          "from":        "OANDA-*-AA-*",          // sender agent-id pattern or "*"
+          "to":          "SYSTM-ALL___-GA-DATA1", // target (see below)
           "priority":    100                       // lower number = higher priority
         }
       ]
@@ -18,17 +18,17 @@ Rule file format (``config/event_routing.json``)::
 ``to`` target types
 -------------------
 Literal agent ID
-    ``"OANDA_ALL..._BA_SUP1"``
+    ``"OANDA-ALL___-BA-SUP1"``
     Message is delivered to that single registered agent.
 
 Template
-    ``"OANDA_{sender.pair}_AA_TRD1"``
+    ``"OANDA-{sender.pair}-AA-TRD1"``
     Placeholders are substituted from the sender's parsed AgentId.
     Supported: ``{sender.broker}``, ``{sender.pair}``, ``{sender.type}``,
     ``{sender.name}``, ``{sender.extension}``, ``{sender.id}``.
 
 Broadcast pattern (contains '*')
-    ``"*_EURUSD_AA_*"``
+    ``"*-EURUSD-AA-*"``
     Message is fanned out to all *registered* agents whose ID matches the pattern.
 
 ``"*"`` (asterisk only)
@@ -47,7 +47,7 @@ and the union of their resolved targets receives the message.
 """
 from __future__ import annotations
 
-import json
+import json5
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,7 +59,7 @@ _log = logging.getLogger(__name__)
 
 @dataclass
 class RoutingRule:
-    """A single routing rule loaded from JSON."""
+    """A single routing rule loaded from JSON5."""
 
     id: str
     event: str                 # EventType.value or "*"
@@ -151,7 +151,7 @@ class RoutingTable:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(self, path: Path) -> None:
-        """Load routing rules from *path* (JSON).  Replaces any existing rules."""
+        """Load routing rules from *path* (JSON5).  Replaces any existing rules."""
         self._path = path
         self._rules = _parse_rules(path)
         _log.info("Routing table loaded: %d rules from %s", len(self._rules), path)
@@ -214,12 +214,12 @@ class RoutingTable:
 def _parse_rules(path: Path) -> list[RoutingRule]:
     try:
         text = path.read_text(encoding="utf-8")
-        data = json.loads(text)
+        data = json5.loads(text)
     except FileNotFoundError:
         _log.warning("Routing file not found: %s — using empty table", path)
         return []
-    except json.JSONDecodeError as exc:
-        _log.error("Invalid JSON in routing file %s: %s", path, exc)
+    except ValueError as exc:
+        _log.error("Invalid JSON5 in routing file %s: %s", path, exc)
         return []
     return _rules_from_dict(data)
 
@@ -246,3 +246,9 @@ def _rules_from_dict(data: dict) -> list[RoutingRule]:
 
     rules.sort(key=lambda r: r.priority)
     return rules
+
+
+
+
+
+

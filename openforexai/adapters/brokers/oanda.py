@@ -408,3 +408,4 @@ class OANDABroker(BrokerBase):
             pnl=Decimal(data.get("pl", "0")),
             closed_at=datetime.now(timezone.utc),
         )
+

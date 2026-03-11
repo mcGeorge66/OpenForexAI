@@ -8,8 +8,8 @@ Handles all configuration loading and the runtime distribution of agent configs 
 |---|---|
 | `config_service.py` | `ConfigService` — EventBus agent that answers config requests |
 | `json_loader.py` | JSON loader with `${ENV_VAR:-default}` substitution |
-| `agent_tools.json` | Per-agent tool approval modes and tier configuration |
-| `event_routing.json` | EventBus routing rules |
+| `../../config/RunTime/agent_tools.json5` | Per-agent tool approval modes and tier configuration |
+| `../../config/RunTime/event_routing.json5` | EventBus routing rules |
 
 ---
 
@@ -32,7 +32,7 @@ Agent.start()
        └── routing rule "config_request_to_service" → ConfigService inbox
 
 ConfigService._handle_request()
-    2. looks up agents["OAPR1_EURUSD_AA_ANLYS"] in system.json
+    2. looks up agents["OAPR1_EURUSD_AA_ANLYS"] in system.json5
     3. resolves LLM and broker module configs
     4. publishes: AGENT_CONFIG_RESPONSE (direct → requesting agent)
        payload: {config: {...}, modules: {llm: {...}, broker: {...}}}
@@ -78,7 +78,7 @@ Loads JSON files with recursive **environment variable substitution**.
 
 ### Example
 
-`config/modules/llm/azure_openai.json`:
+`config/modules/llm/azure_openai.json5`:
 ```json
 {
   "adapter": "azure_openai",
@@ -95,7 +95,7 @@ Substitution is applied recursively to all string values at any nesting level.
 
 ---
 
-## `agent_tools.json` — Tool Approval Configuration
+## `config/RunTime/agent_tools.json5` — Tool Approval Configuration
 
 Configures per-agent tool approval modes and context budget tiers. This file allows fine-grained control over when tools require human/supervisor approval.
 
@@ -122,7 +122,7 @@ Agent-level overrides take precedence over defaults.
 
 ---
 
-## `event_routing.json` — Routing Rules
+## `config/RunTime/event_routing.json5` — Routing Rules
 
 Defines how events flow between agents on the EventBus. See [`messaging/README.md`](../messaging/README.md) for the full routing documentation.
 
@@ -145,3 +145,6 @@ The routing table can be reloaded without restarting the system:
 ```bash
 curl -X POST http://127.0.0.1:8765/routing/reload
 ```
+
+
+

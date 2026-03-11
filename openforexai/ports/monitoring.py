@@ -22,3 +22,4 @@ class AbstractMonitoringBus(ABC):
         the oldest or newest event is dropped silently.
         """
         ...
+

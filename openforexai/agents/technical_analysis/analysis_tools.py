@@ -84,3 +84,4 @@ def trend_strength(candles: list[Candle], period: int = 20) -> tuple[str, float]
     strength = min(abs(last - first) / total_range, 1.0)
     direction = "bullish" if last > first else "bearish"
     return direction, round(strength, 3)
+

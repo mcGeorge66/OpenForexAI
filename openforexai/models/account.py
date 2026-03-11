@@ -23,3 +23,4 @@ class AccountStatus(BaseModel):
     trade_allowed: bool     # False during news/weekends if broker restricts trading
     margin_level: float | None  # equity / margin * 100; None when no open trades
     recorded_at: datetime   # UTC timestamp when this snapshot was taken
+

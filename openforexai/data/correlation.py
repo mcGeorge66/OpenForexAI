@@ -48,3 +48,4 @@ def compute_correlation_matrix(
         matrix=matrix,
         computed_at=utcnow().isoformat(),
     )
+

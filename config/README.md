@@ -1,25 +1,28 @@
 # config — System Configuration
 
-Central configuration files for OpenForexAI. This directory is the **single source of truth** for all system settings.
+Central configuration files for OpenForexAI. The directory **[config]** is the **single source of truth** for all system settings.
 
 ## Structure
 
 ```
 config/
-├── system.json              # Central config — agents, modules, database, system
+├── system.json5              # Central config — agents, modules, database, system
+├── RunTime/
+│   ├── agent_tools.json5     # Tool permissions, tiers, bridge tools
+│   └── event_routing.json5   # EventBus routing rules (hot-reloadable)
 └── modules/
-    ├── llm/
-    │   ├── azure_openai.json
-    │   ├── openai.json
-    │   └── anthropic_claude.json
-    └── broker/
-        ├── oanda.json
-        └── mt5.json
+    ├── llm/                  # Config files for the different language models
+    │   ├── azure_openai.json5
+    │   ├── openai.json5
+    │   └── anthropic_claude.json5
+    └── broker/               # Config files for different broker
+        ├── oanda.json5
+        └── mt5.json5
 ```
 
 ---
 
-## `system.json` — Central Configuration
+## `system.json5` — Central Configuration
 
 All parameters live here. Module-specific connection details (API keys, endpoints) are referenced by name and stored in `config/modules/`.
 
@@ -61,11 +64,11 @@ Declares available LLM and broker module config file paths:
 ```json
 "modules": {
   "llm": {
-    "azure_openai": "config/modules/llm/azure_openai.json",
-    "openai":       "config/modules/llm/openai.json"
+    "azure_openai": "config/modules/llm/azure_openai.json5",
+    "openai":       "config/modules/llm/openai.json5"
   },
   "broker": {
-    "oanda": "config/modules/broker/oanda.json"
+    "oanda": "config/modules/broker/oanda.json5"
   }
 }
 ```
@@ -82,6 +85,7 @@ One entry per running agent:
     "pair": "EURUSD",
     "timer": {"enabled": true, "interval_seconds": 300},
     "event_triggers": ["m5_candle_available", "prompt_updated", "agent_query"],
+    "AnyCandle": 3,
     "system_prompt": "...",
     "tool_config": {
       "allowed_tools": ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
@@ -103,7 +107,7 @@ One entry per running agent:
 
 Each file contains connection details for one LLM provider. Values use `${ENV_VAR:-default}` substitution.
 
-### `azure_openai.json`
+### `azure_openai.json5`
 ```json
 {
   "adapter": "azure_openai",
@@ -114,7 +118,7 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
 }
 ```
 
-### `openai.json`
+### `openai.json5`
 ```json
 {
   "adapter": "openai",
@@ -123,7 +127,7 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
 }
 ```
 
-### `anthropic_claude.json`
+### `anthropic_claude.json5`
 ```json
 {
   "adapter": "anthropic",
@@ -136,26 +140,37 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
 
 ## `modules/broker/` — Broker Module Configs
 
-### `oanda.json`
+### `oanda.json5`
 ```json
 {
   "adapter": "oanda",
   "api_key": "${OANDA_API_KEY}",
   "account_id": "${OANDA_ACCOUNT_ID}",
   "practice": "${OANDA_PRACTICE:-true}",
-  "short_name": "${OANDA_SHORT_NAME:-OAPR1}"
+  "short_name": "${OANDA_SHORT_NAME:-OAPR1}",
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
 }
 ```
 `short_name` is the 5-character identifier used in agent IDs and database table names (e.g., `OAPR1_EURUSD_M5`).
+`background_tasks` controls broker polling/sync frequency per broker module.
 
-### `mt5.json`
+### `mt5.json5`
 ```json
 {
   "adapter": "mt5",
   "login": "${MT5_LOGIN}",
   "password": "${MT5_PASSWORD}",
   "server": "${MT5_SERVER}",
-  "short_name": "${MT5_SHORT_NAME:-MT5B1}"
+  "short_name": "${MT5_SHORT_NAME:-MT5B1}",
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
 }
 ```
 
@@ -180,7 +195,7 @@ OPENFOREXAI_DB_BACKEND=sqlite
 
 ## Adding a New Agent
 
-Add an entry to `system.json → agents` with a valid agent ID. No code changes needed. The system creates the agent automatically on next startup.
+Add an entry to `system.json5 → agents` with a valid agent ID. No code changes needed. The system creates the agent automatically on next startup.
 
 **Agent ID format:** `[BROKER(5)]_[PAIR(6)]_[TYPE(2)]_[NAME(1-5)]`
 - Example: `OAPR1_GBPUSD_AA_ANLYS` — Analysis Agent for GBP/USD on OANDA Practice

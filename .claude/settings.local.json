@@ -24,7 +24,20 @@
       "Bash(\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest \"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\" -x -q)",
       "Bash(\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest \"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\" -q --ignore=\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\\\\test_analysis_tools.py\")",
       "Bash(\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest \"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\" -q --ignore=\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\\\\test_analysis_tools.py\" --ignore=\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\\\\test_pattern_detector.py\" --ignore=\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\tests\\\\unit\\\\test_risk_engine.py\")",
-      "Bash(\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import ast, sys; ast.parse\\(open\\(''D:/GitHub/GHG/OpenForexAI/openforexai/management/api.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")"
+      "Bash(\"D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import ast, sys; ast.parse\\(open\\(''D:/GitHub/GHG/OpenForexAI/openforexai/management/api.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(git add openforexai/management/api.py)",
+      "Bash(git commit:*)",
+      "Bash(git push origin Win_1)",
+      "Bash(gh pr:*)",
+      "Bash(where gh)",
+      "Bash(winget list GitHub.cli)",
+      "Bash(cmd //c \"where gh\")",
+      "Bash(.venv/Scripts/python.exe -c \":*)",
+      "Bash(xargs ls -lh)",
+      "Bash(npm run build --prefix /mnt/d/GitHub/GHG/OpenForexAI/ui)",
+      "Bash(cmd /c \"cd /d D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\ui && npm run build\")",
+      "Bash(cmd /c \"cd /d D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\ui && npm run build 2>&1\")",
+      "Bash(powershell.exe -Command \"cd ''D:\\\\GitHub\\\\GHG\\\\OpenForexAI\\\\ui''; npm run build 2>&1\")"
     ]
   }
 }

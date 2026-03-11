@@ -37,3 +37,4 @@ def normalize_price(price: float | Decimal, pair: str) -> float:
     p = pip_size(pair)
     decimals = abs(p.as_tuple().exponent)
     return round(float(price), decimals)
+

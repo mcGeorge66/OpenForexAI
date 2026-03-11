@@ -61,11 +61,11 @@ class EventBus:
     Quick-start::
 
         routing = RoutingTable()
-        routing.load(Path("config/event_routing.json"))
+        routing.load(Path("config/RunTime/event_routing.json5"))
         bus = EventBus(routing)
 
         # Register an agent (returns its personal queue)
-        queue = bus.register_agent("OANDA_EURUSD_AA_TRD1")
+        queue = bus.register_agent("OANDA-EURUSD-AA-TRD1")
 
         # Legacy handler subscribe (backward compat)
         bus.subscribe(EventType.M5_CANDLE_AVAILABLE, data_container._on_m5_candle)
@@ -314,3 +314,5 @@ class EventBus:
             ))
         except Exception:
             pass  # monitoring must never break the bus
+
+

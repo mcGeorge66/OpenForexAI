@@ -96,7 +96,7 @@ If `EURUSD` and `GBPUSD` correlation is `0.87` (> 0.85 threshold), the risk engi
 
 ### Configuration
 
-Risk parameters are configured per-agent in `system.json`. A typical BA agent receives risk parameters as part of its system prompt context, or from a GA agent that manages portfolio-level risk.
+Risk parameters are configured per-agent in `system.json5`. A typical BA agent receives risk parameters as part of its system prompt context, or from a GA agent that manages portfolio-level risk.
 
 ---
 
@@ -113,3 +113,4 @@ class RiskParameters(BaseModel):
     risk_per_trade_pct: float      # % of balance to risk per trade
     correlation_threshold: float   # above this → positions considered correlated
 ```
+

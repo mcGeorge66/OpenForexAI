@@ -31,3 +31,4 @@ dedicated technical analysis pass would add value before committing to a signal.
 
 def get_default_prompt(pair: str) -> str:
     return DEFAULT_TRADING_SYSTEM_PROMPT.format(pair=pair)
+

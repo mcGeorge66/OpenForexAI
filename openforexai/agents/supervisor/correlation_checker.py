@@ -19,3 +19,4 @@ class CorrelationChecker:
     @property
     def matrix(self) -> CorrelationMatrix | None:
         return self._cached
+

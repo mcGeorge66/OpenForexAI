@@ -37,8 +37,12 @@ class ClosePositionTool(BaseTool):
         result = await context.broker.close_position(position_id)
 
         return {
-            "success": result.success,
+            "success": result.status != "REJECTED",
             "position_id": position_id,
+            "status": result.status,
+            "order_id": result.broker_order_id,
             "close_price": float(result.fill_price) if result.fill_price else None,
-            "message": result.message,
+            "pnl": float(result.pnl) if result.pnl is not None else None,
+            "broker_name": result.broker_name,
         }
+

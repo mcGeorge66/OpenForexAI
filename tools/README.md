@@ -393,3 +393,4 @@ JSON responses are automatically pretty-printed. Plain-text responses are shown 
   or `--llm` in a second terminal to watch the agent process your question in real time.
 - **The agent uses its full tool set** — it has access to all configured tools
   (market data, indicators, account info, etc.) when answering your question.
+

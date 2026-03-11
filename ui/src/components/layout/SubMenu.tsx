@@ -17,15 +17,22 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'all',          label: 'All Events'   },
     { id: 'llm',          label: 'LLM Events'   },
     { id: 'tool',         label: 'Tool Events'  },
-    { id: 'bus',          label: 'Bus Events'   },
-    { id: 'data',         label: 'Data Events'  },
+    { id: 'bus',          label: 'Bus Events'    },
+    { id: 'broker',       label: 'Broker Events' },
+    { id: 'data',         label: 'Data Events'   },
   ],
   config: [
+    { id: 'information',  label: 'Information'   },
+    { id: 'agent_wizard', label: 'Agent Wizard'  },
     { id: 'system',       label: 'System Config'  },
     { id: 'agent_tools',  label: 'Agent Tools'    },
+    { id: 'bridge_tools', label: 'Bridge Tools'   },
     { id: 'event_routing',label: 'Event Routing'  },
+    { id: 'llm',          label: 'LLM Modules'    },
+    { id: 'broker',       label: 'Broker Modules' },
   ],
   test: [
+    { id: 'llm_checker', label: 'LLM Checker'   },
     { id: 'tool_exec',    label: 'Tool Executor'  },
   ],
 }
@@ -63,3 +70,5 @@ export function SubMenu({ section, active, onSelect }: SubMenuProps) {
 }
 
 export { SUB_ITEMS }
+
+

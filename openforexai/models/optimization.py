@@ -43,3 +43,4 @@ class BacktestResult(BaseModel):
     sharpe_ratio: float
     vs_baseline_pnl_delta: float  # positive = improvement over active prompt
     completed_at: datetime
+

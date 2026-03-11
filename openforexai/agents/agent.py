@@ -11,13 +11,14 @@ Bootstrap sequence
 4. Agent initialises LLM, broker, tools and prompt from the received config.
 5. Agent enters its run loop (timer and/or event-triggered).
 
-Config keys (from system.json ``agents.<agent_id>``)
+Config keys (from system.json5 ``agents.<agent_id>``)
 -----------------------------------------------------
 llm              str                 LLM module name (RuntimeRegistry key)
 broker           str | None          Broker module name — omit for GA agents
 pair             str | None          Currency pair — AA agents only
 timer            {enabled, interval} Periodic self-activation
 event_triggers   list[str]           EventType values that wake the agent
+AnyCandle       int >= 1            Divider for m5_candle_available triggers
 system_prompt    str                 LLM system prompt
 tool_config      dict                Passed directly to ToolDispatcher
 
@@ -47,6 +48,7 @@ from openforexai.utils.logging import get_logger
 
 _CONFIG_TIMEOUT = 30.0   # seconds to wait for config response
 _DEFAULT_MAX_TOOL_TURNS = 10
+_DEFAULT_ANY_CANDLE_DIVIDER = 1
 
 
 class Agent:
@@ -82,6 +84,9 @@ class Agent:
         self._tool_dispatcher: ToolDispatcher | None = None
         self._max_tool_turns: int = _DEFAULT_MAX_TOOL_TURNS
         self._max_tokens: int = 4096
+        self._llm_temperature: float | None = None
+        self._any_candle_divider: int = _DEFAULT_ANY_CANDLE_DIVIDER
+        self._m5_candle_event_count: int = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -158,15 +163,58 @@ class Agent:
 
         self._system_prompt = cfg.get("system_prompt", "")
         self._event_triggers = set(cfg.get("event_triggers", []))
+        self._any_candle_divider = self._parse_any_candle_divider(
+            cfg.get("AnyCandle", cfg.get("any_candle", _DEFAULT_ANY_CANDLE_DIVIDER))
+        )
+        self._m5_candle_event_count = 0
 
         tool_cfg = cfg.get("tool_config", {})
         self._max_tool_turns = tool_cfg.get("max_tool_turns", _DEFAULT_MAX_TOOL_TURNS)
-        self._max_tokens = tool_cfg.get("max_tokens", 4096)
 
         # LLM
         llm_name = cfg.get("llm")
         if llm_name:
             self._llm = RuntimeRegistry.get_llm(llm_name)
+
+        # Resolve LLM runtime parameters:
+        # module defaults (source of truth) -> agent overrides.
+        modules = payload.get("modules", {}) if isinstance(payload.get("modules"), dict) else {}
+        llm_module_cfg = modules.get("llm", {}) if isinstance(modules.get("llm"), dict) else {}
+
+        llm_defaults: dict[str, Any] = {}
+        if isinstance(llm_module_cfg.get("defaults"), dict):
+            llm_defaults.update(llm_module_cfg["defaults"])
+        if isinstance(llm_module_cfg.get("params"), dict):
+            llm_defaults.update(llm_module_cfg["params"])
+        for key in ("temperature", "max_tokens"):
+            if key in llm_module_cfg:
+                llm_defaults[key] = llm_module_cfg.get(key)
+
+        llm_overrides: dict[str, Any] = {}
+        if isinstance(cfg.get("llm_params"), dict):
+            llm_overrides.update(cfg["llm_params"])
+        if isinstance(cfg.get("llm_config"), dict):
+            llm_overrides.update(cfg["llm_config"])
+        # Backward compatibility for any legacy top-level keys on agent config.
+        for key in ("temperature", "max_tokens"):
+            if key in cfg:
+                llm_overrides[key] = cfg.get(key)
+
+        resolved_llm = {**llm_defaults, **llm_overrides}
+
+        resolved_temp = resolved_llm.get("temperature")
+        self._llm_temperature = float(resolved_temp) if isinstance(resolved_temp, (int, float)) else None
+
+        resolved_llm_max = resolved_llm.get("max_tokens")
+        llm_default_max = getattr(self._llm, "default_max_tokens", None) if self._llm is not None else None
+
+        tool_budget_max = tool_cfg.get("max_tokens")
+        if isinstance(tool_budget_max, int) and tool_budget_max > 0:
+            self._max_tokens = tool_budget_max
+        elif isinstance(resolved_llm_max, int) and resolved_llm_max > 0:
+            self._max_tokens = resolved_llm_max
+        elif isinstance(llm_default_max, int) and llm_default_max > 0:
+            self._max_tokens = llm_default_max
 
         # Broker (optional — GA agents have no broker)
         broker_name = cfg.get("broker")
@@ -199,6 +247,37 @@ class Agent:
                 context=context,
                 agent_tool_config=tool_cfg,
             )
+
+    def _parse_any_candle_divider(self, value: Any) -> int:
+        if isinstance(value, int) and value >= 1:
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = int(value)
+                if parsed >= 1:
+                    return parsed
+            except ValueError:
+                pass
+        self._logger.warning(
+            "Invalid AnyCandle value in agent config; fallback to 1",
+            any_candle=value,
+        )
+        return _DEFAULT_ANY_CANDLE_DIVIDER
+
+    def _should_run_for_trigger(self, event_val: str) -> bool:
+        if event_val != EventType.M5_CANDLE_AVAILABLE.value:
+            return True
+        if self._any_candle_divider <= 1:
+            return True
+        self._m5_candle_event_count += 1
+        if self._m5_candle_event_count % self._any_candle_divider != 0:
+            self._logger.debug(
+                "Skipping M5 trigger because AnyCandle divider not reached",
+                any_candle=self._any_candle_divider,
+                candle_count=self._m5_candle_event_count,
+            )
+            return False
+        return True
 
     # ── Run loops ─────────────────────────────────────────────────────────────
 
@@ -251,7 +330,22 @@ class Agent:
                         source=msg.source_agent_id,
                         correlation_id=msg.correlation_id,
                     )
+                elif event_val == EventType.AGENT_CONFIG_RESPONSE.value:
+                    # Runtime config refresh: re-apply config without restart.
+                    try:
+                        self._apply_config(msg.payload or {})
+                        self._logger.info("Runtime config refresh applied")
+                    except Exception as exc:
+                        self._logger.exception(
+                            "Runtime config refresh failed",
+                            error=str(exc),
+                        )
+                        self._emit_system_error(
+                            f"Config refresh failed: {type(exc).__name__}: {exc}"
+                        )
                 elif event_val in self._event_triggers:
+                    if not self._should_run_for_trigger(event_val):
+                        continue
                     await self._run_cycle(
                         trigger=event_val,
                         payload=msg.payload,
@@ -277,6 +371,16 @@ class Agent:
     ) -> None:
         """One agent decision cycle (tool-use loop with LLM)."""
         if self._llm is None or self._tool_dispatcher is None:
+            if trigger == EventType.AGENT_QUERY.value and correlation_id:
+                await self._bus.publish(AgentMessage(
+                    event_type=EventType.AGENT_QUERY_RESPONSE,
+                    source_agent_id=self.agent_id,
+                    payload={
+                        "response": "Agent is not ready: LLM/tool dispatcher not initialized.",
+                        "agent_id": self.agent_id,
+                    },
+                    correlation_id=correlation_id,
+                ))
             return
 
         # Build the user message for this cycle
@@ -297,7 +401,22 @@ class Agent:
             )
 
         self._logger.debug("Starting cycle", trigger=trigger)
-        final_text, _ = await self._run_with_tools(user_msg, correlation_id=correlation_id)
+        try:
+            final_text, _ = await self._run_with_tools(user_msg, correlation_id=correlation_id)
+        except Exception as exc:
+            self._logger.exception("Cycle failed", trigger=trigger, error=str(exc))
+            self._emit_system_error(f"Cycle failed: {type(exc).__name__}: {exc}")
+            if trigger == EventType.AGENT_QUERY.value and correlation_id:
+                await self._bus.publish(AgentMessage(
+                    event_type=EventType.AGENT_QUERY_RESPONSE,
+                    source_agent_id=self.agent_id,
+                    payload={
+                        "response": f"LLM cycle failed: {type(exc).__name__}: {exc}",
+                        "agent_id": self.agent_id,
+                    },
+                    correlation_id=correlation_id,
+                ))
+            return
 
         # For agent_query cycles: publish the LLM response back to the caller
         if trigger == EventType.AGENT_QUERY.value and correlation_id:
@@ -334,7 +453,7 @@ class Agent:
                 system_prompt=self._system_prompt,
                 messages=messages,
                 tools=tool_specs,
-                temperature=0.1,
+                temperature=self._llm_temperature,
                 max_tokens=self._max_tokens,
             )
 
@@ -494,3 +613,5 @@ class Agent:
             ))
         except Exception:
             pass
+
+

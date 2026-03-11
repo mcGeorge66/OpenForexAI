@@ -82,3 +82,4 @@ def _hour_to_session(hour: int) -> str:
     if 0 <= hour < 9:
         return "tokyo"
     return "sydney"
+

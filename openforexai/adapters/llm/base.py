@@ -17,3 +17,4 @@ async def llm_retry(coro_fn, attempts: int = 3, base_delay: float = 1.0) -> Any:
     raise RuntimeError(
         f"LLM call failed after {attempts} attempts: {type(last_exc).__name__}: {last_exc}"
     ) from last_exc
+

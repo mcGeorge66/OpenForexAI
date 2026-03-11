@@ -37,11 +37,15 @@ class OpenAILLMProvider(AbstractLLMProvider):
         base_url: str | None = None,
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
+        default_temperature: float | None = None,
+        default_max_tokens: int = 4096,
     ) -> None:
         self._model = model
         self._retry_attempts = retry_attempts
         self._retry_base_delay = retry_base_delay
         self._client = _openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._default_temperature = default_temperature
+        self._default_max_tokens = default_max_tokens
 
     @classmethod
     def from_config(cls, cfg: dict) -> "OpenAILLMProvider":
@@ -51,11 +55,23 @@ class OpenAILLMProvider(AbstractLLMProvider):
             base_url=cfg.get("base_url") or None,
             retry_attempts=cfg.get("retry_attempts", 3),
             retry_base_delay=cfg.get("retry_base_delay", 1.0),
+            default_temperature=(
+                cfg.get("temperature") if isinstance(cfg.get("temperature"), (int, float)) else None
+            ),
+            default_max_tokens=cfg.get("max_tokens", 4096),
         )
 
     @property
     def model_id(self) -> str:
         return self._model
+
+    @property
+    def default_temperature(self) -> float | None:
+        return self._default_temperature
+
+    @property
+    def default_max_tokens(self) -> int:
+        return self._default_max_tokens
 
     # ── Simple completions ────────────────────────────────────────────────────
 
@@ -63,19 +79,25 @@ class OpenAILLMProvider(AbstractLLMProvider):
         self,
         system_prompt: str,
         user_message: str,
-        temperature: float = 0.1,
-        max_tokens: int = 1024,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
+
         async def _call() -> LLMResponse:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                messages=[
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-            )
+            }
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            if resolved_max_tokens is not None:
+                kwargs["max_tokens"] = resolved_max_tokens
+            resp = await self._client.chat.completions.create(**kwargs)
             choice = resp.choices[0]
             return LLMResponse(
                 content=choice.message.content or "",
@@ -115,24 +137,29 @@ class OpenAILLMProvider(AbstractLLMProvider):
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec],
-        temperature: float = 0.1,
-        max_tokens: int = 4096,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponseWithTools:
         """Single turn using OpenAI's native function-calling API."""
         openai_tools = [_to_openai_tool(t) for t in tools]
 
         # Prepend system message
         full_messages = [{"role": "system", "content": system_prompt}] + messages
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
 
         async def _call() -> LLMResponseWithTools:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                messages=full_messages,
-                tools=openai_tools,
-                tool_choice="auto",
-            )
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": full_messages,
+                "tools": openai_tools,
+                "tool_choice": "auto",
+            }
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            if resolved_max_tokens is not None:
+                kwargs["max_tokens"] = resolved_max_tokens
+            resp = await self._client.chat.completions.create(**kwargs)
             choice = resp.choices[0]
             msg = choice.message
 
@@ -228,3 +255,4 @@ class LMStudioLLMProvider(OpenAILLMProvider):
             retry_attempts=cfg.get("retry_attempts", 3),
             retry_base_delay=cfg.get("retry_base_delay", 1.0),
         )
+

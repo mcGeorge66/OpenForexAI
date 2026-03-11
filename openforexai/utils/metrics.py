@@ -39,3 +39,4 @@ def observe_histogram(
 ) -> None:
     if not _enabled:
         return
+

@@ -45,3 +45,4 @@ class TriggerSyncTool(BaseTool):
             "discrepancies_found": len(discrepancies) if discrepancies else 0,
             "discrepancies": discrepancies or [],
         }
+

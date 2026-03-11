@@ -1,0 +1,17 @@
+{
+  // Broker module configuration
+  // This file is managed by the module owner. The system only loads it by name.
+  "adapter":    "oanda|mt5",
+  // short_name must be exact 5 character long
+  "short_name": "OAPR1",
+  "api_key":    "3d307........4ca582",
+  "account_id": "10.......01",
+  "api_url":    "https://api-fxpractice.oanda.com/v3",
+  "practice":   true,
+  "pair":       "EURUSD",
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
+}

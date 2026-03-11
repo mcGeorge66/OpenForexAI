@@ -77,7 +77,12 @@ Controlled by the `practice` config flag:
   "account_id": "${OANDA_ACCOUNT_ID}",
   "practice": "${OANDA_PRACTICE:-true}",
   "short_name": "OAPR1",
-  "pairs": ["EUR_USD", "GBP_USD", "USD_JPY"]
+  "pairs": ["EUR_USD", "GBP_USD", "USD_JPY"],
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
 }
 ```
 
@@ -86,6 +91,20 @@ OANDA uses underscore notation (`EUR_USD`). The adapter normalises to slash-free
 ### Rate Limiting
 
 The OANDA API has rate limits (120 requests/minute for practice, 30/second for live). The adapter respects these with appropriate delays between M5 candle fetches.
+
+### Shared background task keys
+
+All broker modules can define:
+
+```json
+"background_tasks": {
+  "account_poll_interval_seconds": 60,
+  "sync_interval_seconds": 60,
+  "request_agent_reasoning": false
+}
+```
+
+These values are consumed in bootstrap and passed to `BrokerBase.start_background_tasks(...)`.
 
 ---
 
@@ -107,7 +126,12 @@ Windows-only adapter using the `MetaTrader5` Python package (requires MT5 termin
   "login": "${MT5_LOGIN}",
   "password": "${MT5_PASSWORD}",
   "server": "${MT5_SERVER}",
-  "short_name": "MT5B1"
+  "short_name": "MT5B1",
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
 }
 ```
 
@@ -145,4 +169,5 @@ class MyBroker(BrokerBase):
 PluginRegistry.register_broker("mybroker", MyBroker)
 ```
 
-3. Create `config/modules/broker/mybroker.json` and reference in `config/system.json`.
+3. Create `config/modules/broker/mybroker.json5` and reference in `config/system.json5`.
+

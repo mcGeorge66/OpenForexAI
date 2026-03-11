@@ -76,3 +76,4 @@ The BA agent also handles `ORDER_BOOK_CLOSE_REASONING` events — when a positio
 
 - **AA agents**: Use it to understand active trade context when formulating bias and trade management recommendations
 - **BA agents**: Use it to reconcile positions, detect sync discrepancies, and manage active trades
+

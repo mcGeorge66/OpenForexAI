@@ -61,3 +61,4 @@ pytest tests/unit/test_data_container.py  # single file
 - Candle data built with `conftest.make_candle()` or local factories
 - No external dependencies imported in test bodies
 - Assertions are explicit — no magic matchers
+

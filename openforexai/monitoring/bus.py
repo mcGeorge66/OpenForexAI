@@ -114,3 +114,4 @@ class MonitoringBus(AbstractMonitoringBus):
             pair=pair,
             payload=payload_kwargs,
         )
+

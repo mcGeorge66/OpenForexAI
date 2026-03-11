@@ -75,3 +75,4 @@ class GetOrderBookTool(BaseTool):
             }
             for e in entries[:limit]
         ]
+

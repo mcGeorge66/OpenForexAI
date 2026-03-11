@@ -132,3 +132,4 @@ This separation of concerns ensures that:
 ## Reasoning Capture
 
 The `reasoning` parameter is stored in the `order_book` database table alongside the trade. This creates an audit trail of **why** each trade was placed or closed, enabling post-mortem analysis, pattern detection, and prompt optimization.
+

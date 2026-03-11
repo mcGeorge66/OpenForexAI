@@ -30,3 +30,4 @@ __all__ = [
     "SignalDirection", "ChartPattern", "SupportResistanceLevel",
     "TrendAssessment", "AnalysisRequest", "AnalysisResult",
 ]
+

@@ -12,7 +12,7 @@ Responsibilities
 
 Context budget tiers (percentage of max_tokens used so far)
 ------------------------------------------------------------
-Configured per-agent in ``agent_tools.json``::
+Configured per-agent in ``agent_tools.json5``::
 
     "context_tiers": {
         "0":  ["*"],          // 0–69 %: all tools available
@@ -20,7 +20,7 @@ Configured per-agent in ``agent_tools.json``::
         "90": ["safety"]      // 90–100 %: only tools tagged "safety"
     }
 
-Tool tags are set in ``agent_tools.json`` under ``"tool_tags"``.
+Tool tags are set in ``agent_tools.json5`` under ``"tool_tags"``.
 
 Approval modes
 --------------
@@ -325,3 +325,4 @@ class ToolDispatcher:
             ))
         except Exception:
             pass
+

@@ -28,7 +28,7 @@ _ROOT = Path(__file__).parent
 
 
 def _load_module_config(name: str) -> dict:
-    cfg_path = _ROOT / "config" / "modules" / "broker" / f"{name}.json"
+    cfg_path = _ROOT / "config" / "modules" / "broker" / f"{name}.json5"
     if not cfg_path.exists():
         print(f"[ERROR] Config not found: {cfg_path}")
         sys.exit(1)
@@ -37,12 +37,12 @@ def _load_module_config(name: str) -> dict:
 
 
 def _get_test_pair(name: str, cfg: dict) -> str:
-    """Pick a test pair: module config first, then system.json fallback."""
+    """Pick a test pair: module config first, then system.json5 fallback."""
     if cfg.get("pair"):
         return cfg["pair"]
     try:
         from openforexai.config.json_loader import load_json_config
-        sys_cfg = load_json_config(_ROOT / "config" / "system.json")
+        sys_cfg = load_json_config(_ROOT / "config" / "system.json5")
         for agent_cfg in sys_cfg.get("agents", {}).values():
             if agent_cfg.get("broker") == name and agent_cfg.get("pair"):
                 return agent_cfg["pair"]
@@ -70,7 +70,7 @@ async def _run_tests(name: str) -> bool:
     print(f"  practice    : {cfg.get('practice', 'N/A')}")
     print(f"  api_url     : {cfg.get('api_url', '(default)')}")
     print(f"  api_key     : {'SET' if cfg.get('api_key') else 'MISSING'}")
-    print(f"  pair        : {cfg.get('pair', '(from system.json)')}")
+    print(f"  pair        : {cfg.get('pair', '(from system.json5)')}")
     print(f"  test pair   : {pair}")
     print()
 
@@ -267,3 +267,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

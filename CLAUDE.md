@@ -309,3 +309,16 @@ Management API runs at `http://127.0.0.1:8765` by default.
 - Root-level `test_broker.py` / `test_llm.py` — live connectivity tests (require real credentials)
 
 Fixtures and mocks live in `tests/conftest.py`.
+
+---
+
+## UI Tool Context Convention
+
+When a tool schema contains an argument named `agent` (especially bridge tools
+without fixed `target_agent_id`), the Tool Executor must auto-fill this field
+from the top context `Agent` combobox.
+
+Rule:
+- Context selector `Agent` is the source of truth.
+- Matching tool argument key `agent` is auto-synchronized from that selector.
+- This keeps testing predictable and avoids duplicate manual input.

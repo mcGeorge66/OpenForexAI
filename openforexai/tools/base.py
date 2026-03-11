@@ -16,13 +16,13 @@ shared system components so tools can access live data without importing globals
 Approval flow
 -------------
 When ``requires_approval`` is True the dispatcher checks the per-agent config
-(``agent_tools.json``) before calling ``execute()``.  Approval modes:
+(``agent_tools.json5``) before calling ``execute()``.  Approval modes:
 
 - ``"direct"``           — always execute without extra checks (default for most tools)
 - ``"supervisor"``       — route through the SupervisorAgent (trading/close tools)
 - ``"human"``            — block until a human explicitly approves via Management API
 
-The approval mode is configured per-tool per-agent in ``agent_tools.json``.
+The approval mode is configured per-tool per-agent in ``agent_tools.json5``.
 """
 from __future__ import annotations
 
@@ -110,3 +110,4 @@ class BaseTool(ABC):
             "description": self.description,
             "input_schema": self.input_schema,
         }
+

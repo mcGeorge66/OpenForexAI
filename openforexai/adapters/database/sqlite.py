@@ -801,3 +801,4 @@ class SQLiteRepository(AbstractRepository):
             )
         rows = await cursor.fetchall()
         return [await self._row_to_order_book_entry(r) for r in rows]
+
