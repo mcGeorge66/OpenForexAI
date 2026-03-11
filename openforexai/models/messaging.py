@@ -69,3 +69,4 @@ class MessageEnvelope(BaseModel):
     acknowledged: bool = False
     processed_at: datetime | None = None
     error: str | None = None
+

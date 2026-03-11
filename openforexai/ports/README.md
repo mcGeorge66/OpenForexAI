@@ -255,3 +255,4 @@ class AbstractMonitoringBus(ABC):
 | Add broker | Implement `AbstractBroker`, register in PluginRegistry |
 
 The rule: **business logic (agents, tools, data analysis) imports only from `ports/`. Adapters import from `ports/` too — never the reverse.**
+

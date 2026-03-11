@@ -6,3 +6,4 @@ PluginRegistry.register_repository("sqlite", SQLiteRepository)
 PluginRegistry.register_repository("postgresql", PostgreSQLRepository)
 
 __all__ = ["SQLiteRepository", "PostgreSQLRepository"]
+

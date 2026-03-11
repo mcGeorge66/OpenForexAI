@@ -101,3 +101,4 @@ class AbstractBroker(ABC):
         Used by the order-book sync loop to detect SL/TP hits.
         """
         ...
+

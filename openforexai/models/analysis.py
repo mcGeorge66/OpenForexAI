@@ -56,3 +56,4 @@ class AnalysisResult(BaseModel):
     support_resistance: list[SupportResistanceLevel] = Field(default_factory=list)
     trend_assessments: list[TrendAssessment] = Field(default_factory=list)
     analyzed_at: datetime = Field(default_factory=datetime.utcnow)
+

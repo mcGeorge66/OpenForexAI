@@ -26,7 +26,7 @@ All three agent roles share one class:
 | **BA** — Broker Agent | `_BA_` | Executes trades, manages positions, monitors risk |
 | **GA** — Global Agent | `_GA_` | System-wide coordination, config, optimization |
 
-The role label is purely informational. The actual behaviour is controlled by three things in `config/system.json`:
+The role label is purely informational. The actual behaviour is controlled by three things in `config/system.json5`:
 1. **`system_prompt`** — what the LLM is instructed to do
 2. **`event_triggers`** — which EventBus events wake the agent
 3. **`tool_config.allowed_tools`** — which tools the agent can call
@@ -105,7 +105,7 @@ POST /agents/{agent_id}/ask  →  EventBus(AGENT_QUERY)
 
 No config changes are needed — all agents handle `AGENT_QUERY` automatically.
 
-### Config Keys (`system.json → agents.<agent_id>`)
+### Config Keys (`system.json5 → agents.<agent_id>`)
 
 | Key | Type | Description |
 |---|---|---|
@@ -116,6 +116,7 @@ No config changes are needed — all agents handle `AGENT_QUERY` automatically.
 | `timer.enabled` | `bool` | Enable periodic activation |
 | `timer.interval_seconds` | `int` | Timer interval |
 | `event_triggers` | `list[str]` | EventType values that wake the agent |
+| `AnyCandle` | `int >= 1` | Divider for `m5_candle_available` (1 = every candle, 3 = every third candle) |
 | `system_prompt` | `str` | Full LLM system prompt |
 | `tool_config.allowed_tools` | `list[str]` | Tool names this agent may call |
 | `tool_config.context_tiers` | `dict` | Token% → tier name mapping |
@@ -159,7 +160,7 @@ Support for Broker Agents:
 
 ## Adding a New Agent
 
-No code changes are needed. Add an entry in `config/system.json`:
+No code changes are needed. Add an entry in `config/system.json5`:
 
 ```json
 "MY_BR_EURUSD_AA_MYAG": {
@@ -169,6 +170,7 @@ No code changes are needed. Add an entry in `config/system.json`:
   "pair": "EURUSD",
   "timer": {"enabled": true, "interval_seconds": 300},
   "event_triggers": ["m5_candle_available"],
+  "AnyCandle": 3,
   "system_prompt": "You are ...",
   "tool_config": {
     "allowed_tools": ["get_candles", "calculate_indicator"],
@@ -179,3 +181,4 @@ No code changes are needed. Add an entry in `config/system.json`:
 ```
 
 The agent is created automatically by `bootstrap.py` on next start.
+

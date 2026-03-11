@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from openforexai.data.resampler import resample_candles
 from openforexai.models.market import Candle, MarketSnapshot, Tick
@@ -41,6 +42,10 @@ _TF_M5_MULTIPLIER: dict[str, int] = {
 
 # All timeframes that are derived on-demand from M5
 _DERIVED_TIMEFRAMES = ("M15", "M30", "H1", "H4", "D1")
+
+# Additional DB lookback to compensate filtered-out synthetic null candles.
+_NULL_FILTER_BUFFER_M5 = 7 * 24 * 12  # one week of M5 bars
+_M5_STEP = timedelta(minutes=5)
 
 
 class DataContainer:
@@ -291,6 +296,152 @@ class DataContainer:
 
     # ── Data access API ───────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_null_candle(candle: Candle) -> bool:
+        return (
+            candle.open == 0
+            and candle.high == 0
+            and candle.low == 0
+            and candle.close == 0
+            and candle.spread == 0
+            and candle.tick_volume == 0
+        )
+
+    @classmethod
+    def _drop_null_candles(cls, candles: list[Candle]) -> list[Candle]:
+        return [c for c in candles if not cls._is_null_candle(c)]
+
+    @staticmethod
+    def _count_m5_gaps(candles_oldest_first: list[Candle]) -> int:
+        """Return number of missing M5 bars based on timestamp discontinuities."""
+        if len(candles_oldest_first) < 2:
+            return 0
+        missing = 0
+        expected_step = _M5_STEP
+        for prev, curr in zip(candles_oldest_first, candles_oldest_first[1:]):
+            if curr.timestamp <= prev.timestamp:
+                continue
+            delta = curr.timestamp - prev.timestamp
+            if delta > expected_step:
+                # Example: 10 minutes gap => 1 missing candle
+                missing += max(0, int(delta.total_seconds() // 300) - 1)
+        return missing
+
+    @staticmethod
+    def _latest_completed_m5_open(now: datetime | None = None) -> datetime:
+        dt = now or datetime.now(timezone.utc)
+        slot_minute = dt.minute - (dt.minute % 5)
+        boundary = dt.replace(minute=slot_minute, second=0, microsecond=0)
+        return boundary - _M5_STEP
+
+    @staticmethod
+    def _build_null_m5_candle(ts: datetime) -> Candle:
+        return Candle(
+            timestamp=ts,
+            open=Decimal("0"),
+            high=Decimal("0"),
+            low=Decimal("0"),
+            close=Decimal("0"),
+            tick_volume=0,
+            spread=Decimal("0"),
+            timeframe="M5",
+        )
+
+    def _missing_slots_in_recent_window(
+        self,
+        existing_newest_first: list[Candle],
+        required_m5_count: int,
+    ) -> list[datetime]:
+        if required_m5_count <= 0:
+            return []
+
+        if existing_newest_first:
+            end_ts = max(c.timestamp for c in existing_newest_first)
+        else:
+            end_ts = self._latest_completed_m5_open()
+        start_ts = end_ts - _M5_STEP * (required_m5_count - 1)
+
+        existing_set = {c.timestamp for c in existing_newest_first}
+        missing: list[datetime] = []
+        ts = start_ts
+        while ts <= end_ts:
+            if ts not in existing_set:
+                missing.append(ts)
+            ts += _M5_STEP
+        return missing
+
+    async def _ensure_m5_complete_for_read(
+        self,
+        broker_name: str,
+        pair: str,
+        required_m5_count: int,
+    ) -> None:
+        """Ensure recent M5 window is complete enough for a read request.
+
+        If candles are missing (too few rows or timestamp gaps), fetch from broker,
+        persist to DB, then return. Reads remain DB-first; broker access happens
+        only when incompleteness is detected.
+        """
+        if required_m5_count <= 0:
+            return
+
+        key = (broker_name, pair)
+        if key not in self._registered:
+            return
+
+        lock = self._write_locks.get(key)
+        if lock is None:
+            return
+
+        async with lock:
+            existing = await self._store.get_candles(
+                broker_name, pair, "M5", limit=required_m5_count
+            )  # newest-first
+            missing_before = self._missing_slots_in_recent_window(existing, required_m5_count)
+            if not missing_before:
+                return
+
+            broker = self._brokers.get(broker_name)
+            if broker is None:
+                _log.warning(
+                    "Cannot back-fill for read %s/%s: broker not registered",
+                    broker_name, pair,
+                )
+                return
+
+            # Add a small buffer to reduce repeated top-up calls for near-edge reads.
+            fetch_count = max(required_m5_count + 24, _GAP_CHECK_COUNT)
+            fresh = await broker.get_historical_m5_candles(pair, fetch_count)
+            if fresh:
+                await self._store.save_candles_bulk(broker_name, pair, fresh)
+                newest = fresh[-1].timestamp
+                current_last = self._last_ts.get(key)
+                if current_last is None or newest > current_last:
+                    self._last_ts[key] = newest
+
+            # Re-check and fill residual gaps with synthetic null candles.
+            refreshed = await self._store.get_candles(
+                broker_name, pair, "M5", limit=required_m5_count
+            )
+            missing_after_fetch = self._missing_slots_in_recent_window(refreshed, required_m5_count)
+            if missing_after_fetch:
+                nulls = [self._build_null_m5_candle(ts) for ts in missing_after_fetch]
+                await self._store.save_candles_bulk(broker_name, pair, nulls)
+                newest_null = missing_after_fetch[-1]
+                current_last = self._last_ts.get(key)
+                if current_last is None or newest_null > current_last:
+                    self._last_ts[key] = newest_null
+
+            _log.info(
+                "Back-filled missing M5 for read",
+                broker=broker_name,
+                pair=pair,
+                requested=required_m5_count,
+                missing=len(missing_before),
+                fetched=len(fresh),
+                synthesized_nulls=len(missing_after_fetch),
+            )
+
     async def get_candles(
         self,
         broker_name: str,
@@ -311,24 +462,36 @@ class DataContainer:
             Maximum number of *timeframe* candles to return.  Defaults to
             ``_SNAPSHOT_LIMITS[timeframe]`` (300 for M5, 150 for M15, etc.).
         """
+        timeframe = timeframe.upper()
         effective_limit = limit if limit is not None else _SNAPSHOT_LIMITS.get(timeframe, 300)
 
         if timeframe == "M5":
+            await self._ensure_m5_complete_for_read(
+                broker_name=broker_name,
+                pair=pair,
+                required_m5_count=effective_limit,
+            )
             # DB returns newest-first — reverse for oldest-first convention
             raw = await self._store.get_candles(
-                broker_name, pair, "M5", limit=effective_limit
+                broker_name, pair, "M5", limit=effective_limit + _NULL_FILTER_BUFFER_M5
             )
-            result = list(reversed(raw))
+            result = self._drop_null_candles(list(reversed(raw)))[-effective_limit:]
 
         elif timeframe in _DERIVED_TIMEFRAMES:
             # Fetch enough M5 bars to produce the requested number of TF bars.
             # Add one extra multiplier as a safety buffer for boundary alignment.
             multiplier = _TF_M5_MULTIPLIER[timeframe]
-            m5_limit = effective_limit * multiplier + multiplier
+            m5_required = effective_limit * multiplier + multiplier
+            m5_limit = m5_required + _NULL_FILTER_BUFFER_M5
+            await self._ensure_m5_complete_for_read(
+                broker_name=broker_name,
+                pair=pair,
+                required_m5_count=m5_required,
+            )
             raw_m5 = await self._store.get_candles(
                 broker_name, pair, "M5", limit=m5_limit
             )
-            m5 = list(reversed(raw_m5))   # oldest first for resampler
+            m5 = self._drop_null_candles(list(reversed(raw_m5)))   # oldest first for resampler
             result = resample_candles(m5, timeframe)[-effective_limit:]
 
         else:
@@ -371,9 +534,9 @@ class DataContainer:
             + _TF_M5_MULTIPLIER["D1"]   # one extra for boundary alignment
         )
         raw_m5 = await self._store.get_candles(
-            broker_name, pair, "M5", limit=max_m5_needed
+            broker_name, pair, "M5", limit=max_m5_needed + _NULL_FILTER_BUFFER_M5
         )
-        m5 = list(reversed(raw_m5))   # oldest first for resampler
+        m5 = self._drop_null_candles(list(reversed(raw_m5)))   # oldest first for resampler
 
         if not m5:
             raise ValueError(
@@ -455,3 +618,4 @@ class DataContainer:
             ))
         except Exception:
             pass
+

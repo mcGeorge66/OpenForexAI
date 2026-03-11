@@ -19,6 +19,7 @@ dependencies = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "numpy>=1.26",
+    "json5>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -60,3 +61,5 @@ select = ["E", "F", "I", "UP"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+
+

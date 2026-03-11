@@ -15,3 +15,4 @@ class AbstractDataFeed(ABC):
     async def get_rolling_history(
         self, pair: str, timeframe: str, weeks: int = 4
     ) -> list[Candle]: ...
+

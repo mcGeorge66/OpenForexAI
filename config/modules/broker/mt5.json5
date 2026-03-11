@@ -4,5 +4,10 @@
   "adapter":  "mt5",
   "login":    "${MT5_LOGIN}",
   "password": "${MT5_PASSWORD}",
-  "server":   "${MT5_SERVER}"
+  "server":   "${MT5_SERVER}",
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
 }

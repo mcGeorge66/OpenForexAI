@@ -4,7 +4,7 @@ Endpoints
 ---------
 GET  /health                  System health (agents alive, queue depths, uptime)
 GET  /metrics                 Key counters (messages dispatched, tool calls, …)
-GET  /version                 Application version from system.json
+GET  /version                 Application version from system.json5
 GET  /runtime/status          Live runtime state (agents, routing rules)
 GET  /agents                  List registered agents + queue depths
 GET  /agents/{id}             Single agent info
@@ -17,8 +17,15 @@ GET  /monitoring/events       Recent events from ring buffer (polling)
 WS   /ws/monitoring           WebSocket live monitoring stream
 GET  /tools                   List registered tools
 POST /tools/execute           Execute a registered tool directly (for testing)
-GET  /config/view             system.json with sensitive fields masked
+GET  /config/view             system.json5 with sensitive fields masked
+GET  /config/system           Raw system.json5 (editable)
+PUT  /config/system           Save raw system.json5
 GET  /config/files/{name}     Raw config file (agent_tools or event_routing)
+PUT  /config/files/{name}     Save raw config file
+GET  /config/modules/{type}   List configured module names for llm | broker
+GET  /config/modules/{type}/{name}  Single module config file (secrets masked)
+GET  /config/modules/{type}/{name}/raw  Raw module config (editable)
+PUT  /config/modules/{type}/{name}/raw  Save raw module config
 
 Authentication
 --------------
@@ -30,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import json5
 import os
 import time
 from datetime import datetime, timezone
@@ -37,10 +45,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+
+from openforexai.config.json_loader import load_json_config
 
 # ── Agent-query response registry ────────────────────────────────────────────
 # Maps correlation_id → asyncio.Future.  Populated by ask_agent(); resolved by
@@ -80,7 +90,14 @@ _indicator_registry = None
 _monitoring_bus = None
 _system_config: dict[str, Any] = {}
 _config_dir: Path | None = None
+_data_container = None       # DataContainer — shared market data cache
+_repository = None           # AbstractRepository — database access
+_connected_brokers: dict = {}  # broker_name → AbstractBroker live instances
+_config_service = None
 _start_time: float = time.monotonic()
+
+_LLM_CHECKER_LLM_TIMEOUT_SECONDS = 45.0
+_LLM_CHECKER_TOOL_TIMEOUT_SECONDS = 20.0
 
 _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 _EXPECTED_KEY: str | None = os.environ.get("MANAGEMENT_API_KEY")
@@ -118,12 +135,162 @@ def _deep_mask(obj: Any, *, _depth: int = 0) -> Any:
     return obj
 
 
+def _project_root() -> Path:
+    """Return project root path from this module location."""
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _write_json_file(path: Path, content: dict[str, Any] | str) -> None:
+    """Atomically write JSON5 content with stable formatting.
+
+    If *content* is a string, it is validated as JSON5 and written as-is.
+    If it is a dict/list, it is serialized to JSON5-compatible text.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    if isinstance(content, str):
+        # Validate before writing so malformed edits are rejected early.
+        json5.loads(content)
+        serialized = content.rstrip() + "\n"
+    else:
+        serialized = json.dumps(content, indent=2, ensure_ascii=False) + "\n"
+    tmp_path.write_text(serialized, encoding="utf-8")
+    tmp_path.replace(path)
+
+def _read_text_file(path: Path) -> str:
+    """Read a config file as raw UTF-8 text."""
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Config file not found on disk: {path.name}")
+    return path.read_text(encoding="utf-8")
+
+
+def _write_text_file(path: Path, content: str) -> None:
+    """Atomically write UTF-8 text content to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _resolve_module_config_path(module_type: str, name: str) -> Path:
+    if module_type not in ("llm", "broker"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown module type: {module_type!r}. Valid types: 'llm', 'broker'",
+        )
+    path_str = _system_config.get("modules", {}).get(module_type, {}).get(name)
+    if not path_str:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Module {name!r} not found under modules.{module_type} in system config",
+        )
+    cfg_path = _project_root() / path_str
+    if not cfg_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Config file not found on disk: {cfg_path.name}",
+        )
+    return cfg_path
+
+
+def _extract_llm_defaults(module_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Extract common LLM runtime defaults from a module config dict."""
+    defaults: dict[str, Any] = {}
+    if isinstance(module_cfg.get("defaults"), dict):
+        defaults.update(module_cfg["defaults"])
+    if isinstance(module_cfg.get("params"), dict):
+        defaults.update(module_cfg["params"])
+    for key in ("temperature", "max_tokens"):
+        if key in module_cfg:
+            defaults[key] = module_cfg.get(key)
+    return defaults
+
+
+def _emit_checker_monitoring(
+    event_type: str,
+    *,
+    llm_name: str,
+    agent_id: str | None,
+    broker_name: str | None,
+    pair: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """Emit monitoring events for LLM Checker flow."""
+    if _monitoring_bus is None:
+        return
+    try:
+        from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+
+        _monitoring_bus.emit(MonitoringEvent(
+            timestamp=datetime.now(timezone.utc),
+            source_module=f"llm_checker:{llm_name}",
+            event_type=MonitoringEventType[event_type],
+            broker_name=broker_name,
+            pair=pair,
+            payload={
+                "llm_name": llm_name,
+                "agent_id": agent_id,
+                **payload,
+            },
+        ))
+    except Exception:
+        pass
+
+
+def _resolve_llm_checker_params(
+    llm_name: str,
+    agent_cfg: dict[str, Any] | None,
+    request_temperature: float | None,
+    request_max_tokens: int | None,
+    llm_instance: Any,
+) -> tuple[float | None, int | None]:
+    """Resolve checker params via module defaults -> agent override -> request override."""
+    module_cfg: dict[str, Any] = {}
+    llm_path = _system_config.get("modules", {}).get("llm", {}).get(llm_name)
+    if isinstance(llm_path, str) and llm_path.strip():
+        cfg_file = (_project_root() / llm_path).resolve()
+        if cfg_file.exists():
+            try:
+                loaded = load_json_config(cfg_file)
+                if isinstance(loaded, dict):
+                    module_cfg = loaded
+            except Exception:
+                module_cfg = {}
+
+    resolved = _extract_llm_defaults(module_cfg)
+
+    if isinstance(agent_cfg, dict):
+        if isinstance(agent_cfg.get("llm_params"), dict):
+            resolved.update(agent_cfg["llm_params"])
+        if isinstance(agent_cfg.get("llm_config"), dict):
+            resolved.update(agent_cfg["llm_config"])
+        for key in ("temperature", "max_tokens"):
+            if key in agent_cfg:
+                resolved[key] = agent_cfg.get(key)
+
+    if request_temperature is not None:
+        resolved["temperature"] = request_temperature
+    if request_max_tokens is not None:
+        resolved["max_tokens"] = request_max_tokens
+
+    if "temperature" not in resolved and hasattr(llm_instance, "default_temperature"):
+        resolved["temperature"] = getattr(llm_instance, "default_temperature")
+    if "max_tokens" not in resolved and hasattr(llm_instance, "default_max_tokens"):
+        resolved["max_tokens"] = getattr(llm_instance, "default_max_tokens")
+
+    temp = resolved.get("temperature")
+    max_toks = resolved.get("max_tokens")
+    final_temp = float(temp) if isinstance(temp, (int, float)) else None
+    final_max = int(max_toks) if isinstance(max_toks, int) and max_toks > 0 else None
+    return final_temp, final_max
+
+
 # ── Request / response models ─────────────────────────────────────────────────
 
 class EventInjectRequest(BaseModel):
     event_type: str = Field(..., description="EventType value, e.g. 'signal_generated'")
     source_agent_id: str = Field(
-        default="MGMT._ALL..._GA_MGMT", description="Sender agent ID"
+        default="MGMT_-ALL___-GA-MGMT", description="Sender agent ID"
     )
     target_agent_id: str | None = Field(default=None)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -177,12 +344,62 @@ class ToolExecuteRequest(BaseModel):
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Arguments to pass to the tool"
     )
+    agent_id: str | None = Field(
+        default=None,
+        description="Agent ID for tool execution context (sender identity and defaults).",
+    )
+    broker_name: str | None = Field(
+        default=None,
+        description="Configured broker adapter name for tool context. "
+                    "If set, pair is derived from enabled agent config.",
+    )
+    llm_name: str | None = Field(
+        default=None,
+        description="Configured LLM module name for tool context.",
+    )
 
 
 class ToolExecuteResponse(BaseModel):
     tool_name: str
     result: Any
     is_error: bool = False
+class LLMCheckerRequest(BaseModel):
+    llm_name: str = Field(..., description="Configured LLM module name.")
+    messages: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Conversation messages in chat format, e.g. [{role, content}, ...].",
+    )
+    enabled_tools: list[str] = Field(
+        default_factory=list,
+        description="Tool names to expose to the LLM in this ephemeral session.",
+    )
+    system_prompt: str = Field(
+        default="You are a helpful assistant. Use tools when necessary.",
+        description="System prompt for this checker run.",
+    )
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=64, le=8192)
+    max_tool_turns: int | None = Field(default=None, ge=0, le=20)
+    agent_id: str | None = Field(
+        default=None,
+        description="Optional runtime agent context (for broker/pair defaults).",
+    )
+    broker_name: str | None = Field(
+        default=None,
+        description="Optional broker adapter module name override.",
+    )
+    pair: str | None = Field(
+        default=None,
+        description="Optional pair override, e.g. EURUSD.",
+    )
+
+
+class LLMCheckerResponse(BaseModel):
+    llm_name: str
+    final_text: str
+    total_tokens: int
+    stop_reason: str
+    trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -208,7 +425,7 @@ async def health() -> HealthResponse:
 
 @router.get("/version")
 async def get_version() -> dict:
-    """Return the application version from system.json."""
+    """Return the application version from system.json5."""
     version = _system_config.get("system", {}).get("version", "unknown")
     return {"version": version}
 
@@ -246,8 +463,15 @@ async def metrics() -> dict:
 async def list_agents() -> list[AgentInfo]:
     if _bus is None:
         return []
+    enabled_agent_ids = {
+        agent_id
+        for agent_id, cfg in _system_config.get("agents", {}).items()
+        if cfg.get("enable", True)
+    }
     result = []
     for aid in _bus.registered_agents():
+        if aid not in enabled_agent_ids:
+            continue
         q = _bus._agent_queues.get(aid)
         result.append(AgentInfo(
             agent_id=aid,
@@ -265,6 +489,65 @@ async def get_agent(agent_id: str) -> AgentInfo:
     return AgentInfo(agent_id=agent_id, queue_size=q.qsize(), queue_maxsize=q.maxsize)
 
 
+@router.get("/agents/{agent_id}/candles")
+async def get_agent_candles(
+    agent_id: str,
+    timeframe: str = "M5",
+    count: int = 100,
+) -> list[dict[str, Any]]:
+    """Return recent candles for a specific AA agent.
+
+    Resolves pair and broker from ``system_config.agents[agent_id]`` and maps the
+    configured broker module name to its live adapter short_name before querying
+    the DataContainer.
+    """
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    agent_cfg = _system_config.get("agents", {}).get(agent_id)
+    if not agent_cfg or not agent_cfg.get("enable", True):
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} not enabled")
+
+    if agent_cfg.get("type") != "AA":
+        raise HTTPException(status_code=400, detail=f"Agent {agent_id!r} is not an AA agent")
+
+    pair = agent_cfg.get("pair")
+    broker_module_name = agent_cfg.get("broker")
+    if not pair or not broker_module_name:
+        raise HTTPException(status_code=400, detail="Agent has no broker/pair configured")
+
+    broker_instance = _connected_brokers.get(broker_module_name)
+    if broker_instance is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Broker adapter {broker_module_name!r} is not connected",
+        )
+
+    tf = timeframe.upper().strip()
+    if tf not in {"M5", "M15", "M30", "H1", "H4", "D1"}:
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe!r}")
+
+    limit = max(1, min(count, 500))
+    candles = await _data_container.get_candles(
+        broker_name=broker_instance.short_name,
+        pair=str(pair).upper(),
+        timeframe=tf,
+        limit=limit,
+    )
+    return [
+        {
+            "timestamp": c.timestamp.isoformat(),
+            "open": float(c.open),
+            "high": float(c.high),
+            "low": float(c.low),
+            "close": float(c.close),
+            "tick_volume": c.tick_volume,
+            "spread": float(c.spread),
+        }
+        for c in candles
+    ]
+
+
 @router.post("/agents/{agent_id}/ask", response_model=AgentQueryResponse)
 async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse:
     """Send a free-text question to a specific agent and wait for its response.
@@ -279,7 +562,7 @@ async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse
 
     Example::
 
-        POST /agents/OAPR1_EURUSD_AA_ANLYS/ask
+        POST /agents/OAPR1-EURUSD-AA-ANLYS/ask
         {"question": "What is the current EURUSD trend on H1?", "timeout": 60}
     """
     if _bus is None:
@@ -297,7 +580,7 @@ async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse
 
     await _bus.publish(AgentMessage(
         event_type=EventType.AGENT_QUERY,
-        source_agent_id="MGMT._ALL..._GA_MGMT",
+        source_agent_id="MGMT_-ALL___-GA-MGMT",
         target_agent_id=agent_id,
         payload={"question": req.question, "source": "management_api"},
         correlation_id=correlation_id,
@@ -578,6 +861,9 @@ async def ws_monitoring(websocket: WebSocket) -> None:
                 # Connection lost (WebSocketDisconnect, RuntimeError, etc.)
                 break
 
+    except asyncio.CancelledError:
+        # Normal during application shutdown.
+        pass
     except Exception:
         pass  # absorb any unexpected exception — never let monitoring crash
     finally:
@@ -622,11 +908,86 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         raise HTTPException(status_code=404, detail=f"Tool {req.tool_name!r} not registered")
 
     from openforexai.tools.base import ToolContext
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+
+    selected_agent_cfg: dict[str, Any] | None = None
+    if req.agent_id:
+        cfg = _system_config.get("agents", {}).get(req.agent_id)
+        if not cfg or not cfg.get("enable", True):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {req.agent_id!r} not found or disabled",
+            )
+        if _bus is not None and req.agent_id not in _bus.registered_agents():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {req.agent_id!r} is not registered at runtime",
+            )
+        selected_agent_cfg = cfg
+
+    broker_module_name = req.broker_name or (
+        str(selected_agent_cfg.get("broker"))
+        if selected_agent_cfg and selected_agent_cfg.get("broker")
+        else None
+    )
+    broker_instance = _connected_brokers.get(broker_module_name) if broker_module_name else None
+    if broker_module_name and broker_instance is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Broker adapter {broker_module_name!r} is not connected",
+        )
+    context_broker_name = broker_instance.short_name if broker_instance is not None else None
+
+    llm_name = req.llm_name or (
+        str(selected_agent_cfg.get("llm"))
+        if selected_agent_cfg and selected_agent_cfg.get("llm")
+        else None
+    )
+    llm_instance = None
+    if llm_name:
+        try:
+            llm_instance = RuntimeRegistry.get_llm(llm_name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    derived_pair: str | None = None
+    if selected_agent_cfg and selected_agent_cfg.get("pair"):
+        derived_pair = str(selected_agent_cfg.get("pair")).upper()
+    elif broker_module_name:
+        enabled_agents = [
+            cfg
+            for cfg in _system_config.get("agents", {}).values()
+            if cfg.get("enable", True)
+        ]
+        pairs = {
+            str(cfg.get("pair")).upper()
+            for cfg in enabled_agents
+            if cfg.get("broker") == broker_module_name and cfg.get("pair")
+        }
+        if len(pairs) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Broker adapter {broker_module_name!r} maps to multiple pairs: {sorted(pairs)}. "
+                    "Tool execution requires one pair per broker adapter."
+                ),
+            )
+        if len(pairs) == 1:
+            derived_pair = next(iter(pairs))
 
     context = ToolContext(
-        agent_id="MGMT._ALL..._GA_MGMT",
+        agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
+        broker_name=context_broker_name,
+        pair=derived_pair,
+        data_container=_data_container,
+        repository=_repository,
+        broker=broker_instance,
         monitoring_bus=_monitoring_bus,
         event_bus=_bus,
+        extra={
+            "llm_name": llm_name,
+            "llm": llm_instance,
+        },
     )
 
     try:
@@ -640,9 +1001,425 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         )
 
 
+
+@router.post("/test/llm/check", response_model=LLMCheckerResponse)
+async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
+    """Run an ephemeral LLM session with selectable tools and return a trace."""
+    if _tool_registry is None:
+        raise HTTPException(status_code=503, detail="ToolRegistry not available")
+
+    from openforexai.ports.llm import ToolResult
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+    from openforexai.tools.base import ToolContext
+
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="messages must contain at least one message")
+
+    for idx, m in enumerate(req.messages):
+        role = m.get("role")
+        if role not in {"user", "assistant", "tool", "system"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"messages[{idx}] has invalid role {role!r}",
+            )
+
+    unknown_tools = sorted({name for name in req.enabled_tools if _tool_registry.get(name) is None})
+    valid_enabled_tools = [name for name in req.enabled_tools if _tool_registry.get(name) is not None]
+
+    try:
+        llm = RuntimeRegistry.get_llm(req.llm_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    selected_agent_cfg: dict[str, Any] | None = None
+    if req.agent_id:
+        cfg = _system_config.get("agents", {}).get(req.agent_id)
+        if not cfg or not cfg.get("enable", True):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {req.agent_id!r} not found or disabled",
+            )
+        if _bus is not None and req.agent_id not in _bus.registered_agents():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent {req.agent_id!r} is not registered at runtime",
+            )
+        selected_agent_cfg = cfg
+
+    broker_module_name = req.broker_name.strip() if isinstance(req.broker_name, str) and req.broker_name.strip() else None
+    broker_instance = _connected_brokers.get(broker_module_name) if broker_module_name else None
+
+    # LLM checker is diagnostic-first: do not block the whole session when a
+    # selected broker adapter is currently disconnected. Tools that depend on a
+    # live broker will fail with their own error, but pure LLM exchange still works.
+    broker_disconnected = bool(broker_module_name and broker_instance is None)
+
+    derived_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
+
+    context = ToolContext(
+        agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
+        broker_name=broker_instance.short_name if broker_instance is not None else None,
+        pair=derived_pair,
+        data_container=_data_container,
+        repository=_repository,
+        broker=broker_instance,
+        monitoring_bus=_monitoring_bus,
+        event_bus=_bus,
+        extra={"llm_name": req.llm_name, "llm": llm},
+    )
+
+    tool_specs = _tool_registry.specs_for(valid_enabled_tools)
+    messages: list[dict[str, Any]] = [dict(m) for m in req.messages]
+    trace: list[dict[str, Any]] = []
+    if broker_disconnected:
+        trace.append({
+            "type": "warning",
+            "stage": "context",
+            "message": f"Broker adapter {broker_module_name!r} is not connected; broker-dependent tools may fail",
+        })
+    if unknown_tools:
+        trace.append({
+            "type": "warning",
+            "stage": "context",
+            "message": f"Unknown tools ignored: {unknown_tools}",
+        })
+    total_tokens = 0
+    final_text = ""
+    stop_reason = "end_turn"
+    resolved_max_tool_turns = req.max_tool_turns if isinstance(req.max_tool_turns, int) else 8
+
+    for turn in range(resolved_max_tool_turns + 1):
+        try:
+            resolved_temp, resolved_max_tokens = _resolve_llm_checker_params(
+                llm_name=req.llm_name,
+                agent_cfg=selected_agent_cfg,
+                request_temperature=req.temperature,
+                request_max_tokens=req.max_tokens,
+                llm_instance=llm,
+            )
+            _emit_checker_monitoring(
+                "LLM_REQUEST",
+                llm_name=req.llm_name,
+                agent_id=req.agent_id,
+                broker_name=context.broker_name,
+                pair=context.pair,
+                payload={
+                    "turn": turn,
+                    "system_prompt": req.system_prompt,
+                    "messages": messages,
+                    "message_count": len(messages),
+                    "tool_count": len(tool_specs),
+                    "tool_names": [t.get("name", "") for t in tool_specs],
+                    "tool_specs": tool_specs,
+                    "temperature": resolved_temp,
+                    "max_tokens": resolved_max_tokens,
+                },
+            )
+            response = await asyncio.wait_for(
+                llm.complete_with_tools(
+                    system_prompt=req.system_prompt,
+                    messages=messages,
+                    tools=tool_specs,
+                    temperature=resolved_temp,
+                    max_tokens=resolved_max_tokens,
+                ),
+                timeout=_LLM_CHECKER_LLM_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            _emit_checker_monitoring(
+                "LLM_ERROR",
+                llm_name=req.llm_name,
+                agent_id=req.agent_id,
+                broker_name=context.broker_name,
+                pair=context.pair,
+                payload={
+                    "turn": turn,
+                    "error": (
+                        f"LLM checker call exceeded {_LLM_CHECKER_LLM_TIMEOUT_SECONDS:.0f}s timeout"
+                    ),
+                },
+            )
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "stage": "llm_call",
+                    "turn": turn,
+                    "error": (
+                        f"LLM checker call exceeded {_LLM_CHECKER_LLM_TIMEOUT_SECONDS:.0f}s timeout"
+                    ),
+                },
+            ) from exc
+        except Exception as exc:
+            err_text = f"{type(exc).__name__}: {exc}"
+            _emit_checker_monitoring(
+                "LLM_ERROR",
+                llm_name=req.llm_name,
+                agent_id=req.agent_id,
+                broker_name=context.broker_name,
+                pair=context.pair,
+                payload={"turn": turn, "error": err_text},
+            )
+            lower = err_text.lower()
+            status_code = (
+                400
+                if (
+                    "error code: 400" in lower
+                    or "invalid_request_error" in lower
+                    or "unsupported_value" in lower
+                    or "invalid_prompt" in lower
+                )
+                else 500
+            )
+            raise HTTPException(
+                status_code=status_code,
+                detail={
+                    "stage": "llm_call",
+                    "turn": turn,
+                    "error": err_text,
+                },
+            ) from exc
+
+        total_tokens += response.input_tokens + response.output_tokens
+        final_text = response.content or ""
+        stop_reason = response.stop_reason or "end_turn"
+
+        trace.append({
+            "type": "llm_response",
+            "turn": turn,
+            "model": response.model,
+            "stop_reason": response.stop_reason,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "content": response.content,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+                for tc in response.tool_calls
+            ],
+        })
+
+        _emit_checker_monitoring(
+            "LLM_RESPONSE",
+            llm_name=req.llm_name,
+            agent_id=req.agent_id,
+            broker_name=context.broker_name,
+            pair=context.pair,
+            payload={
+                "turn": turn,
+                "model": response.model,
+                "stop_reason": response.stop_reason,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
+                "tool_calls": len(response.tool_calls),
+                "tool_names": [tc.name for tc in response.tool_calls],
+                "tool_call_details": [
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    for tc in response.tool_calls
+                ],
+                "content": response.content or "",
+            },
+        )
+
+        if not response.wants_tools:
+            break
+
+        if turn >= resolved_max_tool_turns:
+            stop_reason = "max_tool_turns"
+            trace.append({
+                "type": "warning",
+                "turn": turn,
+                "message": "Max tool turns reached before completion",
+            })
+            break
+
+        tool_results: list[ToolResult] = []
+        for tc in response.tool_calls:
+            tool = _tool_registry.get(tc.name)
+            if tool is None:
+                err = f"Tool {tc.name!r} is not registered"
+                _emit_checker_monitoring(
+                    "TOOL_CALL_FAILED",
+                    llm_name=req.llm_name,
+                    agent_id=req.agent_id,
+                    broker_name=context.broker_name,
+                    pair=context.pair,
+                    payload={
+                        "turn": turn,
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "error": err,
+                    },
+                )
+                tool_results.append(ToolResult(
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=json.dumps({"error": err}),
+                    is_error=True,
+                ))
+                trace.append({
+                    "type": "tool_result",
+                    "turn": turn,
+                    "tool": tc.name,
+                    "arguments": tc.arguments,
+                    "is_error": True,
+                    "result": {"error": err},
+                })
+                continue
+
+            _emit_checker_monitoring(
+                "TOOL_CALL_STARTED",
+                llm_name=req.llm_name,
+                agent_id=req.agent_id,
+                broker_name=context.broker_name,
+                pair=context.pair,
+                payload={
+                    "turn": turn,
+                    "tool_name": tc.name,
+                    "arguments": tc.arguments,
+                },
+            )
+            try:
+                raw_result = await asyncio.wait_for(
+                    tool.execute(tc.arguments, context),
+                    timeout=_LLM_CHECKER_TOOL_TIMEOUT_SECONDS,
+                )
+                serialized = json.dumps(raw_result, default=str)
+                tool_results.append(ToolResult(
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=serialized,
+                    is_error=False,
+                ))
+                _emit_checker_monitoring(
+                    "TOOL_CALL_COMPLETED",
+                    llm_name=req.llm_name,
+                    agent_id=req.agent_id,
+                    broker_name=context.broker_name,
+                    pair=context.pair,
+                    payload={
+                        "turn": turn,
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "result": serialized,
+                        "result_length": len(serialized),
+                    },
+                )
+                trace.append({
+                    "type": "tool_result",
+                    "turn": turn,
+                    "tool": tc.name,
+                    "arguments": tc.arguments,
+                    "is_error": False,
+                    "result": raw_result,
+                })
+            except asyncio.TimeoutError:
+                err_result = {
+                    "error": (
+                        f"Tool execution exceeded {_LLM_CHECKER_TOOL_TIMEOUT_SECONDS:.0f}s timeout"
+                    )
+                }
+                _emit_checker_monitoring(
+                    "TOOL_CALL_FAILED",
+                    llm_name=req.llm_name,
+                    agent_id=req.agent_id,
+                    broker_name=context.broker_name,
+                    pair=context.pair,
+                    payload={
+                        "turn": turn,
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "error": err_result["error"],
+                    },
+                )
+                tool_results.append(ToolResult(
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=json.dumps(err_result),
+                    is_error=True,
+                ))
+                trace.append({
+                    "type": "tool_result",
+                    "turn": turn,
+                    "tool": tc.name,
+                    "arguments": tc.arguments,
+                    "is_error": True,
+                    "result": err_result,
+                })
+            except Exception as exc:
+                err_result = {"error": str(exc)}
+                _emit_checker_monitoring(
+                    "TOOL_CALL_FAILED",
+                    llm_name=req.llm_name,
+                    agent_id=req.agent_id,
+                    broker_name=context.broker_name,
+                    pair=context.pair,
+                    payload={
+                        "turn": turn,
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "error": err_result["error"],
+                    },
+                )
+                tool_results.append(ToolResult(
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                    content=json.dumps(err_result),
+                    is_error=True,
+                ))
+                trace.append({
+                    "type": "tool_result",
+                    "turn": turn,
+                    "tool": tc.name,
+                    "arguments": tc.arguments,
+                    "is_error": True,
+                    "result": err_result,
+                })
+
+        if hasattr(llm, "assistant_message_with_tools"):
+            messages.append(llm.assistant_message_with_tools(response.content, response.tool_calls))
+            turn_result = llm.tool_result_message(tool_results)
+            if isinstance(turn_result, list):
+                messages.extend(turn_result)
+            else:
+                messages.append(turn_result)
+        else:
+            content: list[dict[str, Any]] = []
+            if response.content:
+                content.append({"type": "text", "text": response.content})
+            for tc in response.tool_calls:
+                content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            messages.append({"role": "assistant", "content": content})
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": r.tool_call_id,
+                        "content": r.content,
+                        "is_error": r.is_error,
+                    }
+                    for r in tool_results
+                ],
+            })
+
+    return LLMCheckerResponse(
+        llm_name=req.llm_name,
+        final_text=final_text,
+        total_tokens=total_tokens,
+        stop_reason=stop_reason,
+        trace=trace,
+    )
 @router.get("/config/view")
 async def config_view() -> dict:
-    """Return system.json with sensitive fields (api_key, password, …) masked.
+    """Return system.json5 with sensitive fields (api_key, password, …) masked.
 
     All keys whose name matches a known sensitive pattern are replaced with
     ``"***"`` recursively.  Environment variable values are already substituted
@@ -651,9 +1428,97 @@ async def config_view() -> dict:
     return _deep_mask(copy.deepcopy(_system_config))
 
 
+@router.get("/config/system")
+async def get_system_config_raw() -> dict:
+    """Return raw system.json5 from disk for editing."""
+    cfg_path = _project_root() / "config" / "system.json5"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=404, detail="system.json5 not found")
+    try:
+        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Config file {cfg_path.name} contains invalid JSON5: {exc}",
+        )
+
+
+
+@router.get("/config/system/text")
+async def get_system_config_text() -> dict[str, str]:
+    """Return raw system.json5 text for editing (comments preserved)."""
+    cfg_path = _project_root() / "config" / "system.json5"
+    return {"text": _read_text_file(cfg_path)}
+
+async def _trigger_agent_config_refresh() -> dict[str, int]:
+    """Ask ConfigService to resend config for all running enabled agents."""
+    if _bus is None:
+        return {"requested": 0, "eligible": 0, "registered": 0}
+
+    from openforexai.config.config_service import CONFIG_SERVICE_ID
+    from openforexai.models.messaging import AgentMessage, EventType
+
+    registered = set(_bus.registered_agents())
+    eligible_agents = [
+        agent_id
+        for agent_id, cfg in _system_config.get("agents", {}).items()
+        if cfg.get("enable", True) and agent_id in registered
+    ]
+
+    requested = 0
+    for agent_id in eligible_agents:
+        await _bus.publish(AgentMessage(
+            event_type=EventType.AGENT_CONFIG_REQUESTED,
+            source_agent_id="MGMT_-ALL___-GA-MGMT",
+            target_agent_id=CONFIG_SERVICE_ID,
+            payload={"agent_id": agent_id},
+        ))
+        requested += 1
+
+    return {
+        "requested": requested,
+        "eligible": len(eligible_agents),
+        "registered": len(registered),
+    }
+
+
+@router.put("/config/system")
+async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
+    """Persist raw system.json5, refresh memory, and trigger runtime apply."""
+    cfg_path = _project_root() / "config" / "system.json5"
+    _write_json_file(cfg_path, content)
+    global _system_config
+    _system_config = (json5.loads(content) if isinstance(content, str) else content)
+
+    if _config_service is not None and hasattr(_config_service, "update_config"):
+        _config_service.update_config(_system_config)
+
+    refresh = await _trigger_agent_config_refresh()
+    return {
+        "status": "saved",
+        "file": "config/system.json5",
+        "runtime_refresh": refresh,
+    }
+
+
+@router.get("/config/information/readme")
+async def get_information_readme_text() -> dict[str, str]:
+    """Return config README.md as raw text for the Information view."""
+    readme_path = _project_root() / "config" / "README.md"
+    return {"text": _read_text_file(readme_path)}
+
+
+@router.put("/config/information/readme")
+async def save_information_readme_text(content: str = Body(..., embed=False)) -> dict[str, str]:
+    """Save config README.md raw text from the Information editor."""
+    readme_path = _project_root() / "config" / "README.md"
+    _write_text_file(readme_path, content)
+    return {"status": "saved", "file": "config/README.md"}
+
+
 # Known config file names that can be served
 _CONFIG_FILES: dict[str, str | None] = {
-    "agent_tools":    None,  # resolved at runtime relative to this file
+    "agent_tools":    None,  # resolved under project root config/RunTime/
     "event_routing":  None,
 }
 
@@ -672,9 +1537,8 @@ async def config_file(name: str) -> dict:
                    f"Valid names: {list(_CONFIG_FILES.keys())}",
         )
 
-    # Config files live next to this package at openforexai/config/
-    here = Path(__file__).resolve().parent.parent  # openforexai/
-    cfg_path = here / "config" / f"{name}.json"
+    # Runtime config files live under project root config/RunTime/
+    cfg_path = _project_root() / "config" / "RunTime" / f"{name}.json5"
 
     if not cfg_path.exists():
         raise HTTPException(
@@ -683,12 +1547,107 @@ async def config_file(name: str) -> dict:
         )
 
     try:
-        return json.loads(cfg_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Config file {cfg_path.name} contains invalid JSON: {exc}",
+            detail=f"Config file {cfg_path.name} contains invalid JSON5: {exc}",
         )
+
+
+
+@router.get("/config/files/{name}/text")
+async def config_file_text(name: str) -> dict[str, str]:
+    """Return raw JSON5 config text by name (comments preserved)."""
+    if name not in _CONFIG_FILES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Config file {name!r} not available. "
+                   f"Valid names: {list(_CONFIG_FILES.keys())}",
+        )
+    cfg_path = _project_root() / "config" / "RunTime" / f"{name}.json5"
+    return {"text": _read_text_file(cfg_path)}
+
+@router.put("/config/files/{name}")
+async def save_config_file(name: str, content: dict[str, Any] | str) -> dict:
+    """Save editable config files (agent_tools | event_routing)."""
+    if name not in _CONFIG_FILES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Config file {name!r} not available. "
+                   f"Valid names: {list(_CONFIG_FILES.keys())}",
+        )
+    cfg_path = _project_root() / "config" / "RunTime" / f"{name}.json5"
+    if not cfg_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Config file not found on disk: {cfg_path.name}",
+        )
+    _write_json_file(cfg_path, content)
+    return {"status": "saved", "file": f"config/RunTime/{name}.json5"}
+
+
+@router.get("/config/modules/{module_type}")
+async def list_module_configs(module_type: str) -> dict:
+    """Return the names of configured modules for *module_type* (llm | broker).
+
+    Reads the module names from the in-memory system config so no disk I/O
+    is needed here.  The names can then be used with the detail endpoint below.
+    """
+    if module_type not in ("llm", "broker"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown module type: {module_type!r}. Valid types: 'llm', 'broker'",
+        )
+    names = list(_system_config.get("modules", {}).get(module_type, {}).keys())
+    return {"names": names}
+
+
+@router.get("/config/modules/{module_type}/{name}")
+async def get_module_config(module_type: str, name: str) -> dict:
+    """Return a single module config file with secrets masked.
+
+    The path is resolved from ``system.json5`` under ``modules.<type>.<name>``,
+    relative to the project root.  Sensitive fields are replaced with ``"***"``
+    via *_deep_mask*.
+    """
+    cfg_path = _resolve_module_config_path(module_type, name)
+    try:
+        raw = json5.loads(cfg_path.read_text(encoding="utf-8"))
+        return _deep_mask(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Config file {cfg_path.name} contains invalid JSON5: {exc}",
+        )
+
+
+@router.get("/config/modules/{module_type}/{name}/raw")
+async def get_module_config_raw(module_type: str, name: str) -> dict:
+    """Return a raw single module config file for editing."""
+    cfg_path = _resolve_module_config_path(module_type, name)
+    try:
+        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Config file {cfg_path.name} contains invalid JSON5: {exc}",
+        )
+
+
+
+@router.get("/config/modules/{module_type}/{name}/raw_text")
+async def get_module_config_raw_text(module_type: str, name: str) -> dict[str, str]:
+    """Return raw module config text for editing (comments preserved)."""
+    cfg_path = _resolve_module_config_path(module_type, name)
+    return {"text": _read_text_file(cfg_path)}
+
+@router.put("/config/modules/{module_type}/{name}/raw")
+async def save_module_config_raw(module_type: str, name: str, content: dict[str, Any] | str) -> dict:
+    """Save a raw single module config file."""
+    cfg_path = _resolve_module_config_path(module_type, name)
+    _write_json_file(cfg_path, content)
+    return {"status": "saved", "file": str(cfg_path)}
 
 
 # ── App factory ───────────────────────────────────────────────────────────────
@@ -700,10 +1659,15 @@ def build_app(
     indicator_registry=None,
     monitoring_bus=None,
     system_config: dict[str, Any] | None = None,
+    data_container=None,
+    repository=None,
+    connected_brokers: dict | None = None,
+    config_service=None,
 ) -> FastAPI:
     """Build the FastAPI application and wire runtime dependencies."""
     global _bus, _routing_table, _tool_registry, _indicator_registry
     global _monitoring_bus, _system_config, _start_time
+    global _data_container, _repository, _connected_brokers, _config_service
 
     _bus = bus
     _routing_table = routing_table
@@ -711,6 +1675,10 @@ def build_app(
     _indicator_registry = indicator_registry
     _monitoring_bus = monitoring_bus
     _system_config = system_config or {}
+    _data_container = data_container
+    _repository = repository
+    _connected_brokers = connected_brokers or {}
+    _config_service = config_service
     _start_time = time.monotonic()
 
     app = FastAPI(
@@ -755,3 +1723,28 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

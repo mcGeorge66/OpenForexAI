@@ -95,8 +95,8 @@ All adapters accept tools in the internal **Anthropic-style** `input_schema` for
 
 1. Create `adapters/llm/<name>.py` implementing `AbstractLLMProvider`
 2. Register in `adapters/llm/__init__.py`
-3. Create `config/modules/llm/<name>.json` with `"adapter": "<name>"`
-4. Reference in `config/system.json` under `modules.llm`
+3. Create `config/modules/llm/<name>.json5` with `"adapter": "<name>"`
+4. Reference in `config/system.json5` under `modules.llm`
 
 ---
 
@@ -121,7 +121,7 @@ Full implementation of the OANDA v20 REST API:
 - Order book: pending orders and their positions
 - Practice and live account support
 
-Config keys (in `config/modules/broker/oanda.json`):
+Config keys (in `config/modules/broker/oanda.json5`):
 ```json
 {
   "adapter": "oanda",
@@ -140,8 +140,8 @@ Windows-only adapter using the `MetaTrader5` Python package. Provides equivalent
 
 1. Create `adapters/brokers/<name>.py` subclassing `BrokerBase`
 2. Register in `adapters/brokers/__init__.py`
-3. Create `config/modules/broker/<name>.json`
-4. Reference in `config/system.json` under `modules.broker`
+3. Create `config/modules/broker/<name>.json5`
+4. Reference in `config/system.json5` under `modules.broker`
 
 ---
 
@@ -172,3 +172,4 @@ Set via environment variable:
 OPENFOREXAI_DB_BACKEND=sqlite      # default
 OPENFOREXAI_DB_BACKEND=postgresql
 ```
+

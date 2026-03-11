@@ -173,3 +173,4 @@ class OrderBookEntry(BaseModel):
 
     # ── Sync ──────────────────────────────────────────────────────────────────
     sync_confirmed: bool = False                # True once broker has confirmed position
+

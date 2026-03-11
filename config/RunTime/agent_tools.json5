@@ -1,31 +1,39 @@
 {
-  "_comment": "OpenForexAI — Per-agent tool configuration",
-  "_doc": [
-    "Each key is an agent_id pattern (wildcard '*' supported).",
-    "Patterns are evaluated in order; the FIRST match wins.",
-    "",
-    "allowed_tools: list of tool names this agent may call.",
-    "  Use ['*'] to allow all registered tools.",
-    "  Empty list [] falls back to ['*'].",
-    "",
-    "approval_modes: per-tool override (reserved for future use, all tools currently 'direct').",
-    "  'direct'     → execute immediately, no approval needed",
-    "",
-    "context_tiers: maps budget-percentage threshold → tool-set key.",
-    "  At 0-69% budget: tools in tier_tools['all'] are available.",
-    "  At 70-89% budget: only tools in tier_tools['decision'].",
-    "  At 90-100% budget: only tools in tier_tools['safety'].",
-    "",
-    "tier_tools: defines which tools belong to each tier.",
-    "  Use '*' in the list to allow all allowed_tools for that tier.",
-    "",
-    "max_tool_turns: maximum tool-use loop iterations per cycle."
+  // "OpenForexAI — Per-agent tool configuration
+  // 
+  // Each key is an agent_id pattern (wildcard '*' supported).
+  // Patterns are evaluated in order; the FIRST match wins.
+  // 
+  // allowed_tools: list of tool names this agent may call.
+  //   Use ['*'] to allow all registered tools.
+  //   Empty list [] falls back to ['*'].
+  // 
+  // approval_modes: per-tool override (reserved for future use, all tools currently 'direct').
+  //   'direct'     → execute immediately, no approval needed
+  // 
+  // context_tiers: maps budget-percentage threshold → tool-set key.
+  //   At 0-69% budget: tools in tier_tools['all'] are available.
+  //   At 70-89% budget: only tools in tier_tools['decision'].
+  //   At 90-100% budget: only tools in tier_tools['safety'].
+  // 
+  // tier_tools: defines which tools belong to each tier.
+  //   Use '*' in the list to allow all allowed_tools for that tier.
+  // 
+  // max_tool_turns: maximum tool-use loop iterations per cycle.
+
+  "bridge_tools": [
+    {
+      "name": "ask_ga_market_outlook",
+      "description": "Ask a global analysis agent for an additional market outlook and return its answer.",
+      "timeout_seconds": 90,
+      "question_description": "Specific question for the target agent, e.g. macro drivers for the next hours."
+    }
   ],
 
   "agents": [
 
     {
-      "pattern": "*_*_AA_TRD*",
+      "pattern": "*-*-AA-TRD*",
       "_comment": "Trading Agents (Adapter Agent, per pair)",
       "allowed_tools": [
         "get_candles",
@@ -71,7 +79,7 @@
     },
 
     {
-      "pattern": "*_ALL..._BA_SUP*",
+      "pattern": "*-ALL___-BA-SUP*",
       "_comment": "Supervisor Agents (Broker Agent, per broker)",
       "allowed_tools": [
         "get_account_status",
@@ -100,7 +108,7 @@
     },
 
     {
-      "pattern": "GLOBL_*_GA_TA*",
+      "pattern": "GLOBL-*-GA-TA*",
       "_comment": "TechnicalAnalysisAgent (Global Agent, singleton)",
       "allowed_tools": [
         "get_candles",
@@ -127,7 +135,7 @@
     },
 
     {
-      "pattern": "GLOBL_ALL..._GA_OPT*",
+      "pattern": "GLOBL-ALL___-GA-OPT*",
       "_comment": "OptimizationAgent (Global Agent, singleton)",
       "allowed_tools": [
         "get_order_book",

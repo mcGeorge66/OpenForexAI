@@ -1,7 +1,7 @@
 """ToolRegistry — plug-and-play tool registration.
 
 Analogous to ``IndicatorRegistry``: add a tool in one line and it becomes
-available to all agents that have it in their ``agent_tools.json`` config.
+available to all agents that have it in their ``agent_tools.json5`` config.
 
 Usage::
 
@@ -81,3 +81,4 @@ class ToolRegistry:
 
 # ── Default registry — populated by tools package __init__ ────────────────────
 DEFAULT_REGISTRY = ToolRegistry()
+

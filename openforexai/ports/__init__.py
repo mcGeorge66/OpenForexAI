@@ -10,3 +10,4 @@ __all__ = [
     "AbstractRepository",
     "AbstractDataFeed",
 ]
+

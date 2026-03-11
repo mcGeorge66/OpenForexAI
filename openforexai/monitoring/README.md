@@ -129,3 +129,4 @@ See [`tools/README.md`](../../tools/README.md) for full monitor.py documentation
 - The ring buffer is a `collections.deque(maxlen=1000)` — O(1) append
 - No asyncio overhead in the emit path — `put_nowait()` is used
 - The monitoring subsystem adds zero latency to the main system under normal conditions
+

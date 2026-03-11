@@ -57,3 +57,4 @@ class MarketSnapshot(BaseModel):
     candles_d1: list[Candle] = []
     session: str               # london | new_york | tokyo | sydney | overlap | closed
     snapshot_time: datetime
+

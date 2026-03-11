@@ -25,3 +25,4 @@ class CorrelationMatrix(BaseModel):
     pairs: list[str]
     matrix: dict[str, dict[str, float]]  # pair -> pair -> coefficient
     computed_at: str  # ISO datetime string
+

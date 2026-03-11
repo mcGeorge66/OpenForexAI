@@ -114,3 +114,4 @@ DATABASE_URL=postgresql://user:pass@localhost/openforexai
 ```
 
 Both backends implement the same `AbstractRepository` interface — the rest of the system is unaware of which backend is in use.
+

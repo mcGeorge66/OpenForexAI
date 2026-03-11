@@ -60,3 +60,4 @@ class PostgreSQLRepository(AbstractRepository):
 
     async def save_backtest_result(self, result: BacktestResult) -> str:
         raise NotImplementedError
+

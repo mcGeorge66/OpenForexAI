@@ -104,3 +104,4 @@ class PluginRegistry:
     @classmethod
     def list_data_containers(cls) -> list[str]:
         return list(cls._repositories)
+

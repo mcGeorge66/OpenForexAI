@@ -63,3 +63,4 @@ class GetCandlesTool(BaseTool):
             }
             for c in candles
         ]
+

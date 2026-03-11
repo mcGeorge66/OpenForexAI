@@ -108,8 +108,8 @@ class AbstractLLMProvider(ABC):
         self,
         system_prompt: str,
         user_message: str,
-        temperature: float = 0.1,
-        max_tokens: int = 1024,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse: ...
 
     @abstractmethod
@@ -128,8 +128,8 @@ class AbstractLLMProvider(ABC):
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec],
-        temperature: float = 0.1,
-        max_tokens: int = 4096,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponseWithTools:
         """Single turn of a tool-use conversation.
 
@@ -152,3 +152,4 @@ class AbstractLLMProvider(ABC):
     @property
     @abstractmethod
     def model_id(self) -> str: ...
+

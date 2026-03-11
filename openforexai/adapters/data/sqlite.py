@@ -263,3 +263,4 @@ class SQLiteDataContainer(SQLiteRepository, AbstractDataContainer):
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+

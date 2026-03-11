@@ -18,12 +18,12 @@ _log = logging.getLogger(__name__)
 def _adapter_agent_id(broker_name: str, pair: str) -> str:
     """Build the structured source_agent_id for a broker adapter.
 
-    One adapter = one pair.  Format: ``BROKER_PAIR_AA_ADPT``
-    Example: ``OANDA_EURUSD_AA_ADPT``, ``MT5.._USDJPY_AA_ADPT``
+    One adapter = one pair.  Format: ``BROKER-PAIR-AD-ADPT``
+    Example: ``OANDA-EURUSD-AD-ADPT``, ``MT5__-USDJPY-AD-ADPT``
     """
-    b = broker_name.upper().ljust(5, ".")[:5]
-    p = pair.upper().ljust(6, ".")[:6]
-    return f"{b}_{p}_AA_ADPT"
+    b = broker_name.upper().ljust(5, "_")[:5]
+    p = pair.upper().ljust(6, "_")[:6]
+    return f"{b}-{p}-AD-ADPT"
 
 
 # ── Candle normalisation ──────────────────────────────────────────────────────
@@ -161,9 +161,17 @@ class BrokerBase(AbstractBroker):
             try:
                 await self._sleep_until_next_m5()
                 try:
+                    expected_open = self._expected_latest_m5_open()
                     candle = await self.fetch_latest_m5_candle(pair)
-                    if candle is None:
-                        continue
+                    if (
+                        candle is None
+                        or candle.timestamp < expected_open
+                        or (self._last_m5_time is not None and candle.timestamp <= self._last_m5_time)
+                    ):
+                        synth_ts = expected_open
+                        if self._last_m5_time is not None and synth_ts <= self._last_m5_time:
+                            synth_ts = self._last_m5_time + timedelta(minutes=5)
+                        candle = self._build_null_m5_candle(synth_ts)
 
                     self._emit(
                         source, MonitoringEventType.M5_CANDLE_FETCHED,
@@ -175,6 +183,7 @@ class BrokerBase(AbstractBroker):
                         close=str(candle.close),
                         spread=str(candle.spread),
                         tick_volume=candle.tick_volume,
+                        is_null_candle=self._is_null_candle(candle),
                     )
 
                     # ── Gap detection ─────────────────────────────────────────
@@ -218,6 +227,7 @@ class BrokerBase(AbstractBroker):
                             "broker_name": self.short_name,
                             "pair": pair,
                             "candle": candle.model_dump(mode="json"),
+                            "is_null_candle": self._is_null_candle(candle),
                         },
                     ))
                     self._emit(
@@ -444,6 +454,39 @@ class BrokerBase(AbstractBroker):
         if wait > 0:
             await asyncio.sleep(wait)
 
+    @staticmethod
+    def _expected_latest_m5_open(now: datetime | None = None) -> datetime:
+        """Return open timestamp for the latest completed M5 candle."""
+        dt = now or datetime.now(timezone.utc)
+        slot_minute = dt.minute - (dt.minute % 5)
+        boundary = dt.replace(minute=slot_minute, second=0, microsecond=0)
+        return boundary - timedelta(minutes=5)
+
+    @staticmethod
+    def _build_null_m5_candle(ts: datetime) -> Candle:
+        """Create a synthetic M5 candle when broker has no fresh candle."""
+        return Candle(
+            timestamp=ts,
+            open=Decimal("0"),
+            high=Decimal("0"),
+            low=Decimal("0"),
+            close=Decimal("0"),
+            tick_volume=0,
+            spread=Decimal("0"),
+            timeframe="M5",
+        )
+
+    @staticmethod
+    def _is_null_candle(candle: Candle) -> bool:
+        return (
+            candle.open == 0
+            and candle.high == 0
+            and candle.low == 0
+            and candle.close == 0
+            and candle.spread == 0
+            and candle.tick_volume == 0
+        )
+
     # ── Monitoring helper ─────────────────────────────────────────────────────
 
     def _emit(
@@ -470,3 +513,6 @@ class BrokerBase(AbstractBroker):
             ))
         except Exception:
             pass  # monitoring must never crash the system
+
+
+

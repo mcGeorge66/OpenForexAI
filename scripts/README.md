@@ -17,16 +17,16 @@ Standalone command-line scripts for database management, data export, and backte
 Applies all pending SQL migration files from `migrations/` to the configured database.
 
 ```bash
-# Using default config (config/system.json)
+# Using default config (config/system.json5)
 python scripts/db_migrate.py
 
 # Using a custom config file
-python scripts/db_migrate.py --config path/to/system.json
+python scripts/db_migrate.py --config path/to/system.json5
 ```
 
 ### What it does
 
-1. Reads `database.backend` and `database.sqlite_path` from `system.json`
+1. Reads `database.backend` and `database.sqlite_path` from `system.json5`
 2. Scans `migrations/*.sql` in alphabetical order
 3. Applies each file via `executescript()`
 4. Prints the name of each applied file
@@ -41,7 +41,7 @@ python scripts/db_migrate.py --config path/to/system.json
 
 ## `export_prompts.py` — Prompt Exporter
 
-Exports the system prompts for all agents defined in `system.json` to readable files or stdout.
+Exports the system prompts for all agents defined in `system.json5` to readable files or stdout.
 
 ```bash
 # Print all agent prompts to stdout
@@ -96,3 +96,4 @@ All scripts:
 - Do not require the main system to be running
 - Write to `stderr` for errors, `stdout` for results
 - Exit with code 0 on success, non-zero on error
+

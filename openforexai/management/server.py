@@ -24,6 +24,7 @@ To stop gracefully::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -44,6 +45,10 @@ class ManagementServer:
         indicator_registry=None,
         monitoring_bus=None,
         system_config: dict[str, Any] | None = None,
+        data_container=None,
+        repository=None,
+        connected_brokers: dict | None = None,
+        config_service=None,
         host: str = "127.0.0.1",
         port: int = 8765,
         log_level: str = "warning",
@@ -57,6 +62,10 @@ class ManagementServer:
         self._indicator_registry = indicator_registry
         self._monitoring_bus = monitoring_bus
         self._system_config = system_config or {}
+        self._data_container = data_container
+        self._repository = repository
+        self._connected_brokers = connected_brokers or {}
+        self._config_service = config_service
         self._server = None
 
     async def serve(self) -> None:
@@ -79,6 +88,10 @@ class ManagementServer:
             indicator_registry=self._indicator_registry,
             monitoring_bus=self._monitoring_bus,
             system_config=self._system_config,
+            data_container=self._data_container,
+            repository=self._repository,
+            connected_brokers=self._connected_brokers,
+            config_service=self._config_service,
         )
 
         # Wire AGENT_QUERY_RESPONSE handler so POST /agents/{id}/ask
@@ -91,9 +104,17 @@ class ManagementServer:
             port=self._port,
             log_level=self._log_level,
             loop="none",         # use the already-running asyncio loop
+            lifespan="off",      # avoid noisy CancelledError traces on Ctrl+C
             access_log=False,
         )
-        self._server = uvicorn.Server(config)
+
+        class _EmbeddedServer(uvicorn.Server):
+            @contextlib.contextmanager
+            def capture_signals(self):
+                # Signal handling is owned by the outer asyncio.run() process.
+                yield
+
+        self._server = _EmbeddedServer(config)
 
         _log.info(
             "Management API starting on http://%s:%d", self._host, self._port
@@ -101,6 +122,8 @@ class ManagementServer:
         try:
             await self._server.serve()
         except asyncio.CancelledError:
+            if self._server is not None:
+                self._server.should_exit = True
             _log.info("Management API server task cancelled")
         except Exception as exc:
             _log.exception("Management API server error: %s", exc)
@@ -109,3 +132,4 @@ class ManagementServer:
         """Gracefully shut down the HTTP server."""
         if self._server is not None:
             self._server.should_exit = True
+

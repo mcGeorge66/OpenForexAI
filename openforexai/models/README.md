@@ -263,3 +263,4 @@ class MonitoringEvent(BaseModel):
 ```
 
 The `payload` structure varies by event type. For `LLM_RESPONSE` it includes `content`, `tokens`, `stop_reason`; for `M5_CANDLE_FETCHED` it includes `open`, `high`, `low`, `close`, `volume`.
+

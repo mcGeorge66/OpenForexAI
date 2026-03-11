@@ -258,3 +258,4 @@ DEFAULT_REGISTRY.register(RSIPlugin())
 DEFAULT_REGISTRY.register(ATRPlugin())
 DEFAULT_REGISTRY.register(BollingerBandsPlugin())
 DEFAULT_REGISTRY.register(VWAPPlugin())
+

@@ -95,3 +95,4 @@ class RaiseAlarmTool(BaseTool):
             "severity": severity,
             "title": title,
         }
+

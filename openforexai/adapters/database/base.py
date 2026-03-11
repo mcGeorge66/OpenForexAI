@@ -9,3 +9,4 @@ AGENT_DECISIONS_TABLE = "agent_decisions"
 TRADE_PATTERNS_TABLE = "trade_patterns"
 PROMPT_CANDIDATES_TABLE = "prompt_candidates"
 BACKTEST_RESULTS_TABLE = "backtest_results"
+

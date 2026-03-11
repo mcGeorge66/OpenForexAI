@@ -6,3 +6,4 @@ PluginRegistry.register_broker("oanda", OANDABroker)
 PluginRegistry.register_broker("mt5", MT5Broker)
 
 __all__ = ["OANDABroker", "MT5Broker"]
+

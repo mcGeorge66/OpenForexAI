@@ -24,11 +24,15 @@ class AnthropicLLMProvider(AbstractLLMProvider):
         model: str = "claude-opus-4-6",
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
+        default_temperature: float | None = None,
+        default_max_tokens: int = 4096,
     ) -> None:
         self._model = model
         self._retry_attempts = retry_attempts
         self._retry_base_delay = retry_base_delay
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._default_temperature = default_temperature
+        self._default_max_tokens = default_max_tokens
 
     @classmethod
     def from_config(cls, cfg: dict) -> "AnthropicLLMProvider":
@@ -37,11 +41,23 @@ class AnthropicLLMProvider(AbstractLLMProvider):
             model=cfg.get("model", "claude-opus-4-6"),
             retry_attempts=cfg.get("retry_attempts", 3),
             retry_base_delay=cfg.get("retry_base_delay", 1.0),
+            default_temperature=(
+                cfg.get("temperature") if isinstance(cfg.get("temperature"), (int, float)) else None
+            ),
+            default_max_tokens=cfg.get("max_tokens", 4096),
         )
 
     @property
     def model_id(self) -> str:
         return self._model
+
+    @property
+    def default_temperature(self) -> float | None:
+        return self._default_temperature
+
+    @property
+    def default_max_tokens(self) -> int:
+        return self._default_max_tokens
 
     # ── Simple completions ────────────────────────────────────────────────────
 
@@ -49,17 +65,22 @@ class AnthropicLLMProvider(AbstractLLMProvider):
         self,
         system_prompt: str,
         user_message: str,
-        temperature: float = 0.1,
-        max_tokens: int = 1024,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
+
         async def _call() -> LLMResponse:
-            msg = await self._client.messages.create(
-                model=self._model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            )
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": resolved_max_tokens,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_message}],
+            }
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            msg = await self._client.messages.create(**kwargs)
             return LLMResponse(
                 content=msg.content[0].text,
                 model=msg.model,
@@ -98,23 +119,28 @@ class AnthropicLLMProvider(AbstractLLMProvider):
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec],
-        temperature: float = 0.1,
-        max_tokens: int = 4096,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponseWithTools:
         """Single turn using Anthropic's native tool_use API.
 
         ToolSpec canonical format matches Anthropic's native format directly
         (``name``, ``description``, ``input_schema``), so no conversion needed.
         """
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
+
         async def _call() -> LLMResponseWithTools:
-            msg = await self._client.messages.create(
-                model=self._model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt,
-                messages=messages,
-                tools=tools,  # type: ignore[arg-type]
-            )
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": resolved_max_tokens,
+                "system": system_prompt,
+                "messages": messages,
+                "tools": tools,
+            }
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            msg = await self._client.messages.create(**kwargs)  # type: ignore[arg-type]
 
             text_parts: list[str] = []
             tool_calls: list[ToolCall] = []
@@ -178,3 +204,4 @@ class AnthropicLLMProvider(AbstractLLMProvider):
             for r in tool_results
         ]
         return {"role": "user", "content": content}
+

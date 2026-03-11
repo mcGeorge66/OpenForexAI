@@ -1,58 +1,58 @@
-# DATABASE.md — OpenForexAI Datenbankreferenz
+# DATABASE.md — OpenForexAI Database Reference
 
-Vollständige Beschreibung aller Tabellen: Zweck, Befüllungszeitpunkt, Schreiber, Leser und mögliche Analysen.
+Complete description of all tables: purpose, population timing, writers, readers, and possible analyses.
 
 ---
 
-## Übersicht
+## Overview
 
-OpenForexAI unterstützt zwei Backends (konfigurierbar via `OPENFOREXAI_DB_BACKEND`):
+OpenForexAI supports two backends (configurable via `OPENFOREXAI_DB_BACKEND`):
 
-| Backend | Adapter | Standard-Pfad |
-|---|---|---|
-| `sqlite` | `SQLiteRepository` | `./data/openforexai.db` |
-| `postgresql` | `PostgreSQLRepository` | via Connection-String |
+| Backend      | Adapter                | Default Path            |
+| ------------ | ---------------------- | ----------------------- |
+| `sqlite`     | `SQLiteRepository`     | `./data/openforexai.db` |
+| `postgresql` | `PostgreSQLRepository` | via connection string   |
 
-Das Schema wird automatisch beim Start migriert. Die Migration ist idempotent — bereits angewendete Dateien werden übersprungen.
+The schema is migrated automatically at startup. Migration is idempotent — already applied files are skipped.
 
-### Migration-Tracking
+### Migration Tracking
 
 ```
 schema_migrations
-  filename    TEXT PRIMARY KEY   -- z. B. "001_initial_schema.sql"
-  applied_at  TEXT               -- UTC-Timestamp der Anwendung
+  filename    TEXT PRIMARY KEY   -- e.g. "001_initial_schema.sql"
+  applied_at  TEXT               -- UTC timestamp of application
 ```
 
-Verwaltet intern durch den Adapter. Nicht für externe Abfragen gedacht.
+Managed internally by the adapter. Not intended for external queries.
 
 ---
 
-## Tabellen-Übersicht
+## Table Overview
 
-| Tabelle | Migration | Zweck |
+| Table | Migration | Purpose |
 |---|---|---|
-| `{BROKER}_{PAIR}_{TF}` | dynamisch | Kerzendaten (M5 primär) |
-| `account_status` | dynamisch | Kontostand-Snapshots |
-| `order_book_entries` | dynamisch | Authoritative lokale Orderbuch-Kopie |
-| `trades` | 001 | Legacy-Trade-Ergebnisse (rückwärtskompatibel) |
-| `agent_decisions` | 001 + 003 | Jede LLM-Entscheidung jedes Agenten |
-| `trade_patterns` | 002 | Erkannte statistische Muster in Trade-Historie |
-| `prompt_candidates` | 002 | Versionierte System-Prompts pro Paar |
-| `backtest_results` | 002 | Backtesting-Ergebnisse pro Prompt-Kandidat |
-| `agent_conversations` | 003 | Vollständige LLM-Gesprächshistorie pro Zyklus |
-| `agent_performance` | 003 | Aggregierte Performance-Snapshots pro Agent |
+| `{BROKER}_{PAIR}_{TF}` | dynamic | Candle data (M5 primary) |
+| `account_status` | dynamic | Account balance snapshots |
+| `order_book_entries` | dynamic | Authoritative local order book copy |
+| `trades` | 001 | Legacy trade results (backward compatible) |
+| `agent_decisions` | 001 + 003 | Every LLM decision of every agent |
+| `trade_patterns` | 002 | Detected statistical patterns in trade history |
+| `prompt_candidates` | 002 | Versioned system prompts per pair |
+| `backtest_results` | 002 | Backtesting results per prompt candidate |
+| `agent_conversations` | 003 | Full LLM conversation history per cycle |
+| `agent_performance` | 003 | Aggregated performance snapshots per agent |
 
 ---
 
-## Dynamische Kerzentabellen
+## Dynamic Candle Tables
 
 ### `{BROKER}_{PAIR}_{TIMEFRAME}`
 
-Beispiele: `OAPR1_EURUSD_M5`, `OAPR1_GBPUSD_M5`
+Examples: `OAPR1_EURUSD_M5`, `OAPR1_GBPUSD_M5`
 
 ```sql
-timestamp    TEXT PRIMARY KEY   -- ISO-8601 UTC, z. B. "2026-03-03T08:00:00+00:00"
-open         TEXT               -- Dezimalpreis als String (Decimal-Präzision)
+timestamp    TEXT PRIMARY KEY   -- ISO-8601 UTC, e.g. "2026-03-03T08:00:00+00:00"
+open         TEXT               -- decimal price as string (Decimal precision)
 high         TEXT
 low          TEXT
 close        TEXT
@@ -60,29 +60,29 @@ tick_volume  INTEGER
 spread       TEXT
 ```
 
-**Warum:** Nur M5-Kerzen werden vom Broker per API abgefragt. Alle höheren Timeframes (M15, M30, H1, H4, D1) werden vom `DataContainer`-Resampler on-demand aus M5 berechnet. Gespeichert werden primär die M5-Rohdaten; höhere TFs können bei Bedarf ebenfalls persistiert werden (gleiche Tabellenstruktur, anderer TF-Suffix).
+**Why:** Only M5 candles are fetched from the broker via API. All higher timeframes (M15, M30, H1, H4, D1) are calculated on demand from M5 by the `DataContainer` resampler. Primarily the raw M5 data is persisted; higher TFs can also be persisted if needed (same table structure, different TF suffix).
 
-**Wann befüllt:**
-- Initial beim Systemstart: `BrokerBase` lädt historische M5-Kerzen per Bulk-Insert (`save_candles_bulk`)
-- Laufend alle 5 Minuten: Broker-Adapter veröffentlicht `m5_candle_available`; `DataContainer` speichert via `save_candle`
+**When populated:**
+- Initial at system startup: `BrokerBase` loads historical M5 candles via bulk insert (`save_candles_bulk`)
+- Continuously every 5 minutes: broker adapter publishes `m5_candle_available`; `DataContainer` persists via `save_candle`
 
-**Schreiber:** `BrokerBase` → `SQLiteRepository.save_candle / save_candles_bulk`
+**Writer:** `BrokerBase` → `SQLiteRepository.save_candle / save_candles_bulk`
 
-**Leser:**
-- `DataContainer` — lädt beim Start fehlende History aus der DB nach
-- `get_candles`-Tool — stellt Agenten Kerzenhistorie bereit
-- `Backtester` — verwendet historische M5-Daten für Prompt-Tests
-- Management-API — `/candles/{pair}` Endpunkt
+**Readers:**
+- `DataContainer` — loads missing history from DB at startup
+- `get_candles` tool — provides candle history to agents
+- `Backtester` — uses historical M5 data for prompt tests
+- Management API — `/candles/{pair}` endpoint
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Wie viele M5-Kerzen für EURUSD sind gespeichert?
+-- How many M5 candles are stored for EURUSD?
 SELECT COUNT(*) FROM OAPR1_EURUSD_M5;
 
--- Letzte 10 EURUSD-Kerzen
+-- Last 10 EURUSD candles
 SELECT * FROM OAPR1_EURUSD_M5 ORDER BY timestamp DESC LIMIT 10;
 
--- Tagesrange eines bestimmten Tages
+-- Day range for a specific day
 SELECT MIN(CAST(low AS REAL)), MAX(CAST(high AS REAL))
 FROM OAPR1_EURUSD_M5
 WHERE timestamp LIKE '2026-03-03%';
@@ -94,39 +94,39 @@ WHERE timestamp LIKE '2026-03-03%';
 
 ```sql
 broker_name    TEXT NOT NULL
-balance        TEXT               -- Kontostand (Decimal als String)
-equity         TEXT               -- Equity inkl. unrealised PnL
-margin         TEXT               -- verwendete Margin
-margin_free    TEXT               -- verfügbare Margin
+balance        TEXT               -- account balance (Decimal as string)
+equity         TEXT               -- equity incl. unrealized PnL
+margin         TEXT               -- used margin
+margin_free    TEXT               -- free margin
 leverage       INTEGER
-currency       TEXT               -- Kontowährung, z. B. "EUR"
-trade_allowed  INTEGER            -- 0 | 1 (SQLite-Boolean)
-margin_level   REAL               -- Margin-Level in %, kann NULL sein
+currency       TEXT               -- account currency, e.g. "EUR"
+trade_allowed  INTEGER            -- 0 | 1 (SQLite boolean)
+margin_level   REAL               -- margin level in %, can be NULL
 recorded_at    TEXT NOT NULL      -- ISO-8601 UTC
 PRIMARY KEY (broker_name, recorded_at)
 ```
 
-**Warum:** Historischer Verlauf des Kontostands ermöglicht Equity-Kurven-Analyse. Der aktuelle Wert wird von Agenten via `get_account_status`-Tool abgefragt.
+**Why:** Historical account balance progression enables equity-curve analysis. The current value is queried by agents via the `get_account_status` tool.
 
-**Wann befüllt:** `BrokerBase` pollt alle 5 Minuten den Account-Status beim Broker und speichert jeden Snapshot via `save_account_status`.
+**When populated:** `BrokerBase` polls account status from broker every 5 minutes and stores each snapshot via `save_account_status`.
 
-**Schreiber:** `BrokerBase` (account poll loop)
+**Writer:** `BrokerBase` (account poll loop)
 
-**Leser:**
-- `get_account_status`-Tool → Agenten (Positionsgrößenberechnung, Risk-Check)
-- Management-API — `/account/{broker}` Endpunkt
-- Supervisor-Agent — prüft Margin-Level vor Trade-Genehmigung
+**Readers:**
+- `get_account_status` tool → agents (position sizing, risk checks)
+- Management API — `/account/{broker}` endpoint
+- Supervisor agent — checks margin level before trade approval
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Equity-Verlauf der letzten 7 Tage
+-- Equity curve for the last 7 days
 SELECT recorded_at, CAST(equity AS REAL) AS equity
 FROM account_status
 WHERE broker_name = 'OAPR1'
   AND recorded_at > datetime('now', '-7 days')
 ORDER BY recorded_at;
 
--- Niedrigste freie Margin (kritische Momente)
+-- Lowest free margin (critical moments)
 SELECT recorded_at, CAST(margin_free AS REAL) AS free
 FROM account_status
 WHERE broker_name = 'OAPR1'
@@ -138,73 +138,73 @@ LIMIT 5;
 
 ## `order_book_entries`
 
-Die **zentrale Trade-Tabelle** des Systems. Eine Zeile pro platziertem Order — von der Signal-Genehmigung bis zur Schließung.
+The **central trade table** of the system. One row per placed order — from signal approval to closure.
 
 ```sql
 id                       TEXT PRIMARY KEY          -- UUID
-broker_name              TEXT NOT NULL             -- z. B. "OAPR1"
-broker_order_id          TEXT                      -- Broker-seitige Order-ID (nach Bestätigung)
-pair                     TEXT NOT NULL             -- z. B. "EURUSD"
+broker_name              TEXT NOT NULL             -- e.g. "OAPR1"
+broker_order_id          TEXT                      -- broker-side order ID (after confirmation)
+pair                     TEXT NOT NULL             -- e.g. "EURUSD"
 direction                TEXT NOT NULL             -- "BUY" | "SELL"
 order_type               TEXT NOT NULL             -- MARKET | LIMIT | STOP | STOP_LIMIT | TRAILING_STOP
 units                    INTEGER NOT NULL
 
--- Preise
-requested_price          TEXT NOT NULL             -- kalkulierter Einstiegspreis des Agenten
-fill_price               TEXT                      -- tatsächlicher Füllpreis (nach Broker-Bestätigung)
+-- Prices
+requested_price          TEXT NOT NULL             -- agent-calculated entry price
+fill_price               TEXT                      -- actual fill price (after broker confirmation)
 stop_loss                TEXT
 take_profit              TEXT
-trailing_stop_distance   TEXT                      -- in Pips (nur TRAILING_STOP)
+trailing_stop_distance   TEXT                      -- in pips (TRAILING_STOP only)
 limit_price              TEXT                      -- LIMIT / STOP_LIMIT
 stop_price               TEXT                      -- STOP / STOP_LIMIT
 
 -- Status
 status                   TEXT NOT NULL             -- PENDING | OPEN | PARTIALLY_FILLED | CLOSED | REJECTED | CANCELLED
 
--- Agent-Kontext (Schlüssel für Optimierung)
-agent_id                 TEXT NOT NULL             -- z. B. "OAPR1_EURUSD_AA_ANLYS"
-prompt_version           INTEGER                   -- Prompt-Version zum Zeitpunkt des Signals
-entry_reasoning          TEXT NOT NULL             -- Begründungstext des Agenten
+-- Agent context (key for optimization)
+agent_id                 TEXT NOT NULL             -- e.g. "OAPR1_EURUSD_AA_ANLYS"
+prompt_version           INTEGER                   -- prompt version at signal time
+entry_reasoning          TEXT NOT NULL             -- agent reasoning text
 signal_confidence        REAL NOT NULL             -- 0.0–1.0
-market_context_snapshot  TEXT NOT NULL             -- JSON: letzter M5-Candle + Indikatorwerte
+market_context_snapshot  TEXT NOT NULL             -- JSON: last M5 candle + indicator values
 
--- Zeitstempel
-requested_at             TEXT NOT NULL             -- Signal-Zeitpunkt
-opened_at                TEXT                      -- Broker-Bestätigung
+-- Timestamps
+requested_at             TEXT NOT NULL             -- signal timestamp
+opened_at                TEXT                      -- broker confirmation
 closed_at                TEXT
-last_broker_sync         TEXT                      -- letzter Sync-Check
+last_broker_sync         TEXT                      -- last sync check
 
--- Exit-Daten
+-- Exit data
 close_reason             TEXT                      -- SL_HIT | TP_HIT | TRAILING_STOP | AGENT_CLOSED | BROKER_CLOSED | SYNC_DETECTED
 close_price              TEXT
-close_reasoning          TEXT                      -- Freitext-Notiz zur Schließung
+close_reasoning          TEXT                      -- free-text closure note
 pnl_pips                 TEXT
 pnl_account_currency     TEXT
 
 -- Sync
-sync_confirmed           INTEGER NOT NULL DEFAULT 0  -- 1 = Broker hat Position bestätigt
+sync_confirmed           INTEGER NOT NULL DEFAULT 0  -- 1 = broker confirmed position
 ```
 
-**Warum:** Diese Tabelle ist die einzige Wahrheitsquelle über alle Trades des Systems. Sie enthält den vollständigen Kontext zum Zeitpunkt der Entscheidung (`market_context_snapshot`, `entry_reasoning`) — das ist das primäre Rohmaterial für den `OptimizationAgent`.
+**Why:** This table is the single source of truth for all trades in the system. It contains the full decision context (`market_context_snapshot`, `entry_reasoning`) — the primary raw material for the `OptimizationAgent`.
 
-**Wann befüllt:**
-- `PENDING`-Eintrag beim Signal-Approval (Supervisor genehmigt)
-- Update auf `OPEN` + `fill_price` nach Broker-Bestätigung
-- Update auf `CLOSED` beim Schließen (SL/TP/Agent/Sync)
-- `last_broker_sync` bei jedem Sync-Zyklus aktualisiert
+**When populated:**
+- `PENDING` entry at signal approval (supervisor approved)
+- Update to `OPEN` + `fill_price` after broker confirmation
+- Update to `CLOSED` on closure (SL/TP/agent/sync)
+- `last_broker_sync` updated on every sync cycle
 
-**Schreiber:** Broker-Agent (`BA`) via `place_order`-Tool → `save_order_book_entry`; Sync-Loop via `update_order_book_entry`
+**Writer:** Broker agent (`BA`) via `place_order` tool → `save_order_book_entry`; sync loop via `update_order_book_entry`
 
-**Leser:**
-- `get_open_positions`-Tool — zeigt Agenten offene Positionen
-- `get_order_book`-Tool — historische Übersicht
-- `OptimizationAgent` — analysiert `market_context_snapshot` + Ergebnisse
-- Sync-Loop — prüft PENDING/OPEN-Einträge gegen Broker-API
-- Management-API — `/orders/{broker}` Endpunkt
+**Readers:**
+- `get_open_positions` tool — shows open positions to agents
+- `get_order_book` tool — historical overview
+- `OptimizationAgent` — analyzes `market_context_snapshot` + outcomes
+- Sync loop — checks PENDING/OPEN entries against broker API
+- Management API — `/orders/{broker}` endpoint
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Win-Rate nach Paar
+-- Win rate by pair
 SELECT pair,
        COUNT(*) AS total,
        SUM(CASE WHEN CAST(pnl_account_currency AS REAL) > 0 THEN 1 ELSE 0 END) AS wins,
@@ -213,13 +213,13 @@ FROM order_book_entries
 WHERE status = 'CLOSED'
 GROUP BY pair;
 
--- Durchschnittlicher PnL nach Close-Grund
+-- Average PnL by close reason
 SELECT close_reason, AVG(CAST(pnl_account_currency AS REAL)) AS avg_pnl, COUNT(*) AS cnt
 FROM order_book_entries
 WHERE status = 'CLOSED'
 GROUP BY close_reason;
 
--- Alle Trades mit hohem Confidence-Score die trotzdem verloren
+-- All trades with high confidence that still lost
 SELECT id, pair, direction, signal_confidence, pnl_account_currency, entry_reasoning
 FROM order_book_entries
 WHERE status = 'CLOSED'
@@ -238,7 +238,7 @@ GROUP BY pair;
 
 ## `trades`
 
-**Legacy-Tabelle** — wird für Rückwärtskompatibilität behalten. Neuere Deployments verwenden primär `order_book_entries`.
+**Legacy table** — kept for backward compatibility. Newer deployments primarily use `order_book_entries`.
 
 ```sql
 id              TEXT PRIMARY KEY
@@ -259,49 +259,49 @@ broker_order_id TEXT
 created_at      TEXT NOT NULL
 ```
 
-**Wann befüllt:** Via `save_trade` (wird in neuem Code kaum noch direkt aufgerufen; `order_book_entries` ist der Standard).
+**When populated:** Via `save_trade` (rarely called directly in newer code; `order_book_entries` is the standard).
 
-**Analyse:** Gleiche Grundmuster wie `order_book_entries`, aber ohne `market_context_snapshot` und `entry_reasoning`.
+**Analysis:** Same basic patterns as `order_book_entries`, but without `market_context_snapshot` and `entry_reasoning`.
 
 ---
 
 ## `agent_decisions`
 
-Protokolliert **jede LLM-Entscheidung** jedes Agenten — das vollständige Audit-Log des KI-Systems.
+Logs **every LLM decision** of every agent — the complete audit log of the AI system.
 
 ```sql
 id               TEXT PRIMARY KEY
-agent_id         TEXT NOT NULL          -- z. B. "OAPR1_EURUSD_AA_ANLYS"
+agent_id         TEXT NOT NULL          -- e.g. "OAPR1_EURUSD_AA_ANLYS"
 agent_role       TEXT NOT NULL          -- trading | technical_analysis | supervisor | optimization
 pair             TEXT
 decision_type    TEXT NOT NULL          -- signal | hold | approve | reject | analyze | optimize
-input_context    TEXT NOT NULL          -- JSON: was der Agent als Input bekam
-output           TEXT NOT NULL          -- JSON: was der Agent entschieden hat
-llm_model        TEXT NOT NULL          -- z. B. "claude-sonnet-4-6"
-tokens_used      INTEGER                -- Gesamte Token-Anzahl (input + output)
-latency_ms       REAL                   -- Antwortzeit in ms
+input_context    TEXT NOT NULL          -- JSON: what input the agent received
+output           TEXT NOT NULL          -- JSON: what the agent decided
+llm_model        TEXT NOT NULL          -- e.g. "claude-sonnet-4-6"
+tokens_used      INTEGER                -- total token count (input + output)
+latency_ms       REAL                   -- response time in ms
 decided_at       TEXT NOT NULL          -- ISO-8601 UTC
 
--- Felder aus Migration 003:
-reasoning        TEXT                   -- vollständiger Reasoning-Text des LLM
-market_snapshot  TEXT                   -- JSON: Marktdaten zum Entscheidungszeitpunkt
-confidence       REAL                   -- 0.0–1.0 (wenn vom Agent ausgegeben)
+-- Fields from migration 003:
+reasoning        TEXT                   -- full LLM reasoning text
+market_snapshot  TEXT                   -- JSON: market data at decision time
+confidence       REAL                   -- 0.0–1.0 (if emitted by agent)
 ```
 
-**Warum:** Vollständige Nachvollziehbarkeit aller KI-Entscheidungen. Ermöglicht Post-Mortem-Analyse, Debugging und Kostentracking.
+**Why:** Complete traceability of all AI decisions. Enables post-mortem analysis, debugging, and cost tracking.
 
-**Wann befüllt:** Am Ende jedes `run_cycle()` — nach jeder LLM-Antwort, unabhängig vom Ergebnis.
+**When populated:** At the end of each `run_cycle()` — after every LLM response, regardless of outcome.
 
-**Schreiber:** Jeder Agent via `save_agent_decision` nach abgeschlossenem LLM-Turn.
+**Writer:** Every agent via `save_agent_decision` after completed LLM turn.
 
-**Leser:**
-- `OptimizationAgent` — Muster-Erkennung über Entscheidungssequenzen
-- Management-API — `/decisions/{agent_id}` Endpunkt
-- Monitoring / Debugging
+**Readers:**
+- `OptimizationAgent` — pattern detection over decision sequences
+- Management API — `/decisions/{agent_id}` endpoint
+- Monitoring / debugging
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Token-Kosten pro Agent pro Tag
+-- Token cost per agent per day
 SELECT agent_id,
        DATE(decided_at) AS day,
        SUM(tokens_used) AS total_tokens,
@@ -310,18 +310,18 @@ FROM agent_decisions
 GROUP BY agent_id, day
 ORDER BY day DESC, total_tokens DESC;
 
--- Durchschnittliche LLM-Latenz nach Modell
+-- Average LLM latency by model
 SELECT llm_model, AVG(latency_ms) AS avg_ms, MAX(latency_ms) AS max_ms
 FROM agent_decisions
 GROUP BY llm_model;
 
--- Verhältnis approve/reject des Supervisors
+-- Supervisor approve/reject ratio
 SELECT decision_type, COUNT(*) AS cnt
 FROM agent_decisions
 WHERE agent_role = 'supervisor'
 GROUP BY decision_type;
 
--- Welche Entscheidungen haben zum Signal "hold" geführt?
+-- Which decisions resulted in signal "hold"?
 SELECT decided_at, pair, output
 FROM agent_decisions
 WHERE decision_type = 'hold'
@@ -333,39 +333,39 @@ LIMIT 20;
 
 ## `agent_conversations`
 
-Speichert die **vollständige LLM-Nachrichtenhistorie** pro Agent-Zyklus (Session).
+Stores the **full LLM message history** per agent cycle (session).
 
 ```sql
 id          TEXT PRIMARY KEY       -- UUID
-agent_id    TEXT NOT NULL          -- z. B. "OAPR1_EURUSD_AA_ANLYS"
-session_id  TEXT NOT NULL          -- UUID, eine neue pro run_cycle()-Aufruf
-messages    TEXT NOT NULL          -- vollständige JSON-Nachrichtenliste (system, user, assistant, tool_result)
-turn_count  INTEGER DEFAULT 0      -- Anzahl LLM-Turns in dieser Session
+agent_id    TEXT NOT NULL          -- e.g. "OAPR1_EURUSD_AA_ANLYS"
+session_id  TEXT NOT NULL          -- UUID, one new one per run_cycle() call
+messages    TEXT NOT NULL          -- full JSON message list (system, user, assistant, tool_result)
+turn_count  INTEGER DEFAULT 0      -- number of LLM turns in this session
 started_at  TEXT NOT NULL          -- ISO-8601 UTC
-updated_at  TEXT NOT NULL          -- ISO-8601 UTC (Upsert bei jedem Turn)
+updated_at  TEXT NOT NULL          -- ISO-8601 UTC (upsert on each turn)
 UNIQUE (agent_id, session_id)
 ```
 
-**Warum:** Vollständige Reproduzierbarkeit jedes Zyklus. Ermöglicht genaue Analyse, warum ein Agent zu einer bestimmten Entscheidung gekommen ist — inklusive aller Tool-Calls und Zwischenschritte.
+**Why:** Full reproducibility of each cycle. Enables precise analysis of why an agent reached a specific decision — including all tool calls and intermediate steps.
 
-**Wann befüllt:** Upsert nach jedem LLM-Turn innerhalb von `run_cycle()`. Eine Session endet mit dem Zyklus.
+**When populated:** Upsert after each LLM turn within `run_cycle()`. A session ends with the cycle.
 
-**Schreiber:** Agent (`agent.py`) via Repository nach jedem Turn.
+**Writer:** Agent (`agent.py`) via repository after each turn.
 
-**Leser:**
-- Debugging und Post-Mortem-Analyse
-- Prompt-Engineering (Sichtung realer Konversationsabläufe)
-- Potentiell `OptimizationAgent` für tiefe Verhaltensanalyse
+**Readers:**
+- Debugging and post-mortem analysis
+- Prompt engineering (review of real conversation flows)
+- Potentially `OptimizationAgent` for deep behavior analysis
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Sessions mit vielen Turns (komplexe Entscheidungen)
+-- Sessions with many turns (complex decisions)
 SELECT agent_id, session_id, turn_count, started_at
 FROM agent_conversations
 ORDER BY turn_count DESC
 LIMIT 10;
 
--- Alle Sessions eines Agenten heute
+-- All sessions of one agent today
 SELECT session_id, turn_count, started_at, updated_at
 FROM agent_conversations
 WHERE agent_id = 'OAPR1_EURUSD_AA_ANLYS'
@@ -377,7 +377,7 @@ ORDER BY started_at DESC;
 
 ## `agent_performance`
 
-Append-only Tabelle mit **aggregierten Performance-Snapshots** pro Agent und Paar.
+Append-only table with **aggregated performance snapshots** per agent and pair.
 
 ```sql
 id               TEXT PRIMARY KEY       -- UUID
@@ -389,25 +389,25 @@ trades_closed    INTEGER DEFAULT 0
 win_count        INTEGER DEFAULT 0
 loss_count       INTEGER DEFAULT 0
 total_pnl        REAL DEFAULT 0.0
-period_start     TEXT NOT NULL          -- ISO-8601 UTC (Anfang des Auswertungsfensters)
+period_start     TEXT NOT NULL          -- ISO-8601 UTC (start of evaluation window)
 period_end       TEXT NOT NULL          -- ISO-8601 UTC
-recorded_at      TEXT NOT NULL          -- ISO-8601 UTC (Zeitpunkt des Snapshots)
+recorded_at      TEXT NOT NULL          -- ISO-8601 UTC (snapshot timestamp)
 ```
 
-**Warum:** Leichtgewichtiger Zugriff auf Performance-Kennzahlen ohne aufwändige Aggregation über `order_book_entries` oder `agent_decisions`. Dient als Zeitreihe für Trend-Analyse.
+**Why:** Lightweight access to performance metrics without expensive aggregation over `order_book_entries` or `agent_decisions`. Serves as a time series for trend analysis.
 
-**Wann befüllt:** Periodisch vom `OptimizationAgent` oder Supervisor — nach abgeschlossenen Auswertungsfenstern.
+**When populated:** Periodically by `OptimizationAgent` or supervisor — after completed evaluation windows.
 
-**Schreiber:** `OptimizationAgent` / Supervisor via `save_agent_performance` (Repository-Methode).
+**Writer:** `OptimizationAgent` / supervisor via `save_agent_performance` (repository method).
 
-**Leser:**
-- Management-API — Performance-Dashboard
-- `OptimizationAgent` — Baseline für Prompt-Vergleich
-- Externe Reporting-Tools
+**Readers:**
+- Management API — performance dashboard
+- `OptimizationAgent` — baseline for prompt comparison
+- External reporting tools
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Win-Rate-Trend eines Agenten über Zeit
+-- Agent win-rate trend over time
 SELECT recorded_at,
        ROUND(100.0 * win_count / NULLIF(trades_closed, 0), 1) AS win_rate_pct,
        total_pnl
@@ -415,7 +415,7 @@ FROM agent_performance
 WHERE agent_id = 'OAPR1_EURUSD_AA_ANLYS'
 ORDER BY recorded_at;
 
--- Bester Agent nach kumulativem PnL
+-- Best agent by cumulative PnL
 SELECT agent_id, pair, SUM(total_pnl) AS cum_pnl
 FROM agent_performance
 GROUP BY agent_id, pair
@@ -426,41 +426,41 @@ ORDER BY cum_pnl DESC;
 
 ## `trade_patterns`
 
-Statistisch erkannte Muster in der Trade-Historie. Input für den Prompt-Evolver.
+Statistically detected patterns in trade history. Input for the prompt evolver.
 
 ```sql
 id                    TEXT PRIMARY KEY
 pair                  TEXT NOT NULL
 pattern_type          TEXT NOT NULL   -- session_bias | direction_bias | entry_timing | sl_placement
-description           TEXT            -- menschenlesbare Beschreibung
-frequency             INTEGER         -- wie oft das Muster in den Daten vorkam
-win_rate_when_present REAL            -- Win-Rate der Trades, bei denen dieses Muster vorlag
-avg_pnl_when_present  REAL            -- durchschnittlicher PnL bei Mustern
-conditions            TEXT            -- JSON: z. B. {"session": "london", "rsi": ">70"}
+description           TEXT            -- human-readable description
+frequency             INTEGER         -- how often pattern appeared in data
+win_rate_when_present REAL            -- win rate of trades where pattern was present
+avg_pnl_when_present  REAL            -- average PnL with pattern
+conditions            TEXT            -- JSON: e.g. {"session": "london", "rsi": ">70"}
 detected_at           TEXT NOT NULL
-sample_size           INTEGER         -- Anzahl der analysierten Trades
+sample_size           INTEGER         -- number of analyzed trades
 ```
 
-**Warum:** Formalisiertes Gedächtnis des `OptimizationAgent`. Erkannte Muster werden als Wissen für die Prompt-Evolution gespeichert und referenziert.
+**Why:** Formalized memory of the `OptimizationAgent`. Detected patterns are persisted as knowledge for prompt evolution and referenced later.
 
-**Wann befüllt:** `OptimizationAgent` nach Analyse der `order_book_entries`-Historie — typisch nach einer Mindestanzahl abgeschlossener Trades.
+**When populated:** `OptimizationAgent` after analyzing `order_book_entries` history — typically after a minimum number of closed trades.
 
-**Schreiber:** `OptimizationAgent` via `save_pattern`
+**Writer:** `OptimizationAgent` via `save_pattern`
 
-**Leser:**
-- `OptimizationAgent` — Basis für `PromptCandidate`-Erstellung
-- `get_patterns` — Management-API / Debugging
+**Readers:**
+- `OptimizationAgent` — basis for `PromptCandidate` creation
+- `get_patterns` — Management API / debugging
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Muster mit der höchsten Win-Rate (mind. 20 Samples)
+-- Highest win-rate patterns (min. 20 samples)
 SELECT pair, pattern_type, description, win_rate_when_present, sample_size
 FROM trade_patterns
 WHERE sample_size >= 20
 ORDER BY win_rate_when_present DESC
 LIMIT 10;
 
--- Alle bekannten Muster für EURUSD
+-- All known patterns for EURUSD
 SELECT pattern_type, description, win_rate_when_present, avg_pnl_when_present
 FROM trade_patterns
 WHERE pair = 'EURUSD'
@@ -471,39 +471,39 @@ ORDER BY detected_at DESC;
 
 ## `prompt_candidates`
 
-Versionierte System-Prompts pro Währungspaar. Immer nur ein Kandidat pro Paar ist aktiv (`is_active = 1`).
+Versioned system prompts per currency pair. Only one candidate per pair is active at a time (`is_active = 1`).
 
 ```sql
 id              TEXT PRIMARY KEY
 pair            TEXT NOT NULL
-version         INTEGER NOT NULL       -- monoton steigend pro Paar
-system_prompt   TEXT NOT NULL          -- vollständiger System-Prompt-Text
-rationale       TEXT                   -- Begründung für die Änderung
-source_patterns TEXT                   -- JSON-Array der TradePattern-UUIDs, die diesen Prompt motivierten
-is_active       INTEGER DEFAULT 0      -- 0 | 1 (SQLite-Boolean)
+version         INTEGER NOT NULL       -- monotonically increasing per pair
+system_prompt   TEXT NOT NULL          -- full system prompt text
+rationale       TEXT                   -- rationale for the change
+source_patterns TEXT                   -- JSON array of TradePattern UUIDs that motivated this prompt
+is_active       INTEGER DEFAULT 0      -- 0 | 1 (SQLite boolean)
 created_at      TEXT NOT NULL
 ```
 
-**Warum:** Ermöglicht kontrollierte, datengesteuerte Prompt-Evolution. Jede Änderung ist versioniert und auf spezifische Muster zurückführbar. Rollback auf ältere Versionen ist jederzeit möglich.
+**Why:** Enables controlled, data-driven prompt evolution. Every change is versioned and traceable to specific patterns. Rollback to older versions is always possible.
 
-**Wann befüllt:** `OptimizationAgent` erstellt einen neuen Kandidaten nach erfolgreicher Mustererkennung. Aktivierung erfolgt nach positivem Backtest (`is_active` wird via UPDATE gesetzt).
+**When populated:** `OptimizationAgent` creates a new candidate after successful pattern detection. Activation occurs after positive backtest (`is_active` is set via UPDATE).
 
-**Schreiber:** `OptimizationAgent` via `save_prompt_candidate`
+**Writer:** `OptimizationAgent` via `save_prompt_candidate`
 
-**Leser:**
-- `ConfigService` — liefert aktiven Prompt an Agenten via `AGENT_CONFIG_RESPONSE`
-- `get_best_prompt` — gibt den aktuell aktiven Prompt zurück
-- Management-API — Prompt-Versionshistorie
+**Readers:**
+- `ConfigService` — provides active prompt to agents via `AGENT_CONFIG_RESPONSE`
+- `get_best_prompt` — returns current active prompt
+- Management API — prompt version history
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Alle Prompt-Versionen für EURUSD (neueste zuerst)
+-- All prompt versions for EURUSD (newest first)
 SELECT version, is_active, rationale, created_at
 FROM prompt_candidates
 WHERE pair = 'EURUSD'
 ORDER BY version DESC;
 
--- Welche Patterns haben den aktuell aktiven Prompt begründet?
+-- Which patterns motivated the currently active prompt?
 SELECT source_patterns
 FROM prompt_candidates
 WHERE pair = 'EURUSD' AND is_active = 1;
@@ -513,38 +513,38 @@ WHERE pair = 'EURUSD' AND is_active = 1;
 
 ## `backtest_results`
 
-Ergebnisse der Simulation eines `PromptCandidate` auf historischen M5-Daten.
+Results of simulating a `PromptCandidate` on historical M5 data.
 
 ```sql
 id                    TEXT PRIMARY KEY
 prompt_candidate_id   TEXT NOT NULL      -- FK → prompt_candidates.id
 pair                  TEXT NOT NULL
-period_start          TEXT               -- Backtest-Zeitraum Anfang
-period_end            TEXT               -- Backtest-Zeitraum Ende
+period_start          TEXT               -- backtest period start
+period_end            TEXT               -- backtest period end
 total_trades          INTEGER
 win_rate              REAL               -- 0.0–1.0
 total_pnl             REAL
 max_drawdown          REAL
 sharpe_ratio          REAL
-vs_baseline_pnl_delta REAL               -- PnL-Delta vs. vorherigem aktiven Prompt (positiv = besser)
+vs_baseline_pnl_delta REAL               -- PnL delta vs previous active prompt (positive = better)
 completed_at          TEXT NOT NULL
 FOREIGN KEY (prompt_candidate_id) REFERENCES prompt_candidates(id)
 ```
 
-**Warum:** Vor dem Aktivieren eines neuen Prompts wird er auf historischen Daten getestet. Nur wenn `vs_baseline_pnl_delta > 0` (und weitere Schwellwerte erfüllt), wird der Kandidat aktiviert.
+**Why:** Before activating a new prompt, it is tested on historical data. Only if `vs_baseline_pnl_delta > 0` (and other thresholds are met), the candidate is activated.
 
-**Wann befüllt:** `Backtester` via `scripts/run_backtest.py` oder automatisch durch `OptimizationAgent` nach Prompt-Erstellung.
+**When populated:** `Backtester` via `scripts/run_backtest.py` or automatically by `OptimizationAgent` after prompt creation.
 
-**Schreiber:** `Backtester` via `save_backtest_result`
+**Writer:** `Backtester` via `save_backtest_result`
 
-**Leser:**
-- `OptimizationAgent` — Entscheidung über Prompt-Aktivierung
-- Management-API — Backtest-Dashboard
-- Externe Reporting-Tools
+**Readers:**
+- `OptimizationAgent` — decision on prompt activation
+- Management API — backtest dashboard
+- External reporting tools
 
-**Analyse-Möglichkeiten:**
+**Analysis options:**
 ```sql
--- Alle Backtests für EURUSD, sortiert nach Sharpe-Ratio
+-- All backtests for EURUSD, sorted by Sharpe ratio
 SELECT b.completed_at, b.total_trades, b.win_rate, b.total_pnl,
        b.sharpe_ratio, b.vs_baseline_pnl_delta, p.version
 FROM backtest_results b
@@ -552,7 +552,7 @@ JOIN prompt_candidates p ON b.prompt_candidate_id = p.id
 WHERE b.pair = 'EURUSD'
 ORDER BY b.sharpe_ratio DESC;
 
--- Hat der letzte Prompt-Wechsel wirklich etwas gebracht?
+-- Did the last prompt switch actually improve performance?
 SELECT p.version, b.vs_baseline_pnl_delta, b.win_rate, b.total_pnl
 FROM backtest_results b
 JOIN prompt_candidates p ON b.prompt_candidate_id = p.id
@@ -563,32 +563,32 @@ LIMIT 1;
 
 ---
 
-## Datenfluß-Diagramm
+## Data Flow Diagram
 
 ```
-Broker-API (alle 5 min)
+Broker API (every 5 min)
     │
     ├─► {BROKER}_{PAIR}_M5          (save_candle / save_candles_bulk)
     └─► account_status              (save_account_status)
 
-Agent (LLM-Zyklus)
+Agent (LLM cycle)
     │
-    ├─► agent_decisions             (save_agent_decision)     — jede LLM-Entscheidung
-    └─► agent_conversations         (upsert)                  — vollständige Gesprächshistorie
+    ├─► agent_decisions             (save_agent_decision)     — every LLM decision
+    └─► agent_conversations         (upsert)                  — full conversation history
 
-Signal genehmigt → Order platziert
+Signal approved → order placed
     │
     └─► order_book_entries          (save_order_book_entry)   — PENDING
 
-Broker bestätigt Fill
+Broker confirms fill
     │
     └─► order_book_entries          (update_order_book_entry) — OPEN + fill_price
 
-Trade geschlossen (SL/TP/Agent)
+Trade closed (SL/TP/agent)
     │
     └─► order_book_entries          (update_order_book_entry) — CLOSED + PnL
 
-OptimizationAgent (periodisch)
+OptimizationAgent (periodic)
     │
     ├─► trade_patterns              (save_pattern)
     ├─► prompt_candidates           (save_prompt_candidate)
@@ -598,28 +598,28 @@ OptimizationAgent (periodisch)
 
 ---
 
-## Nützliche Allgemein-Abfragen
+## Useful General Queries
 
 ```sql
--- Datenbankgröße pro Tabelle (SQLite)
+-- Database size per table (SQLite)
 SELECT name,
        SUM(pgsize) / 1024 AS size_kb
 FROM dbstat
 GROUP BY name
 ORDER BY size_kb DESC;
 
--- Welche Candle-Tabellen existieren?
+-- Which candle tables exist?
 SELECT name FROM sqlite_master
 WHERE type = 'table'
   AND name GLOB '*_M5'
 ORDER BY name;
 
--- Gesamtübersicht: offene Positionen
+-- Overall view: open positions
 SELECT broker_name, pair, direction, units, requested_price, signal_confidence, requested_at
 FROM order_book_entries
 WHERE status IN ('PENDING', 'OPEN', 'PARTIALLY_FILLED')
 ORDER BY requested_at DESC;
 
--- Migrations-Status
+-- Migration status
 SELECT filename, applied_at FROM schema_migrations ORDER BY applied_at;
 ```

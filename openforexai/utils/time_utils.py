@@ -45,3 +45,4 @@ def detect_session(dt: datetime | None = None) -> str:
 def is_market_open(dt: datetime | None = None) -> bool:
     """Return True if at least one major forex session is active."""
     return detect_session(dt) != "closed"
+

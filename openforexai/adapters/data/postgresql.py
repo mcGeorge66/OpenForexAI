@@ -243,3 +243,4 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
                     agent_id, limit,
                 )
         return [dict(r) for r in rows]
+

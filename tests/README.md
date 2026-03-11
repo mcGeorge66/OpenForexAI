@@ -195,3 +195,4 @@ testpaths = ["tests"]
 ```
 
 No `@pytest.mark.asyncio` decorators are needed — pytest-asyncio runs all async test functions automatically.
+

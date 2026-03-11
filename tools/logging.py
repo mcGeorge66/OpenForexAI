@@ -127,7 +127,13 @@ class _RotatingWriter:
 
     def write(self, event: dict) -> None:
         """Serialise *event* as a JSON line and write it.  Rotates if needed."""
-        line = json.dumps(event, default=str, ensure_ascii=False) + "\n"
+        # Ensure each line starts with a clear log timestamp for quick human
+        # interpretation while keeping strict JSONL format.
+        event_with_log_ts = {
+            "logged_at_utc": _ts_now().isoformat(),
+            **event,
+        }
+        line = json.dumps(event_with_log_ts, default=str, ensure_ascii=False) + "\n"
         encoded = line.encode("utf-8")
 
         with self._lock:
@@ -430,3 +436,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

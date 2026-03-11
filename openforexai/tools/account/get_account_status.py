@@ -36,3 +36,4 @@ class GetAccountStatusTool(BaseTool):
             "trade_allowed": status.trade_allowed,
             "recorded_at": status.recorded_at.isoformat(),
         }
+

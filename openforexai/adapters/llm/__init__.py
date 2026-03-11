@@ -9,3 +9,4 @@ PluginRegistry.register_llm_provider("lmstudio", LMStudioLLMProvider)
 PluginRegistry.register_llm_provider("azure", AzureOpenAILLMProvider)
 
 __all__ = ["AnthropicLLMProvider", "OpenAILLMProvider", "LMStudioLLMProvider", "AzureOpenAILLMProvider"]
+

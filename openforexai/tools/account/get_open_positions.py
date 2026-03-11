@@ -27,11 +27,11 @@ class GetOpenPositionsTool(BaseTool):
         positions = await context.broker.get_open_positions()
         return [
             {
-                "position_id": p.position_id,
+                "position_id": p.broker_position_id,
                 "pair": p.pair,
-                "direction": p.direction,
+                "direction": p.direction.value,
                 "units": p.units,
-                "entry_price": float(p.entry_price),
+                "entry_price": float(p.open_price),
                 "current_price": float(p.current_price) if p.current_price else None,
                 "stop_loss": float(p.stop_loss) if p.stop_loss else None,
                 "take_profit": float(p.take_profit) if p.take_profit else None,
@@ -40,3 +40,4 @@ class GetOpenPositionsTool(BaseTool):
             }
             for p in positions
         ]
+

@@ -128,3 +128,4 @@ class IndicatorToolset:
     def available_indicators(self) -> list[str]:
         """Return canonical names of all registered indicators."""
         return self._registry.registered_names()
+

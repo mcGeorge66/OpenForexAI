@@ -82,3 +82,4 @@ class CalculateIndicatorTool(BaseTool):
 
         return {"indicator": indicator, "period": period, "timeframe": timeframe,
                 "history": history, "value": result}
+

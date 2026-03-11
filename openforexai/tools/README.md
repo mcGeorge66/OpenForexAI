@@ -9,7 +9,7 @@ tools/
 ├── base.py              # BaseTool ABC + ToolContext dataclass
 ├── registry.py          # ToolRegistry — stores and retrieves tools
 ├── dispatcher.py        # ToolDispatcher — executes tools with gating
-├── config_loader.py     # Loads agent_tools.json per-agent config
+├── config_loader.py     # Loads agent_tools.json5 per-agent config
 ├── __init__.py          # DEFAULT_REGISTRY with all built-in tools
 ├── account/
 │   ├── get_account_status.py
@@ -123,7 +123,7 @@ Each tool can require approval before execution:
 | `"supervisor"` | Publish `SIGNAL_GENERATED`, wait for `SIGNAL_APPROVED`/`SIGNAL_REJECTED` (15s timeout) |
 | `"human"` | Block until Management API approval (planned, not yet implemented) |
 
-Approval modes are configured per-tool per-agent in `config/agent_tools.json`.
+Approval modes are configured per-tool per-agent in `config/RunTime/agent_tools.json5`.
 
 ### 2. Context Budget Tiers
 
@@ -134,7 +134,7 @@ As the conversation grows, the LLM token budget fills up. The dispatcher automat
 85% – 99% used →  "safety" tier:   only raise_alarm
 ```
 
-(Thresholds and tier names are configured per-agent in `system.json → tool_config.context_tiers`)
+(Thresholds and tier names are configured per-agent in `system.json5 → tool_config.context_tiers`)
 
 This prevents the LLM from starting expensive multi-step operations when it's running out of context.
 
@@ -171,7 +171,7 @@ results = await dispatcher.execute_tool_calls(tool_calls, input_tokens, max_toke
 
 ## `config_loader.py` — Tool Configuration
 
-Loads `config/agent_tools.json` for per-agent tool customisation. Supports:
+Loads `config/RunTime/agent_tools.json5` for per-agent tool customisation. Supports:
 - Per-agent approval mode overrides
 - Per-tool approval mode overrides
 - Context tier threshold and tool-set definitions
@@ -208,6 +208,8 @@ from openforexai.tools.market.my_tool import MyNewTool
 DEFAULT_REGISTRY.register(MyNewTool())
 ```
 
-3. Add to an agent's `allowed_tools` in `config/system.json`.
+3. Add to an agent's `allowed_tools` in `config/system.json5`.
 
 The tool will automatically appear in the LLM's tool manifest for that agent.
+
+

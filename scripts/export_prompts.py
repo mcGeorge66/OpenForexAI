@@ -15,8 +15,8 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export active prompts per pair.")
-    parser.add_argument("--output", default="prompts.json", help="Output file (JSON)")
-    parser.add_argument("--config", default="config/system.json")
+    parser.add_argument("--output", default="prompts.json", help="Output file (JSON/JSON5-compatible)")
+    parser.add_argument("--config", default="config/system.json5")
     return parser.parse_args()
 
 
@@ -47,3 +47,5 @@ async def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     asyncio.run(main(parse_args()))
+
+

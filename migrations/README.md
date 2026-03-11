@@ -139,7 +139,7 @@ On each startup:
 
 ```bash
 python scripts/db_migrate.py
-python scripts/db_migrate.py --config config/system.json
+python scripts/db_migrate.py --config config/system.json5
 ```
 
 ### Adding a New Migration
@@ -153,3 +153,4 @@ python scripts/db_migrate.py --config config/system.json
 ### PostgreSQL
 
 PostgreSQL migrations are not yet automated. Apply SQL files manually with `psql` or a migration tool.
+

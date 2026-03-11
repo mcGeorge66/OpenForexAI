@@ -161,3 +161,4 @@ all_metrics = metrics.snapshot()
 ```
 
 These metrics are exposed at `GET /metrics` and can be scraped by monitoring tools.
+

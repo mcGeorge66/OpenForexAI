@@ -48,3 +48,4 @@ class AgentPerformance(BaseModel):
     sharpe_ratio: float | None = None
     max_drawdown: float
     period_days: int
+

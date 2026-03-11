@@ -17,6 +17,31 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function getText(path: string): Promise<string> {
+  const res = await fetch(`${BASE}${path}`)
+  const raw = await res.text()
+  if (!res.ok) {
+    throw new Error(`GET ${path} → ${res.status}: ${raw}`)
+  }
+  const contentType = (res.headers.get('content-type') || '').toLowerCase()
+  if (!contentType.includes('application/json')) {
+    const preview = raw.slice(0, 120).replace(/\s+/g, ' ').trim()
+    throw new Error(
+      `GET ${path} returned non-JSON response (${contentType || 'unknown'}): ${preview}`,
+    )
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(`GET ${path} returned invalid JSON payload`)
+  }
+  if (!parsed || typeof parsed !== 'object' || typeof (parsed as { text?: unknown }).text !== 'string') {
+    throw new Error(`GET ${path} JSON payload does not contain a string field 'text'`)
+  }
+  return (parsed as { text: string }).text
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -25,7 +50,31 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`POST ${path} → ${res.status}: ${text}`)
+    let detail = text
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      if (parsed && typeof parsed === 'object' && parsed.detail !== undefined) {
+        detail = typeof parsed.detail === 'string'
+          ? parsed.detail
+          : JSON.stringify(parsed.detail)
+      }
+    } catch {
+      // Keep raw text when response is not JSON.
+    }
+    throw new Error(`POST ${path} → ${res.status}: ${detail}`)
+  }
+  return res.json() as Promise<T>
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`PUT ${path} -> ${res.status}: ${text}`)
   }
   return res.json() as Promise<T>
 }
@@ -39,12 +88,49 @@ export const api = {
   getAgents:      () => get<AgentInfo[]>('/agents'),
   askAgent:       (agentId: string, question: string, timeout = 120) =>
                     post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout }),
+  getAgentCandles: (agentId: string, timeframe = 'M5', count = 100) =>
+                    get<CandleBar[]>(
+                      `/agents/${encodeURIComponent(agentId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
+                    ),
   getTools:       () => get<{ tools: ToolInfo[] }>('/tools'),
-  executeTool:    (tool_name: string, arguments_: Record<string, unknown>) =>
-                    post<ToolExecuteResponse>('/tools/execute', { tool_name, arguments: arguments_ }),
-  getConfigView:  () => get<Record<string, unknown>>('/config/view'),
-  getConfigFile:  (name: string) => get<Record<string, unknown>>(`/config/files/${name}`),
-  injectEvent:    (body: EventInjectRequest) => post<{ message_id: string }>('/events', body),
+  executeTool:    (
+                    tool_name: string,
+                    arguments_: Record<string, unknown>,
+                    agent_id?: string | null,
+                    broker_name?: string | null,
+                    llm_name?: string | null,
+                  ) =>
+                    post<ToolExecuteResponse>('/tools/execute', {
+                      tool_name,
+                      arguments: arguments_,
+                      agent_id: agent_id || null,
+                      broker_name: broker_name || null,
+                      llm_name: llm_name || null,
+                    }),
+  runLlmChecker: (body: LlmCheckerRequest) => post<LlmCheckerResponse>('/test/llm/check', body),
+  getConfigView:   () => get<Record<string, unknown>>('/config/view'),
+  getProjectReadmeText: () => getText('/config/information/readme'),
+  saveProjectReadmeText: (content: string) =>
+                    put<{ status: string; file: string }>('/config/information/readme', content),
+  getSystemConfig: () => get<Record<string, unknown>>('/config/system'),
+  getSystemConfigText: () => getText('/config/system/text'),
+  saveSystemConfig: (content: Record<string, unknown> | string) =>
+                    put<{ status: string; file: string }>('/config/system', content),
+  getConfigFile:   (name: string) => get<Record<string, unknown>>(`/config/files/${name}`),
+  getConfigFileText: (name: string) => getText(`/config/files/${name}/text`),
+  saveConfigFile:  (name: string, content: Record<string, unknown> | string) =>
+                    put<{ status: string; file: string }>(`/config/files/${name}`, content),
+  getModuleNames:  (moduleType: string) =>
+                     get<{ names: string[] }>(`/config/modules/${moduleType}`),
+  getModuleConfig: (moduleType: string, name: string) =>
+                     get<Record<string, unknown>>(`/config/modules/${moduleType}/${name}`),
+  getModuleConfigRaw: (moduleType: string, name: string) =>
+                     get<Record<string, unknown>>(`/config/modules/${moduleType}/${name}/raw`),
+  getModuleConfigRawText: (moduleType: string, name: string) =>
+                     getText(`/config/modules/${moduleType}/${name}/raw_text`),
+  saveModuleConfigRaw: (moduleType: string, name: string, content: Record<string, unknown> | string) =>
+                     put<{ status: string; file: string }>(`/config/modules/${moduleType}/${name}/raw`, content),
+  injectEvent:     (body: EventInjectRequest) => post<{ message_id: string }>('/events', body),
 }
 
 // ── Types matching Python Pydantic models ─────────────────────────────────────
@@ -86,6 +172,32 @@ export interface ToolExecuteResponse {
   is_error: boolean
 }
 
+
+export interface LlmCheckerMessage {
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: unknown
+}
+
+export interface LlmCheckerRequest {
+  llm_name: string
+  messages: LlmCheckerMessage[]
+  enabled_tools: string[]
+  system_prompt?: string
+  temperature?: number
+  max_tokens?: number
+  max_tool_turns?: number
+  agent_id?: string | null
+  broker_name?: string | null
+  pair?: string | null
+}
+
+export interface LlmCheckerResponse {
+  llm_name: string
+  final_text: string
+  total_tokens: number
+  stop_reason: string
+  trace: Array<Record<string, unknown>>
+}
 export interface MonitoringEvent {
   id: string
   timestamp: string
@@ -103,3 +215,18 @@ export interface EventInjectRequest {
   payload?: Record<string, unknown>
   correlation_id?: string | null
 }
+
+export interface CandleBar {
+  timestamp: string
+  open: number
+  high: number
+  low: number
+  close: number
+  tick_volume: number
+  spread: number
+}
+
+
+
+
+

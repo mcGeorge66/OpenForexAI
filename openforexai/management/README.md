@@ -35,7 +35,7 @@ The control plane for the running system. A FastAPI application served by a non-
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/routing/rules` | Current routing rules as JSON |
-| `POST` | `/routing/reload` | Hot-reload routing table from `config/event_routing.json` |
+| `POST` | `/routing/reload` | Hot-reload routing table from `config/RunTime/event_routing.json5` |
 
 #### Events & Config
 
@@ -198,3 +198,5 @@ curl "http://127.0.0.1:8765/monitoring/events?limit=50"
 ```
 
 See also: [`tools/ask.py`](../../tools/README.md) for a CLI wrapper around the agent query endpoint.
+
+

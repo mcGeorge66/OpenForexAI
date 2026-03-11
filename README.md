@@ -47,7 +47,7 @@ change a strategy.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         config/system.json                           │
+│                         config/system.json5                           │
 │  All agents, modules, prompts, tools, timers — one source of truth   │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  │
@@ -72,7 +72,7 @@ OANDA_USDJPY_AA_ANLYS  per broker)            Agent)
  per pair)
     │
     ▼  native tool_use API (Anthropic / OpenAI)
-ToolDispatcher  ←  tool_config per agent (from system.json)
+ToolDispatcher  ←  tool_config per agent (from system.json5)
     ├── get_candles          ← DataContainer
     ├── calculate_indicator  ← IndicatorToolset
     ├── get_order_book       ← Repository
@@ -132,7 +132,7 @@ is entirely in their configuration — not in code. The config determines:
 | TYPE | 2 chars | none | `AA`, `BA`, `GA` |
 | NAME | 1–5 chars | none | `ANLYS`, `TRADE`, `OPTIM` |
 
-**Default agents (defined in `config/system.json`):**
+**Default agents (defined in `config/system.json5`):**
 
 | Agent ID | Type | Role |
 |---|---|---|
@@ -182,7 +182,7 @@ Every agent follows the same startup sequence regardless of type:
 ```
 
 This means: **adding a new agent requires zero code changes** — only an entry in
-`config/system.json`.
+`config/system.json5`.
 
 ---
 
@@ -194,7 +194,7 @@ The main system only knows their name — all connection details are encapsulate
 ### LLM modules (`config/modules/llm/`)
 
 ```json
-// config/modules/llm/anthropic_claude.json
+// config/modules/llm/anthropic_claude.json5
 {
   "adapter":         "anthropic",
   "api_key":         "${ANTHROPIC_API_KEY}",
@@ -208,7 +208,7 @@ The main system only knows their name — all connection details are encapsulate
 ### Broker modules (`config/modules/broker/`)
 
 ```json
-// config/modules/broker/oanda.json
+// config/modules/broker/oanda.json5
 {
   "adapter":    "oanda",
   "api_key":    "${OANDA_API_KEY}",
@@ -257,7 +257,7 @@ Agent sends initial message:
 The LLM decides **which data to fetch** and **what action to take** — there is no
 pre-determined context-building step.
 
-**Context budget tiers** (configured per agent in `system.json`):
+**Context budget tiers** (configured per agent in `system.json5`):
 - `0–84%` budget: all allowed tools visible
 - `85–100%` budget: safety tools only (e.g. `raise_alarm`)
 
@@ -274,7 +274,7 @@ queue — **no routing rules evaluated**. Used by ConfigService for config respo
 
 ### 2. Agent queue delivery
 
-The routing table (`config/event_routing.json`) determines which agent queues receive
+The routing table (`config/RunTime/event_routing.json5`) determines which agent queues receive
 each published message.
 
 ### 3. Legacy handler delivery
@@ -315,7 +315,7 @@ Infrastructure components (`DataContainer`, `BrokerBase`) subscribe via
 | `*` | Broadcast to all agents |
 | `@handlers` | Legacy handler-subscriber delivery only |
 
-**Hot-reload:** `POST /routing/reload` atomically reloads `event_routing.json`.
+**Hot-reload:** `POST /routing/reload` atomically reloads `event_routing.json5`.
 
 ---
 
@@ -338,7 +338,7 @@ OpenAI `function_calling`) — no JSON schema prompt hacks.
 | `raise_alarm` | System | Severity-levelled alarm → MonitoringBus + logging |
 | `trigger_sync` | System | Manual order book sync with the broker |
 
-### Per-agent tool configuration (in `system.json`)
+### Per-agent tool configuration (in `system.json5`)
 
 ```json
 "OANDA_EURUSD_AA_ANLYS": {
@@ -372,7 +372,7 @@ class MyTool(BaseTool):
 DEFAULT_REGISTRY.register(MyTool())
 ```
 
-Add `"my_tool"` to `allowed_tools` for any agent in `system.json`.
+Add `"my_tool"` to `allowed_tools` for any agent in `system.json5`.
 
 ---
 
@@ -498,7 +498,7 @@ Color coding: green = OK, yellow = warning, red = error, blue = tool calls, cyan
 
 ## Management API
 
-FastAPI HTTP server on `localhost:8765` (configurable in `system.json`).
+FastAPI HTTP server on `localhost:8765` (configurable in `system.json5`).
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -507,7 +507,7 @@ FastAPI HTTP server on `localhost:8765` (configurable in `system.json`).
 | `/agents` | GET | All registered agents with queue depths |
 | `/agents/{id}` | GET | Single agent info |
 | `/routing/rules` | GET | Active routing rules |
-| `/routing/reload` | POST | Hot-reload `event_routing.json` |
+| `/routing/reload` | POST | Hot-reload `event_routing.json5` |
 | `/events` | POST | Inject an arbitrary event into the EventBus |
 | `/monitoring/events` | GET | Recent monitoring events (ring buffer, for `monitor.py`) |
 | `/indicators` | GET | Registered indicator plugins |
@@ -562,7 +562,7 @@ All candidates and results are persisted for full reproducibility.
 
 ## Configuration
 
-### `config/system.json` — central config
+### `config/system.json5` — central config
 
 One file contains everything: all agents, their tools, prompts, timers, and module
 references. The system reads only this file at startup.
@@ -578,8 +578,8 @@ references. The system reads only this file at startup.
     "sqlite_path": "${OPENFOREXAI_DB_PATH:-./data/openforexai.db}"
   },
   "modules": {
-    "llm":    {"anthropic_claude": "config/modules/llm/anthropic_claude.json"},
-    "broker": {"oanda": "config/modules/broker/oanda.json"}
+    "llm":    {"anthropic_claude": "config/modules/llm/anthropic_claude.json5"},
+    "broker": {"oanda": "config/modules/broker/oanda.json5"}
   },
   "agents": {
     "OANDA_EURUSD_AA_ANLYS": {
@@ -602,14 +602,14 @@ All string values support `${VAR_NAME}` and `${VAR_NAME:-default}` env-var subst
 
 ```
 config/
-├── system.json                      ← main config
+├── system.json5                      ← main config
 ├── modules/
 │   ├── llm/
-│   │   └── anthropic_claude.json    ← LLM credentials + settings
+│   │   └── anthropic_claude.json5    ← LLM credentials + settings
 │   └── broker/
-│       ├── oanda.json               ← OANDA credentials
-│       └── mt5.json                 ← MT5 credentials
-└── event_routing.json               ← routing rules (hot-reloadable)
+│       ├── oanda.json5               ← OANDA credentials
+│       └── mt5.json5                 ← MT5 credentials
+└── event_routing.json5               ← routing rules (hot-reloadable)
 ```
 
 ### Environment variables
@@ -665,7 +665,7 @@ openforexai
 ```
 
 The system will:
-- Load `config/system.json`
+- Load `config/system.json5`
 - Start all configured agents (they each request their own config via the EventBus)
 - Start broker background tasks (M5 streaming, account poll, sync)
 - Start the Management API on `localhost:8765`
@@ -712,14 +712,14 @@ pytest --cov=openforexai  # with coverage
 ```
 OpenForexAI/
 ├── config/
-│   ├── system.json                   # central config — agents, modules, prompts
+│   ├── system.json5                   # central config — agents, modules, prompts
 │   ├── modules/
 │   │   ├── llm/
-│   │   │   └── anthropic_claude.json # LLM module config (credentials + settings)
+│   │   │   └── anthropic_claude.json5 # LLM module config (credentials + settings)
 │   │   └── broker/
-│   │       ├── oanda.json            # OANDA module config
-│   │       └── mt5.json              # MT5 module config
-│   └── event_routing.json            # EventBus routing rules (hot-reloadable)
+│   │       ├── oanda.json5            # OANDA module config
+│   │       └── mt5.json5              # MT5 module config
+│   └── event_routing.json5            # EventBus routing rules (hot-reloadable)
 ├── tools/
 │   └── monitor.py                    # console monitor — polls /monitoring/events
 ├── test_llm.py                       # LLM module test script
@@ -776,7 +776,7 @@ OpenForexAI/
 │   │   ├── api.py                    # FastAPI endpoints (incl. /monitoring/events)
 │   │   └── server.py                 # ManagementServer (uvicorn background task)
 │   ├── utils/                        # logging, metrics, retry, time utils
-│   ├── bootstrap.py                  # wires all components from system.json
+│   ├── bootstrap.py                  # wires all components from system.json5
 │   └── main.py                       # entry point
 ├── scripts/
 │   ├── db_migrate.py
@@ -815,3 +815,5 @@ OpenForexAI/
 > Forex trading involves substantial risk of loss. Always test with a practice
 > account before connecting real funds. The authors are not responsible for any
 > financial losses incurred through the use of this software.
+
+

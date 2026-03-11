@@ -126,3 +126,4 @@ The system prompt instructs the agent to follow this exact analysis process.
 - `get_candles` with `timeframe="H1"` fetches ~720 M5 bars from DB and resamples in RAM — typically 10–30ms for 50 H1 bars
 - `calculate_indicator` includes the candle fetch; total time is dominated by the DB query
 - Results are **not cached between tool calls** — each call reads fresh data from DB
+

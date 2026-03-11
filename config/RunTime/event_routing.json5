@@ -4,7 +4,7 @@
     "Rules are evaluated in ascending priority order (lower number = higher priority).",
     "Multiple rules may match a single message — all matching targets receive it.",
     "",
-    "Agent ID format: [BROKER(5)]_[PAIR(6)]_[TYPE(2)]_[NAME(1-5)]",
+    "Agent ID format: [BROKER(5)]-[PAIR(6)]-[TYPE(2)]-[NAME(1-5)]",
     "  AA (Analysis Agent) | BA (Broker Agent) | GA (Global Agent)",
     "",
     "Communication topology:",
@@ -15,7 +15,7 @@
     "Special 'to' values:",
     "  '@handlers'  — legacy handler-subscribers (DataContainer, BrokerBase)",
     "  '*'          — broadcast to ALL registered agents",
-    "  '{sender.broker}_...' — template substitution from sender ID parts"
+    "  '{sender.broker}-...' — template substitution from sender ID parts"
   ],
 
   "rules": [
@@ -25,7 +25,7 @@
       "description": "Any agent startup → ConfigService",
       "event": "agent_config_requested",
       "from":  "*",
-      "to":    "SYSTM_ALL..._GA_CFGSV",
+      "to":    "SYSTM-ALL___-GA-CFGSV",
       "priority": 1
     },
 
@@ -36,6 +36,14 @@
       "from":  "*",
       "to":    "@handlers",
       "priority": 10
+    },
+    {
+      "id": "m5_candle_to_matching_aa",
+      "description": "New M5 candle from broker adapter → matching AA (same broker+pair)",
+      "event": "m5_candle_available",
+      "from":  "*-*-AD-ADPT",
+      "to":    "{sender.broker}-{sender.pair}-AA-*",
+      "priority": 11
     },
 
     {
@@ -83,8 +91,8 @@
       "id": "aa_signal_to_ba",
       "description": "AA signal → BA of the same broker",
       "event": "signal_generated",
-      "from":  "*_*_AA_*",
-      "to":    "{sender.broker}_ALL..._BA_*",
+      "from":  "*-*-AA-*",
+      "to":    "{sender.broker}-ALL___-BA-*",
       "priority": 20
     },
 
@@ -92,8 +100,8 @@
       "id": "aa_analysis_to_ba",
       "description": "AA analysis result → BA of the same broker",
       "event": "analysis_result",
-      "from":  "*_*_AA_*",
-      "to":    "{sender.broker}_ALL..._BA_*",
+      "from":  "*-*-AA-*",
+      "to":    "{sender.broker}-ALL___-BA-*",
       "priority": 20
     },
 
@@ -101,8 +109,8 @@
       "id": "ba_approved_to_aa",
       "description": "BA approval → all AAs of the same broker",
       "event": "signal_approved",
-      "from":  "*_ALL..._BA_*",
-      "to":    "{sender.broker}_*_AA_*",
+      "from":  "*-ALL___-BA-*",
+      "to":    "{sender.broker}-*-AA-*",
       "priority": 20
     },
 
@@ -110,8 +118,8 @@
       "id": "ba_rejected_to_aa",
       "description": "BA rejection → all AAs of the same broker",
       "event": "signal_rejected",
-      "from":  "*_ALL..._BA_*",
-      "to":    "{sender.broker}_*_AA_*",
+      "from":  "*-ALL___-BA-*",
+      "to":    "{sender.broker}-*-AA-*",
       "priority": 20
     },
 
@@ -119,8 +127,8 @@
       "id": "ba_prompt_update_to_aa",
       "description": "BA prompt update → all AAs of the same broker",
       "event": "prompt_updated",
-      "from":  "*_ALL..._BA_*",
-      "to":    "{sender.broker}_*_AA_*",
+      "from":  "*-ALL___-BA-*",
+      "to":    "{sender.broker}-*-AA-*",
       "priority": 20
     },
 
@@ -129,7 +137,7 @@
       "description": "Analysis request → all Global Agents",
       "event": "analysis_requested",
       "from":  "*",
-      "to":    "GLOBL_ALL..._GA_*",
+      "to":    "GLOBL-ALL___-GA-*",
       "priority": 20
     },
 
@@ -137,8 +145,8 @@
       "id": "ga_prompt_broadcast",
       "description": "GA prompt update → all agents",
       "event": "prompt_updated",
-      "from":  "GLOBL_*_GA_*",
-      "to":    "*_*_*_*",
+      "from":  "GLOBL-*-GA-*",
+      "to":    "*-*-*-*",
       "priority": 25
     },
 
@@ -147,7 +155,7 @@
       "description": "Risk breach → BA of the same broker",
       "event": "risk_breach",
       "from":  "*",
-      "to":    "{sender.broker}_ALL..._BA_*",
+      "to":    "{sender.broker}-ALL___-BA-*",
       "priority": 25
     },
 
@@ -156,7 +164,7 @@
       "description": "Order-book sync discrepancy → BA of the same broker",
       "event": "order_book_sync_discrepancy",
       "from":  "*",
-      "to":    "{sender.broker}_ALL..._BA_*",
+      "to":    "{sender.broker}-ALL___-BA-*",
       "priority": 30
     },
 
@@ -194,3 +202,5 @@
 
   ]
 }
+
+

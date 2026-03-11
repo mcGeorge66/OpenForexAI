@@ -1,0 +1,138 @@
+{
+  "system": {
+    "version": "0.5",
+    "log_level": "${OPENFOREXAI_LOG_LEVEL:-INFO}",
+    "management_api": {
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  },
+  "data": {
+    "rolling_weeks": 4,
+    "timeframes": [
+      "M5"
+    ],
+    "indicator_cache_ttl_seconds": 30
+  },
+  "database": {
+    "backend": "${OPENFOREXAI_DB_BACKEND:-sqlite}",
+    "sqlite_path": "${OPENFOREXAI_DB_PATH:-./data/openforexai.db}",
+    "pool_size": 5
+  },
+  "modules": {
+    "_doc": "Module names only — connection details are in config/modules/",
+    "llm": {
+      "azure_openai": "config/modules/llm/azure_openai.json5",
+      "azure_oai_mini": "config/modules/llm/azure_oai_mini.json5",
+      "rtx-oss20b": "config/modules/llm/rtx-oss20b.json5",
+      "rtx-quen25": "config/modules/llm/rtx-quen25.json5"
+    },
+    "broker": {
+      "oanda": "config/modules/broker/oanda.json5"
+    }
+  },
+  "agents": {
+    "OAPR1-EURUSD-AA-ANLYS": {
+      "_comment": "Analysis Agent — OANDA Practice / EURUSD",
+      "enable": true,
+      "type": "AA",
+      "llm": "azure_oai_mini",
+      "broker": "oanda",
+      "pair": "EURUSD",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 300
+      },
+      "event_triggers": [
+        "m5_candle_available",
+        "prompt_updated",
+        "agent_query"
+      ],
+      "AnyCandle": 3,
+      "system_prompt": "You are a Forex market analysis agent specialized in EUR USD.\n\nROLE\nYou provide structured market analysis and directional bias.\nYou do NOT execute trades.\nYou must not call any broker execution tools.\nYou are analysis-only.\n\nOBJECTIVE\nOn each run, determine a coarse directional bias and, if applicable, trade management guidance.\nBe aggressive. If signals are weak, conflicting, or unclear, output NEUTRAL.\n\nREQUIRED ANALYSIS PROCESS\n1. Fetch the most recent M5 candles.\n2. Fetch at least one higher timeframe H1 for context.\n3. Compute a small, consistent indicator set on H1 candles:\n   - EMA(20)\n   - EMA(50)\n   - RSI(7)\n   - ATR(7)\n4. Assess:\n   - Trend direction\n   - Momentum\n   - Volatility regime\n   - Proximity to support/resistance\n\nDECISION OUTPUT\nChoose exactly one bias:\n- BIAS_LONG\n- BIAS_SHORT\n- NEUTRAL\n\nIf an active trade is provided in context, also suggest management:\n- HOLD\n- EXIT\n- N/A\n\nOUTPUT strictly valid JSON only.\n\nDAY TRADING CONSTRAINTS\n- Trades must not exceed 10 hours in duration.\n- Typical holding time is 1–3 hours depending on volatility.\n- If an active trade has been open:\n  - More than 3 hours AND momentum weakens → consider EXIT.\n  - 8–10 hours → strongly prefer EXIT unless strong continuation.\n  - More than 10 hours → mandatory EXIT recommendation.\n- When evaluating an active trade, always consider:\n  - Time in trade\n  - Current volatility (ATR)\n  - Momentum strength\n  - Distance to target or invalidation level.",
+      "tool_config": {
+        "allowed_tools": [
+          "get_candles",
+          "calculate_indicator",
+          "get_order_book",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "context_tiers": {
+          "0": "all",
+          "85": "safety"
+        },
+        "tier_tools": {
+          "all": [
+            "get_candles",
+            "calculate_indicator",
+            "get_order_book",
+            "raise_alarm",
+            "trigger_sync"
+          ],
+          "safety": [
+            "raise_alarm"
+          ]
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      }
+    },
+    "OAPR1-ALL___-BA-TRADE": {
+      "_comment": "Broker Agent — OANDA Practice (all pairs)",
+      "enable": false,
+      "type": "BA",
+      "llm": "azure_openai",
+      "broker": "oanda",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 0
+      },
+      "event_triggers": [
+        "analysis_result",
+        "signal_generated",
+        "account_status_updated",
+        "risk_breach",
+        "order_book_sync_discrepancy"
+      ],
+      "system_prompt": "You are the broker agent for OANDA. You receive analysis and signals from the analysis agents, manage open positions, monitor account risk, and execute trades when conditions are met. Always verify account status and risk parameters before placing any order.",
+      "tool_config": {
+        "allowed_tools": [
+          "place_order",
+          "close_position",
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "raise_alarm"
+        ],
+        "context_tiers": {
+          "0": "all",
+          "80": "decision",
+          "95": "safety"
+        },
+        "tier_tools": {
+          "all": [
+            "place_order",
+            "close_position",
+            "get_account_status",
+            "get_open_positions",
+            "get_order_book",
+            "raise_alarm"
+          ],
+          "decision": [
+            "place_order",
+            "close_position",
+            "raise_alarm"
+          ],
+          "safety": [
+            "close_position",
+            "raise_alarm"
+          ]
+        },
+        "max_tool_turns": 8,
+        "max_tokens": 4096
+      },
+      "AnyCandle": 1
+    }
+  }
+}

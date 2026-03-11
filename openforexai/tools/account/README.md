@@ -83,3 +83,4 @@ Both tools are in the default `allowed_tools` list for **Broker Agents** (BA):
 Both tools delegate to the `AbstractBroker` interface (via `context.broker`). The live account data is fetched from the broker API, not from the local database. This ensures the information is always current, not stale.
 
 The `BrokerBase._account_poll_loop()` runs in the background and publishes `ACCOUNT_STATUS_UPDATED` events every N seconds. These events are separate from the direct tool call — the tool always fetches fresh data on demand.
+

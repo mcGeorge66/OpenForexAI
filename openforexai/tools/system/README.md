@@ -90,3 +90,4 @@ This ensures that even when the agent is running out of context window, it can s
 - Close a dangerous position
 
 This design prevents scenarios where a nearly-full context causes the agent to be unable to respond to emergencies.
+

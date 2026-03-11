@@ -71,7 +71,7 @@ messages = [
 ]
 ```
 
-### Config Keys (`config/modules/llm/anthropic_claude.json`)
+### Config Keys (`config/modules/llm/anthropic_claude.json5`)
 
 ```json
 {
@@ -183,4 +183,5 @@ class MyLLMProvider(AbstractLLMProvider):
 PluginRegistry.register_llm_provider("myprovider", MyLLMProvider)
 ```
 
-3. Create `config/modules/llm/myprovider.json` and reference in `config/system.json`.
+3. Create `config/modules/llm/myprovider.json5` and reference in `config/system.json5`.
+
