@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC
 from typing import Any
 
 from openforexai.ports.llm import ToolCall, ToolResult
@@ -240,6 +241,7 @@ class ToolDispatcher:
         in the payload so the SupervisorAgent can run its risk checks.
         """
         import uuid
+
         from openforexai.models.messaging import AgentMessage, EventType
 
         if self._context.event_bus is None:
@@ -274,7 +276,7 @@ class ToolDispatcher:
 
         try:
             await asyncio.wait_for(approval_event.wait(), timeout=15.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False, "Supervisor approval timed out"
         finally:
             bus.unsubscribe(EventType.SIGNAL_APPROVED, _on_decision)
@@ -309,14 +311,15 @@ class ToolDispatcher:
         if self._context.monitoring_bus is None:
             return
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
             try:
                 mtype = MonitoringEventType[event_str]
             except KeyError:
                 return
             self._context.monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=f"tool_dispatcher:{self._context.agent_id}",
                 event_type=mtype,
                 broker_name=self._context.broker_name,

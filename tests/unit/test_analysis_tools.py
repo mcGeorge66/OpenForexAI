@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from tests.conftest import make_candle
+from datetime import UTC
+
 from openforexai.agents.technical_analysis.analysis_tools import (
     detect_doji,
     detect_engulfing,
     fibonacci_levels,
-    find_swing_highs,
-    find_swing_lows,
     trend_strength,
 )
+from tests.conftest import make_candle
 
 
 def test_detect_doji_true():
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, timezone
+
     from openforexai.models.market import Candle
 
     doji = Candle(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         open=Decimal("1.1000"),
         high=Decimal("1.1020"),
         low=Decimal("1.0980"),
@@ -35,12 +36,13 @@ def test_detect_doji_false():
 
 
 def test_detect_engulfing_bullish():
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, timezone
+
     from openforexai.models.market import Candle
 
     prev = Candle(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         open=Decimal("1.1050"),
         high=Decimal("1.1060"),
         low=Decimal("1.1020"),
@@ -50,7 +52,7 @@ def test_detect_engulfing_bullish():
         timeframe="H1",
     )
     curr = Candle(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         open=Decimal("1.1010"),
         high=Decimal("1.1080"),
         low=Decimal("1.1000"),

@@ -6,6 +6,7 @@ MonitoringBus and can be forwarded to notification channels.
 """
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 from openforexai.tools.base import BaseTool, ToolContext
@@ -49,7 +50,7 @@ class RaiseAlarmTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
         import logging
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         severity = arguments.get("severity", "warning").lower()
         if severity not in _VALID_SEVERITIES:
@@ -66,7 +67,7 @@ class RaiseAlarmTool(BaseTool):
             "agent_id": context.agent_id,
             "broker_name": context.broker_name,
             "pair": context.pair,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **extra_context,
         }
 
@@ -80,7 +81,7 @@ class RaiseAlarmTool(BaseTool):
             try:
                 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
                 context.monitoring_bus.emit(MonitoringEvent(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     source_module=f"agent:{context.agent_id}",
                     event_type=MonitoringEventType.AGENT_ALARM,
                     broker_name=context.broker_name,

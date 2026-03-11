@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-
-import pytest
 
 from openforexai.agents.supervisor.risk_engine import RiskEngine
 from openforexai.models.risk import RiskParameters
@@ -19,7 +17,7 @@ def make_signal(pair="EURUSD", direction=TradeDirection.BUY):
         take_profit=Decimal("1.1100"),
         confidence=0.8,
         reasoning="test",
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         agent_id="test",
     )
 
@@ -38,7 +36,6 @@ def test_approve_clean_state():
 
 
 def test_reject_max_positions(mock_broker):
-    from tests.conftest import make_candle
     from openforexai.models.trade import Position
 
     params = RiskParameters(max_open_positions=2)
@@ -53,7 +50,7 @@ def test_reject_max_positions(mock_broker):
             open_price=Decimal("1.1000"),
             current_price=Decimal("1.1010"),
             unrealized_pnl=Decimal("10"),
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         for i in range(3)
     ]
@@ -83,7 +80,7 @@ def test_reject_drawdown_exceeded():
             open_price=Decimal("1.1000"),
             current_price=Decimal("1.0500"),
             unrealized_pnl=Decimal("-600"),
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
     ]
     assessment = engine.assess(

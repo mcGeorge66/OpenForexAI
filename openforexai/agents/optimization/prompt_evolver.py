@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from openforexai.models.optimization import PromptCandidate, TradePattern
 from openforexai.ports.llm import AbstractLLMProvider
@@ -51,6 +51,6 @@ async def evolve_prompt(
         rationale=f"Evolved from v{current_version} based on {len(patterns)} patterns",
         source_patterns=[str(p.id) for p in patterns],
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 

@@ -175,7 +175,7 @@ class AgentBridgeTool(BaseTool):
                 "response": result.get("response", ""),
                 "from_agent": result.get("from_agent", target_agent_id),
             }
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _log.warning(
                 "AgentBridgeTool %r: no response from %r within %.0fs",
                 self.name,
@@ -193,7 +193,7 @@ class AgentBridgeTool(BaseTool):
             bus.unsubscribe(EventType.AGENT_QUERY_RESPONSE, _on_response)
 
     @classmethod
-    def from_config(cls, cfg: dict[str, Any]) -> "AgentBridgeTool":
+    def from_config(cls, cfg: dict[str, Any]) -> AgentBridgeTool:
         """Create an ``AgentBridgeTool`` from a normalised config dict."""
         return cls(
             name=cfg["name"],

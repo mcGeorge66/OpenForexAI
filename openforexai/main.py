@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from openforexai.agents.agent import Agent
@@ -44,7 +44,7 @@ async def _run_agent_safe(agent: Agent, monitoring_bus: MonitoringBus) -> None:
         _log.exception("Agent task crashed", agent_id=agent.agent_id, error=str(exc))
         try:
             monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=f"agent:{agent.agent_id}",
                 event_type=MonitoringEventType.SYSTEM_ERROR,
                 payload={

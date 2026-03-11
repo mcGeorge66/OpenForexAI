@@ -3,7 +3,6 @@ from __future__ import annotations
 # PostgreSQL adapter skeleton — uses asyncpg under the hood.
 # Full implementation mirrors SQLiteRepository; swap aiosqlite for asyncpg
 # and adjust placeholder syntax (? -> $1, $2, ...).
-
 from openforexai.models.agent import AgentDecision
 from openforexai.models.optimization import BacktestResult, PromptCandidate, TradePattern
 from openforexai.models.trade import TradeResult

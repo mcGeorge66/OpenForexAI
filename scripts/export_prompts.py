@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
 
 async def main(args: argparse.Namespace) -> None:
     import aiosqlite
+
     from openforexai.config.json_loader import load_json_config
 
     config = load_json_config(Path(args.config))

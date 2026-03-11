@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from openforexai.agents.optimization.pattern_detector import detect_patterns
@@ -14,7 +14,7 @@ from openforexai.models.trade import (
 
 
 def _make_trade(pnl: float, direction: str = "BUY", hour: int = 9) -> TradeResult:
-    opened = datetime.now(timezone.utc).replace(hour=hour)
+    opened = datetime.now(UTC).replace(hour=hour)
     signal = TradeSignal(
         pair="EURUSD",
         direction=TradeDirection(direction),

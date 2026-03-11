@@ -35,7 +35,7 @@ class AnthropicLLMProvider(AbstractLLMProvider):
         self._default_max_tokens = default_max_tokens
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "AnthropicLLMProvider":
+    def from_config(cls, cfg: dict) -> AnthropicLLMProvider:
         return cls(
             api_key=cfg.get("api_key", ""),
             model=cfg.get("model", "claude-opus-4-6"),

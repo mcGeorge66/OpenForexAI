@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import UTC, datetime
 
 from openforexai.models.optimization import TradePattern
 from openforexai.models.trade import TradeResult
@@ -39,7 +38,7 @@ def detect_patterns(trades: list[TradeResult]) -> list[TradePattern]:
                     win_rate_when_present=win_rate,
                     avg_pnl_when_present=avg_pnl,
                     conditions={"session": session},
-                    detected_at=datetime.now(timezone.utc),
+                    detected_at=datetime.now(UTC),
                     sample_size=len(pnls),
                 )
             )
@@ -66,7 +65,7 @@ def detect_patterns(trades: list[TradeResult]) -> list[TradePattern]:
                     win_rate_when_present=win_rate,
                     avg_pnl_when_present=avg_pnl,
                     conditions={"direction": direction},
-                    detected_at=datetime.now(timezone.utc),
+                    detected_at=datetime.now(UTC),
                     sample_size=len(pnls),
                 )
             )

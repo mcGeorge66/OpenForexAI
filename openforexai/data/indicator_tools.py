@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Union
-
 from openforexai.data.container import DataContainer
 from openforexai.data.indicator_plugins import (
     DEFAULT_REGISTRY,
@@ -12,7 +10,7 @@ from openforexai.data.indicator_plugins import (
 # Public return type:
 #   history=1 → single value (float or dict for BB), or None
 #   history>1 → list of values (oldest first), or None
-IndicatorResult = Union[IndicatorValue, list[IndicatorValue], None]
+IndicatorResult = IndicatorValue | list[IndicatorValue] | None
 
 
 class IndicatorToolset:

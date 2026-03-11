@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-
-from tests.conftest import MockBroker, MockLLMProvider, MockRepository, MOCK_BROKER_NAME
 from openforexai.agents.supervisor.supervisor_agent import SupervisorAgent
+
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.risk import RiskParameters
 from openforexai.models.trade import TradeDirection, TradeSignal
+from tests.conftest import MOCK_BROKER_NAME, MockBroker, MockLLMProvider, MockRepository
 
 
 def _signal_message(pair: str = "EURUSD") -> AgentMessage:
@@ -24,7 +23,7 @@ def _signal_message(pair: str = "EURUSD") -> AgentMessage:
         take_profit=Decimal("1.1100"),
         confidence=0.80,
         reasoning="test",
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         agent_id=f"MOCKB_{pair.ljust(6, '.')[:6]}_AA_TRD1",
     )
     return AgentMessage(
@@ -108,7 +107,7 @@ async def test_supervisor_rejects_at_position_limit():
             open_price=Decimal("150.0"),
             current_price=Decimal("150.5"),
             unrealized_pnl=Decimal("50"),
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         for i in range(6)
     ]

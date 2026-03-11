@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from openforexai.adapters.brokers.base import BrokerBase
@@ -65,7 +65,7 @@ class MT5Broker(BrokerBase):
         self._mt5 = None  # set in connect()
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "MT5Broker":
+    def from_config(cls, cfg: dict) -> MT5Broker:
         return cls(
             short_name=cfg.get("short_name", "MT5"),
             login=int(cfg.get("login", 0)),
@@ -111,8 +111,6 @@ class MT5Broker(BrokerBase):
 
     async def get_historical_m5_candles(self, pair: str, count: int) -> list[Candle]:
         """Fetch up to *count* historical M5 candles (oldest first)."""
-        import MetaTrader5 as mt5
-
         mt5 = self._mt5_or_raise()
         rates = mt5.copy_rates_from_pos(pair, mt5.TIMEFRAME_M5, 0, count)
         if rates is None:
@@ -120,7 +118,7 @@ class MT5Broker(BrokerBase):
         result: list[Candle] = []
         for r in rates:
             result.append(Candle(
-                timestamp=datetime.fromtimestamp(r["time"], tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(r["time"], tz=UTC),
                 open=Decimal(str(r["open"])),
                 high=Decimal(str(r["high"])),
                 low=Decimal(str(r["low"])),
@@ -153,14 +151,12 @@ class MT5Broker(BrokerBase):
             currency=info.currency,
             trade_allowed=info.trade_allowed,
             margin_level=margin_level,
-            recorded_at=datetime.now(timezone.utc),
+            recorded_at=datetime.now(UTC),
         )
 
     # ── Orders ────────────────────────────────────────────────────────────────
 
     async def place_order(self, order: TradeOrder) -> TradeResult:
-        import MetaTrader5 as mt5
-
         mt5 = self._mt5_or_raise()
         signal = order.signal
 
@@ -227,7 +223,7 @@ class MT5Broker(BrokerBase):
             broker_name=self._short_name,
             status=status,
             fill_price=Decimal(str(result.price)) if result.price else None,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
 
     # ── Positions ─────────────────────────────────────────────────────────────
@@ -251,13 +247,11 @@ class MT5Broker(BrokerBase):
                 stop_loss=Decimal(str(p.sl)) if p.sl else None,
                 take_profit=Decimal(str(p.tp)) if p.tp else None,
                 unrealized_pnl=Decimal(str(p.profit)),
-                opened_at=datetime.fromtimestamp(p.time, tz=timezone.utc),
+                opened_at=datetime.fromtimestamp(p.time, tz=UTC),
             ))
         return result
 
     async def close_position(self, position_id: str) -> TradeResult:
-        import MetaTrader5 as mt5
-
         mt5 = self._mt5_or_raise()
         positions = mt5.positions_get(ticket=int(position_id))
         if not positions:
@@ -277,7 +271,8 @@ class MT5Broker(BrokerBase):
         }
         result = mt5.order_send(request)
 
-        from openforexai.models.trade import TradeDirection, TradeSignal, TradeOrder as TO
+        from openforexai.models.trade import TradeDirection, TradeSignal
+        from openforexai.models.trade import TradeOrder as TO
         dummy_signal = TradeSignal(
             pair=p.symbol,
             direction=TradeDirection.BUY if is_buy else TradeDirection.SELL,
@@ -286,7 +281,7 @@ class MT5Broker(BrokerBase):
             take_profit=Decimal("0"),
             confidence=0.0,
             reasoning="position close",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id="supervisor",
         )
         dummy_order = TO(
@@ -306,6 +301,6 @@ class MT5Broker(BrokerBase):
             broker_name=self._short_name,
             status=status,
             fill_price=Decimal(str(result.price)) if result.price else None,
-            closed_at=datetime.now(timezone.utc),
+            closed_at=datetime.now(UTC),
         )
 

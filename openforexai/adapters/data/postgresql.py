@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from openforexai.adapters.database.postgresql import PostgreSQLRepository
 from openforexai.ports.data_container import AbstractDataContainer
@@ -53,7 +53,7 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
     ) -> str:
         """Insert a full agent decision record.  Returns the UUID string."""
         record_id = str(uuid.uuid4())
-        ts = (decided_at or datetime.now(timezone.utc)).isoformat()
+        ts = (decided_at or datetime.now(UTC)).isoformat()
         async with self._pool.acquire() as conn:  # type: ignore[union-attr]
             await conn.execute(
                 """
@@ -135,8 +135,8 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
         started_at: datetime | None = None,
     ) -> None:
         """Upsert the complete LLM messages list for one trading cycle."""
-        now = datetime.now(timezone.utc).isoformat()
-        start = (started_at or datetime.now(timezone.utc)).isoformat()
+        now = datetime.now(UTC).isoformat()
+        start = (started_at or datetime.now(UTC)).isoformat()
         record_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:  # type: ignore[union-attr]
             await conn.execute(
@@ -196,7 +196,7 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
     ) -> None:
         """Append a performance snapshot."""
         record_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         async with self._pool.acquire() as conn:  # type: ignore[union-attr]
             await conn.execute(
                 """
@@ -224,7 +224,11 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
         async with self._pool.acquire() as conn:  # type: ignore[union-attr]
             if pair and since:
                 rows = await conn.fetch(
-                    "SELECT * FROM agent_performance WHERE agent_id=$1 AND pair=$2 AND recorded_at>=$3 ORDER BY recorded_at DESC LIMIT $4",
+                    (
+                        "SELECT * FROM agent_performance "
+                        "WHERE agent_id=$1 AND pair=$2 AND recorded_at>=$3 "
+                        "ORDER BY recorded_at DESC LIMIT $4"
+                    ),
                     agent_id, pair, since.isoformat(), limit,
                 )
             elif pair:
@@ -234,7 +238,11 @@ class PostgreSQLDataContainer(PostgreSQLRepository, AbstractDataContainer):
                 )
             elif since:
                 rows = await conn.fetch(
-                    "SELECT * FROM agent_performance WHERE agent_id=$1 AND recorded_at>=$2 ORDER BY recorded_at DESC LIMIT $3",
+                    (
+                        "SELECT * FROM agent_performance "
+                        "WHERE agent_id=$1 AND recorded_at>=$2 "
+                        "ORDER BY recorded_at DESC LIMIT $3"
+                    ),
                     agent_id, since.isoformat(), limit,
                 )
             else:

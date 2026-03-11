@@ -7,7 +7,7 @@ Purpose:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -37,7 +37,7 @@ class DemoBrokerAdapter(AbstractBroker):
         self._connected = False
 
     @classmethod
-    def from_config(cls, cfg: dict[str, Any]) -> "DemoBrokerAdapter":
+    def from_config(cls, cfg: dict[str, Any]) -> DemoBrokerAdapter:
         """Factory used by bootstrap.
 
         Typical module config fields:
@@ -63,7 +63,7 @@ class DemoBrokerAdapter(AbstractBroker):
     async def fetch_latest_m5_candle(self, pair: str) -> Candle | None:
         if not self._connected:
             return None
-        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
         base = Decimal("1.1000")
         return Candle(
             timestamp=now,
@@ -79,7 +79,7 @@ class DemoBrokerAdapter(AbstractBroker):
     async def get_historical_m5_candles(self, pair: str, count: int) -> list[Candle]:
         out: list[Candle] = []
         for i in range(max(1, count)):
-            ts = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            ts = datetime.now(UTC).replace(second=0, microsecond=0)
             price = Decimal("1.1000") + Decimal(i) * Decimal("0.0001")
             out.append(
                 Candle(
@@ -106,7 +106,7 @@ class DemoBrokerAdapter(AbstractBroker):
             currency="USD",
             trade_allowed=True,
             margin_level=None,
-            recorded_at=datetime.now(timezone.utc),
+            recorded_at=datetime.now(UTC),
         )
 
     async def place_order(self, order: TradeOrder) -> TradeResult:
@@ -116,7 +116,7 @@ class DemoBrokerAdapter(AbstractBroker):
             broker_name=self.short_name,
             status=TradeStatus.OPEN,
             fill_price=order.signal.entry_price,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
 
     async def close_position(self, position_id: str) -> TradeResult:
@@ -128,7 +128,7 @@ class DemoBrokerAdapter(AbstractBroker):
             take_profit=Decimal("1.1100"),
             confidence=0.5,
             reasoning="demo close_position placeholder",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id="DEMO_ALL..._GA_TEST",
         )
         dummy_order = TradeOrder(
@@ -145,8 +145,8 @@ class DemoBrokerAdapter(AbstractBroker):
             status=TradeStatus.CLOSED,
             fill_price=Decimal("1.1000"),
             pnl=Decimal("0.0"),
-            opened_at=datetime.now(timezone.utc),
-            closed_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
+            closed_at=datetime.now(UTC),
         )
 
     async def get_open_positions(self) -> list[Position]:

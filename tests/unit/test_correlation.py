@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from tests.conftest import make_candle
 from openforexai.data.correlation import compute_correlation_matrix
+from tests.conftest import make_candle
 
 
 def test_self_correlation_is_one():

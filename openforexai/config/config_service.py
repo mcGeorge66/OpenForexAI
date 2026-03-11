@@ -50,7 +50,7 @@ class ConfigService:
         while True:
             try:
                 msg = await asyncio.wait_for(self._inbox.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break

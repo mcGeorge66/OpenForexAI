@@ -1,7 +1,7 @@
 """Tool: place_order — submit a trade order to the broker."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -109,9 +109,21 @@ class PlaceOrderTool(BaseTool):
         order_type = OrderType(arguments.get("order_type", "MARKET").upper())
         units_arg = arguments.get("units")
 
-        stop_loss = Decimal(str(arguments["stop_loss"])) if arguments.get("stop_loss") is not None else Decimal("0")
-        take_profit = Decimal(str(arguments["take_profit"])) if arguments.get("take_profit") is not None else Decimal("0")
-        entry_price = Decimal(str(arguments["entry_price"])) if arguments.get("entry_price") is not None else Decimal("0")
+        stop_loss = (
+            Decimal(str(arguments["stop_loss"]))
+            if arguments.get("stop_loss") is not None
+            else Decimal("0")
+        )
+        take_profit = (
+            Decimal(str(arguments["take_profit"]))
+            if arguments.get("take_profit") is not None
+            else Decimal("0")
+        )
+        entry_price = (
+            Decimal(str(arguments["entry_price"]))
+            if arguments.get("entry_price") is not None
+            else Decimal("0")
+        )
 
         signal = TradeSignal(
             pair=context.pair,
@@ -121,7 +133,7 @@ class PlaceOrderTool(BaseTool):
             take_profit=take_profit,
             confidence=float(arguments.get("confidence", 0.5)),
             reasoning=arguments.get("reasoning", ""),
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id=context.agent_id,
         )
 

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = Path(__file__).resolve().parent
 TARGET_DIR = REPO_ROOT / "openforexai" / "adapters" / "llm"
@@ -102,9 +101,9 @@ def _register(args: argparse.Namespace) -> int:
     import_line = f"from openforexai.adapters.llm.{module} import {class_name}"
     register_line = f'PluginRegistry.register_llm_provider("{name}", {class_name})'
     lines = _read_lines()
-    if import_line not in [l.strip() for l in lines]:
+    if import_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, IMPORT_RE, import_line)
-    if register_line not in [l.strip() for l in lines]:
+    if register_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, REGISTER_RE, register_line)
     _write_lines(lines)
     print(f"Registered LLM provider '{name}'")
@@ -134,7 +133,7 @@ def _deregister(args: argparse.Namespace) -> int:
     t = _find_for_deregister(args.name.strip())
     import_line = f"from openforexai.adapters.llm.{t.module} import {t.class_name}"
     register_line = f'PluginRegistry.register_llm_provider("{t.name}", {t.class_name})'
-    lines = [l for l in _read_lines() if l.strip() not in {import_line, register_line}]
+    lines = [line for line in _read_lines() if line.strip() not in {import_line, register_line}]
     _write_lines(lines)
     if t.file_path.exists():
         moved = _safe_move_back(t.file_path)
@@ -162,7 +161,11 @@ def _help(p: argparse.ArgumentParser) -> None:
     print()
     print("Examples:")
     print("  python template/llm/llm_adapter_manager.py --list")
-    print("  python template/llm/llm_adapter_manager.py --register --name demo --source-file template/llm/demo_llm_provider.py --class-name DemoLLMProvider")
+    print(
+        "  python template/llm/llm_adapter_manager.py --register "
+        "--name demo --source-file template/llm/demo_llm_provider.py "
+        "--class-name DemoLLMProvider"
+    )
     print("  python template/llm/llm_adapter_manager.py --deregister --name demo")
 
 

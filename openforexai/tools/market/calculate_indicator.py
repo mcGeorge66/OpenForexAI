@@ -49,8 +49,8 @@ class CalculateIndicatorTool(BaseTool):
     }
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
-        from openforexai.data.indicator_tools import IndicatorToolset
         from openforexai.data.indicator_plugins import DEFAULT_REGISTRY
+        from openforexai.data.indicator_tools import IndicatorToolset
 
         if context.data_container is None:
             raise RuntimeError("DataContainer not available in tool context")

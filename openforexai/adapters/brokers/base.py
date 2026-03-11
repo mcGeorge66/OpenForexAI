@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -45,7 +45,7 @@ def normalize_candle(raw: dict[str, Any], pair: str, timeframe: str) -> Candle:
     if isinstance(ts, str):
         ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     elif isinstance(ts, (int, float)):
-        ts = datetime.fromtimestamp(ts, tz=timezone.utc)
+        ts = datetime.fromtimestamp(ts, tz=UTC)
 
     spread_raw = raw.get("spread", 0)
     tick_vol_raw = raw.get("tick_volume", 0) or raw.get("v", 0)
@@ -323,7 +323,7 @@ class BrokerBase(AbstractBroker):
                 local_open = await repository.get_open_order_book_entries(
                     self.short_name, pair
                 )
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 discrepancies = 0
 
                 for entry in local_open:
@@ -399,7 +399,7 @@ class BrokerBase(AbstractBroker):
         broker_positions = await self.get_open_positions()
         broker_ids = {p.broker_position_id for p in broker_positions}
         local_open = await repository.get_open_order_book_entries(self.short_name, pair)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         found: list[dict] = []
 
         for entry in local_open:
@@ -442,22 +442,22 @@ class BrokerBase(AbstractBroker):
         M5 candles close at :00, :05, :10, ... past the hour.
         The 10-second buffer gives the broker time to finalise the bar.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Minutes since epoch
         total_minutes = int(now.timestamp() / 60)
         # Next 5-minute boundary (in minutes since epoch)
         next_boundary_minutes = ((total_minutes // 5) + 1) * 5
-        next_boundary = datetime.fromtimestamp(next_boundary_minutes * 60, tz=timezone.utc)
+        next_boundary = datetime.fromtimestamp(next_boundary_minutes * 60, tz=UTC)
         # Add 10-second buffer
         target = next_boundary + timedelta(seconds=10)
-        wait = (target - datetime.now(timezone.utc)).total_seconds()
+        wait = (target - datetime.now(UTC)).total_seconds()
         if wait > 0:
             await asyncio.sleep(wait)
 
     @staticmethod
     def _expected_latest_m5_open(now: datetime | None = None) -> datetime:
         """Return open timestamp for the latest completed M5 candle."""
-        dt = now or datetime.now(timezone.utc)
+        dt = now or datetime.now(UTC)
         slot_minute = dt.minute - (dt.minute % 5)
         boundary = dt.replace(minute=slot_minute, second=0, microsecond=0)
         return boundary - timedelta(minutes=5)
@@ -504,7 +504,7 @@ class BrokerBase(AbstractBroker):
             from openforexai.models.monitoring import MonitoringEvent
 
             self._monitoring.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=source,
                 event_type=event_type,
                 broker_name=broker_name,

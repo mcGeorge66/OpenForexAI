@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-
-from tests.conftest import MockBroker, MockLLMProvider, MockRepository
 from openforexai.agents.optimization.optimization_agent import OptimizationAgent
+
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
 from openforexai.models.trade import (
@@ -17,10 +15,11 @@ from openforexai.models.trade import (
     TradeSignal,
     TradeStatus,
 )
+from tests.conftest import MockBroker, MockLLMProvider, MockRepository
 
 
 def _make_closed_trade(pnl: float, pair: str = "EURUSD") -> TradeResult:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     signal = TradeSignal(
         pair=pair,
         direction=TradeDirection.BUY,

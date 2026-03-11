@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     # ── Market data / candle pipeline ─────────────────────────────────────────
     M5_CANDLE_AVAILABLE = "m5_candle_available"     # broker adapter → event bus
     CANDLE_GAP_DETECTED = "candle_gap_detected"     # adapter signals a gap in M5 sequence

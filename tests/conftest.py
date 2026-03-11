@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -26,7 +25,6 @@ from openforexai.ports.llm import (
     LLMResponseWithTools,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 MOCK_BROKER_NAME = "MOCKB"
@@ -34,7 +32,7 @@ MOCK_BROKER_NAME = "MOCKB"
 
 def make_candle(close: float = 1.1000, timeframe: str = "H1") -> Candle:
     return Candle(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         open=Decimal(str(close - 0.001)),
         high=Decimal(str(close + 0.002)),
         low=Decimal(str(close - 0.002)),
@@ -50,7 +48,7 @@ def make_tick(pair: str = "EURUSD", bid: float = 1.1000) -> Tick:
         pair=pair,
         bid=Decimal(str(bid)),
         ask=Decimal(str(bid + 0.0002)),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -67,7 +65,7 @@ def make_snapshot(pair: str = "EURUSD", broker_name: str = MOCK_BROKER_NAME) -> 
         candles_h4=candles[:5],
         candles_d1=candles[:3],
         session="london",
-        snapshot_time=datetime.now(timezone.utc),
+        snapshot_time=datetime.now(UTC),
     )
 
 
@@ -82,7 +80,7 @@ def make_account_status(broker_name: str = MOCK_BROKER_NAME) -> AccountStatus:
         currency="USD",
         trade_allowed=True,
         margin_level=5025.0,
-        recorded_at=datetime.now(timezone.utc),
+        recorded_at=datetime.now(UTC),
     )
 
 
@@ -123,7 +121,7 @@ class MockBroker(AbstractBroker):
             broker_order_id="MOCK_ORDER_001",
             status=TradeStatus.OPEN,
             fill_price=order.signal.entry_price,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
 
     async def close_position(self, position_id: str) -> TradeResult:
@@ -135,7 +133,7 @@ class MockBroker(AbstractBroker):
             take_profit=Decimal("1.1100"),
             confidence=0.8,
             reasoning="test",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id="test",
         )
         order = TradeOrder(signal=signal, units=1000, risk_pct=1.0, approved_by="supervisor")
@@ -144,7 +142,7 @@ class MockBroker(AbstractBroker):
             broker_order_id=position_id,
             status=TradeStatus.CLOSED,
             pnl=Decimal("50"),
-            closed_at=datetime.now(timezone.utc),
+            closed_at=datetime.now(UTC),
         )
 
 

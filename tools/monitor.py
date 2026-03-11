@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
 
@@ -353,7 +353,7 @@ def _show_missed_errors(base_url: str, limit: int, since_ts: str | None) -> None
 
 # ── Background log writer ──────────────────────────────────────────────────────
 
-def _log_writer_thread(log_path: str, q: "queue.Queue[str | None]") -> None:
+def _log_writer_thread(log_path: str, q: queue.Queue[str | None]) -> None:
     """Background thread: writes events as a streaming JSON array.
 
     Each event is flushed to disk immediately — no in-memory accumulation.
@@ -390,7 +390,7 @@ def _log_writer_thread(log_path: str, q: "queue.Queue[str | None]") -> None:
         print(f"\n[monitor] Log file error: {exc}", file=sys.stderr)
 
 
-def _start_log_writer(log_path: str) -> "queue.Queue[str | None]":
+def _start_log_writer(log_path: str) -> queue.Queue[str | None]:
     """Start the background log writer and return its input queue."""
     q: queue.Queue[str | None] = queue.Queue(maxsize=10_000)
     t = threading.Thread(target=_log_writer_thread, args=(log_path, q), daemon=True)
@@ -398,7 +398,7 @@ def _start_log_writer(log_path: str) -> "queue.Queue[str | None]":
     return q
 
 
-def _log_event(q: "queue.Queue[str | None] | None", evt: dict) -> None:
+def _log_event(q: queue.Queue[str | None] | None, evt: dict) -> None:
     """Enqueue an event for logging (full JSON, no truncation)."""
     if q is None:
         return
@@ -540,7 +540,7 @@ def main() -> None:
 
 
 def _ts_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 if __name__ == "__main__":

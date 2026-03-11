@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
-from tests.conftest import MockBroker, MockLLMProvider, MockRepository, MOCK_BROKER_NAME, make_snapshot
 from openforexai.agents.technical_analysis.technical_analysis_agent import TechnicalAnalysisAgent
+
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
-
+from tests.conftest import (
+    MOCK_BROKER_NAME,
+    MockBroker,
+    MockLLMProvider,
+    MockRepository,
+    make_snapshot,
+)
 
 _TA_PHASE1_RESPONSE = {
     "preliminary_observations": "Uptrend on H4",

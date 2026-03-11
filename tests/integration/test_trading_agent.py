@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
-from tests.conftest import MockBroker, MockLLMProvider, MockRepository, MOCK_BROKER_NAME
 from openforexai.agents.trading.trading_agent import TradingAgent
+
 from openforexai.data.container import DataContainer
 from openforexai.messaging.bus import EventBus
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.base import ToolContext
 from openforexai.tools.dispatcher import ToolDispatcher
+from tests.conftest import MOCK_BROKER_NAME, MockBroker, MockLLMProvider, MockRepository
 
 
 def _make_trading_agent(

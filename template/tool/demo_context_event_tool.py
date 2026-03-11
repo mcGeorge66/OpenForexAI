@@ -7,7 +7,7 @@ This script demonstrates:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from openforexai.models.messaging import AgentMessage, EventType
@@ -75,7 +75,7 @@ class DemoContextEventTool(BaseTool):
         if context.monitoring_bus is not None:
             context.monitoring_bus.emit(
                 MonitoringEvent(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     source_module=f"tool:{self.name}",
                     event_type=MonitoringEventType.SYSTEM_INFO,
                     broker_name=context.broker_name,
@@ -97,7 +97,7 @@ class DemoContextEventTool(BaseTool):
                     source_agent_id=context.agent_id,
                     payload={
                         "reason": "demo_context_event_tool",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     },
                 )
             )

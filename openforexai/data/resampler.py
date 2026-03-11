@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from openforexai.models.market import Candle
 
@@ -14,7 +14,7 @@ _TF_MINUTES: dict[str, int] = {
     "D1": 1440,
 }
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _bucket_start(ts: datetime, target_mins: int) -> datetime:

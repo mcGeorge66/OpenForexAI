@@ -41,8 +41,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from pathlib import Path
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC
 
 from openforexai.messaging.routing import RoutingTable
 from openforexai.models.messaging import AgentMessage, EventType
@@ -153,7 +153,7 @@ class EventBus:
         while self._running:
             try:
                 message = await asyncio.wait_for(self._inbound.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
             try:
@@ -295,7 +295,8 @@ class EventBus:
         if self._monitoring is None:
             return
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 
             # Map string to enum if possible, else use a generic type
@@ -307,7 +308,7 @@ class EventBus:
                 return
 
             self._monitoring.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=source,
                 event_type=mtype,
                 payload=kwargs,

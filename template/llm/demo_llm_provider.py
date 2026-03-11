@@ -20,7 +20,7 @@ class DemoLLMProvider(AbstractLLMProvider):
         self._model = model
 
     @classmethod
-    def from_config(cls, cfg: dict[str, Any]) -> "DemoLLMProvider":
+    def from_config(cls, cfg: dict[str, Any]) -> DemoLLMProvider:
         model = str(cfg.get("model", "demo-llm-v1"))
         return cls(model=model)
 
