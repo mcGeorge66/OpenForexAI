@@ -85,7 +85,7 @@ config/system.json5
 
 ## Configuration
 
-Everything is controlled by `config/system.json5`. See the [`config/` README](../config/README.md) for details.
+Everything is controlled by `config/system.json5`. See the [`config/` README](config.md.md) for details.
 
 Environment variables override config values. The most important ones:
 

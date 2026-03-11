@@ -67,7 +67,7 @@ export function InformationView() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Information</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">D:\\GitHub\\GHG\\OpenForexAI\\config\\README.md</span>
+          <span className="text-xs text-gray-500">D:\\GitHub\\GHG\\OpenForexAI\\config\\config.md</span>
           {!editing && (
             <button
               onClick={startEdit}

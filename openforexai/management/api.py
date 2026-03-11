@@ -1503,17 +1503,17 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
 
 @router.get("/config/information/readme")
 async def get_information_readme_text() -> dict[str, str]:
-    """Return config README.md as raw text for the Information view."""
-    readme_path = _project_root() / "config" / "README.md"
+    """Return config/config.md as raw text for the Information view."""
+    readme_path = _project_root() / "config" / "config.md"
     return {"text": _read_text_file(readme_path)}
 
 
 @router.put("/config/information/readme")
 async def save_information_readme_text(content: str = Body(..., embed=False)) -> dict[str, str]:
-    """Save config README.md raw text from the Information editor."""
-    readme_path = _project_root() / "config" / "README.md"
+    """Save config/config.md raw text from the Information editor."""
+    readme_path = _project_root() / "config" / "config.md"
     _write_text_file(readme_path, content)
-    return {"status": "saved", "file": "config/README.md"}
+    return {"status": "saved", "file": "config/config.md"}
 
 
 # Known config file names that can be served

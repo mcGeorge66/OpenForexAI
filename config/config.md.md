@@ -1,3 +1,5 @@
+[Back to Documentation Index](../docs/README.md)
+
 # config — System Configuration
 
 Central configuration files for OpenForexAI. The directory **[config]** is the **single source of truth** for all system settings.
