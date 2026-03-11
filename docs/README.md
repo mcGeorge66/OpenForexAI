@@ -27,8 +27,6 @@ Technical reference for internal `openforexai` modules, including adapters, agen
 - [openforexai.adapters.database.md](./openforexai.adapters.database.md)
 - [openforexai.adapters.llm.md](./openforexai.adapters.llm.md)
 - [openforexai.agents.md](./openforexai.agents.md)
-- [openforexai.agents.optimization.md](./openforexai.agents.optimization.md)
-- [openforexai.agents.supervisor.md](./openforexai.agents.supervisor.md)
 - [openforexai.data.md](./openforexai.data.md)
 - [openforexai.management.md](./openforexai.management.md)
 - [openforexai.messaging.md](./openforexai.messaging.md)
@@ -59,3 +57,4 @@ Testing documentation for the overall test strategy and test layers (unit, integ
 - [tests.e2e.md](./tests.e2e.md)
 - [tests.integration.md](./tests.integration.md)
 - [tests.unit.md](./tests.unit.md)
+

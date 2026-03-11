@@ -163,6 +163,13 @@ class MockLLMProvider(AbstractLLMProvider):
         self._response_text = response_text
         self._structured = structured_response or {}
 
+    @classmethod
+    def from_config(cls, cfg: dict[str, Any]) -> MockLLMProvider:
+        return cls(
+            response_text=cfg.get("response_text", "Mock LLM decision — HOLD"),
+            structured_response=cfg.get("structured_response"),
+        )
+
     @property
     def model_id(self) -> str:
         return "mock-model"
