@@ -49,6 +49,6 @@ logs/
 .claude
 .obsidian
 AGENTS.md
-CLAUDE.md
 *.drawio
 *.cmd
+CLAUDE.md
