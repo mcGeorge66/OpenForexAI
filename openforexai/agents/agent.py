@@ -33,7 +33,7 @@ user message context.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from openforexai.data.container import DataContainer
@@ -150,7 +150,7 @@ class Agent:
                 msg = await asyncio.wait_for(
                     self._inbox.get(), timeout=min(remaining, 1.0)
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if msg.event_type == EventType.AGENT_CONFIG_RESPONSE:
                 return msg.payload
@@ -305,7 +305,7 @@ class Agent:
         while self._running:
             try:
                 msg = await asyncio.wait_for(self._inbox.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 raise
@@ -384,7 +384,7 @@ class Agent:
             return
 
         # Build the user message for this cycle
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         if trigger == "timer":
             user_msg = f"[{now}] Periodic analysis cycle. Review current market conditions and act if appropriate."
         elif trigger == EventType.AGENT_QUERY.value:
@@ -532,7 +532,7 @@ class Agent:
         try:
             from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
             self._monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=f"agent:{self.agent_id}",
                 event_type=MonitoringEventType.SYSTEM_ERROR,
                 payload={"agent_id": self.agent_id, "message": message},
@@ -553,7 +553,7 @@ class Agent:
             ctx = self._tool_dispatcher._context if self._tool_dispatcher else None
 
             self._monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=f"agent:{self.agent_id}",
                 event_type=MonitoringEventType.LLM_REQUEST,
                 broker_name=ctx.broker_name if ctx else None,
@@ -594,7 +594,7 @@ class Agent:
                 for tc in response.tool_calls
             ]
             ctx.monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=f"agent:{self.agent_id}",
                 event_type=MonitoringEventType.LLM_RESPONSE,
                 broker_name=ctx.broker_name,

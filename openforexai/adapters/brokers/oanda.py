@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -106,7 +106,7 @@ class OANDABroker(BrokerBase):
         self._client: httpx.AsyncClient | None = None
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "OANDABroker":
+    def from_config(cls, cfg: dict) -> OANDABroker:
         api_url = cfg.get("api_url", "")
         if not api_url:
             raise ValueError(
@@ -170,7 +170,7 @@ class OANDABroker(BrokerBase):
         # Paginate: estimate start time and walk forward in 5000-candle pages.
         # M5 bars are 5 min each; forex is ~5/7 days, so use a 1.6× time buffer
         # to account for weekends and bank holidays.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         from_time = now - timedelta(minutes=int(count * 5 * 1.6))
 
         all_candles: list[Candle] = []
@@ -259,7 +259,7 @@ class OANDABroker(BrokerBase):
             currency=acct.get("currency", "USD"),
             trade_allowed=not acct.get("tradingDisabled", False),
             margin_level=margin_level,
-            recorded_at=datetime.now(timezone.utc),
+            recorded_at=datetime.now(UTC),
         )
 
     # ── Orders ────────────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ class OANDABroker(BrokerBase):
             broker_name=self._short_name,
             status=TradeStatus.OPEN if fill else TradeStatus.PENDING,
             fill_price=Decimal(fill["price"]) if fill.get("price") else None,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
 
     # ── Positions ─────────────────────────────────────────────────────────────
@@ -381,7 +381,7 @@ class OANDABroker(BrokerBase):
         data = resp.json().get("orderFillTransaction", {})
 
         # Minimal dummy order needed to satisfy TradeResult schema
-        from openforexai.models.trade import TradeDirection, TradeSignal, TradeOrder
+        from openforexai.models.trade import TradeDirection, TradeOrder, TradeSignal
         dummy_signal = TradeSignal(
             pair="",
             direction=TradeDirection.BUY,
@@ -390,7 +390,7 @@ class OANDABroker(BrokerBase):
             take_profit=Decimal("0"),
             confidence=0.0,
             reasoning="position close",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id="supervisor",
         )
         dummy_order = TradeOrder(
@@ -406,6 +406,6 @@ class OANDABroker(BrokerBase):
             status=TradeStatus.CLOSED,
             fill_price=Decimal(data["price"]) if data.get("price") else None,
             pnl=Decimal(data.get("pl", "0")),
-            closed_at=datetime.now(timezone.utc),
+            closed_at=datetime.now(UTC),
         )
 

@@ -48,7 +48,7 @@ class OpenAILLMProvider(AbstractLLMProvider):
         self._default_max_tokens = default_max_tokens
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "OpenAILLMProvider":
+    def from_config(cls, cfg: dict) -> OpenAILLMProvider:
         return cls(
             api_key=cfg.get("api_key", ""),
             model=cfg.get("model", "gpt-4o"),
@@ -248,7 +248,7 @@ class LMStudioLLMProvider(OpenAILLMProvider):
                          retry_attempts=retry_attempts, retry_base_delay=retry_base_delay)
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "LMStudioLLMProvider":
+    def from_config(cls, cfg: dict) -> LMStudioLLMProvider:
         return cls(
             base_url=cfg.get("base_url", "http://localhost:1234/v1"),
             model=cfg.get("model", "local-model"),

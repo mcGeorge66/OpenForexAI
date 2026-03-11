@@ -7,7 +7,7 @@ This demonstrates a practical pattern:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from openforexai.adapters.data.sqlite import SQLiteDataContainer
 
@@ -52,6 +52,6 @@ class DemoDataContainer(SQLiteDataContainer):
             market_snapshot=snapshot,
             prompt_version=prompt_version,
             latency_ms=latency_ms,
-            decided_at=decided_at or datetime.now(timezone.utc),
+            decided_at=decided_at or datetime.now(UTC),
         )
 

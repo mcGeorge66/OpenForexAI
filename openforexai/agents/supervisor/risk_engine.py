@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from openforexai.models.risk import CorrelationMatrix, RiskAssessment, RiskParameters
 from openforexai.models.trade import Position, TradeSignal
 

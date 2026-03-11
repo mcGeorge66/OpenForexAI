@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
-
-import aiosqlite
+from datetime import UTC, datetime
 
 from openforexai.adapters.database.sqlite import SQLiteRepository
 from openforexai.ports.data_container import AbstractDataContainer
@@ -57,7 +55,7 @@ class SQLiteDataContainer(SQLiteRepository, AbstractDataContainer):
     ) -> str:
         """Insert a full agent decision record.  Returns the UUID string."""
         record_id = str(uuid.uuid4())
-        ts = (decided_at or datetime.now(timezone.utc)).isoformat()
+        ts = (decided_at or datetime.now(UTC)).isoformat()
         await self._db().execute(
             """
             INSERT INTO agent_decisions (
@@ -143,8 +141,8 @@ class SQLiteDataContainer(SQLiteRepository, AbstractDataContainer):
         started_at: datetime | None = None,
     ) -> None:
         """Upsert the complete LLM messages list for one trading cycle."""
-        now = datetime.now(timezone.utc).isoformat()
-        start = (started_at or datetime.now(timezone.utc)).isoformat()
+        now = datetime.now(UTC).isoformat()
+        start = (started_at or datetime.now(UTC)).isoformat()
         record_id = str(uuid.uuid4())
         await self._db().execute(
             """
@@ -207,7 +205,7 @@ class SQLiteDataContainer(SQLiteRepository, AbstractDataContainer):
     ) -> None:
         """Append a performance snapshot (append-only, never updated)."""
         record_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         await self._db().execute(
             """
             INSERT INTO agent_performance (

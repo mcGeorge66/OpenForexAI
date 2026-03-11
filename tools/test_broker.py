@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import UTC
 from pathlib import Path
 
 _ROOT = Path(__file__).parent
@@ -52,7 +53,6 @@ def _get_test_pair(name: str, cfg: dict) -> str:
 
 
 def _create_broker(cfg: dict):
-    import openforexai.adapters.brokers  # trigger registration
     from openforexai.registry.plugin_registry import PluginRegistry
 
     adapter = cfg.get("adapter", "")
@@ -82,7 +82,7 @@ async def _run_tests(name: str) -> bool:
     try:
         await broker.connect()
         print(f"  short_name : {broker.short_name!r}")
-        print(f"  [PASS]")
+        print("  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
         return False
@@ -96,7 +96,7 @@ async def _run_tests(name: str) -> bool:
         print(f"  margin_free : {status.margin_free}")
         print(f"  leverage    : {status.leverage}")
         print(f"  trade_ok    : {status.trade_allowed}")
-        print(f"  [PASS]")
+        print("  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
         passed = False
@@ -108,7 +108,7 @@ async def _run_tests(name: str) -> bool:
         print(f"  open positions : {len(positions)}")
         for p in positions[:3]:
             print(f"    {p.pair} {p.direction} {p.units} @ {p.entry_price}  pnl={p.unrealized_pnl}")
-        print(f"  [PASS]")
+        print("  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
         passed = False
@@ -121,7 +121,7 @@ async def _run_tests(name: str) -> bool:
         if candles:
             c = candles[-1]
             print(f"  latest   : {c.timestamp}  O={c.open} H={c.high} L={c.low} C={c.close}")
-        print(f"  [PASS]")
+        print("  [PASS]")
     except Exception as e:
         print(f"  [FAIL] {e}")
         passed = False
@@ -167,16 +167,16 @@ async def _run_tests(name: str) -> bool:
         if candle_events:
             ev = candle_events[0]
             c  = ev.payload.get("candle", {})
-            print(f"  event          : M5_CANDLE_AVAILABLE")
+            print("  event          : M5_CANDLE_AVAILABLE")
             print(f"  pair           : {ev.payload.get('pair')}")
             print(f"  timestamp      : {c.get('timestamp')}")
             print(f"  close          : {c.get('close')}")
             print(f"  total events   : {len(events)}")
-            print(f"  [PASS]")
+            print("  [PASS]")
         else:
-            print(f"  no M5_CANDLE_AVAILABLE received within 5 s")
+            print("  no M5_CANDLE_AVAILABLE received within 5 s")
             print(f"  total events   : {len(events)}")
-            print(f"  [FAIL]")
+            print("  [FAIL]")
             passed = False
     except Exception as e:
         import traceback
@@ -185,13 +185,13 @@ async def _run_tests(name: str) -> bool:
         passed = False
 
     # ── Test 6: live M5 streaming (real timing, Ctrl+C to exit) ─────────────
-    from datetime import datetime, timezone as _tz
-    _now = datetime.now(_tz.utc)
+    from datetime import datetime
+    _now = datetime.now(UTC)
     _secs_to_next = int(
         (((int(_now.timestamp() / 60) // 5) + 1) * 5 * 60) - _now.timestamp()
     ) + 10
 
-    print(f"\nTest 6: live M5 streaming — press Ctrl+C to exit")
+    print("\nTest 6: live M5 streaming — press Ctrl+C to exit")
     print(f"  Next candle in approx. {_secs_to_next} s  "
           f"({_secs_to_next // 60}:{_secs_to_next % 60:02d} min)")
     print(f"  Streaming {pair} via {broker.short_name!r} ...\n")
@@ -231,9 +231,9 @@ async def _run_tests(name: str) -> bool:
     )
     try:
         await asyncio.sleep(_TIMEOUT)
-        print(f"\n  30-minute timeout reached.")
+        print("\n  30-minute timeout reached.")
     except (KeyboardInterrupt, asyncio.CancelledError):
-        print(f"\n  Stopped by user.")
+        print("\n  Stopped by user.")
     finally:
         broker.stop_background_tasks()
         print(f"  Total candles received: {_live_count}")

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import MockBroker, MockRepository, MOCK_BROKER_NAME
 from openforexai.messaging.bus import EventBus
+from tests.conftest import MOCK_BROKER_NAME, MockBroker, MockRepository
 
 
 def _make_container(pairs: list[str] | None = None):

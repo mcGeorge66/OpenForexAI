@@ -47,12 +47,13 @@ and the union of their resolved targets receives the message.
 """
 from __future__ import annotations
 
-import json5
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-from openforexai.messaging.agent_id import AgentId, _seg_match, substitute_template
+import json5
+
+from openforexai.messaging.agent_id import AgentId, substitute_template
 
 _log = logging.getLogger(__name__)
 

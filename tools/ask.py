@@ -31,7 +31,7 @@ import sys
 import textwrap
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ── ANSI colour helpers ────────────────────────────────────────────────────────
 
@@ -140,7 +140,7 @@ def cmd_ask(
         sys.exit(1)
 
     # ── Send the query ─────────────────────────────────────────────────────────
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    ts = datetime.now(UTC).strftime("%H:%M:%S UTC")
     print()
     print(_c(_DIM, f"[{ts}] Sending query to ") + _c(_CYAN, agent_id))
     print(_c(_DIM, "─" * 60))
@@ -168,7 +168,7 @@ def cmd_ask(
         sys.exit(1)
 
     # ── Print the response ─────────────────────────────────────────────────────
-    ts2 = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    ts2 = datetime.now(UTC).strftime("%H:%M:%S UTC")
     response_text  = result.get("response", "")
     correlation_id = result.get("correlation_id", "")
     responding_id  = result.get("agent_id", agent_id)

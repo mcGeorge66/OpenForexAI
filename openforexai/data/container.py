@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from openforexai.data.resampler import resample_candles
@@ -329,7 +329,7 @@ class DataContainer:
 
     @staticmethod
     def _latest_completed_m5_open(now: datetime | None = None) -> datetime:
-        dt = now or datetime.now(timezone.utc)
+        dt = now or datetime.now(UTC)
         slot_minute = dt.minute - (dt.minute % 5)
         boundary = dt.replace(minute=slot_minute, second=0, microsecond=0)
         return boundary - _M5_STEP
@@ -609,7 +609,7 @@ class DataContainer:
             from openforexai.models.monitoring import MonitoringEvent
 
             self._monitoring.emit(MonitoringEvent(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_module=source,
                 event_type=event_type,
                 broker_name=broker_name,

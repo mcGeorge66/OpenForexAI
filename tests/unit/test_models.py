@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
 from openforexai.models.analysis import AnalysisResult, SignalDirection
-from openforexai.models.market import Candle, Tick
+from openforexai.models.market import Tick
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.risk import RiskParameters
 from openforexai.models.trade import TradeDirection, TradeSignal
@@ -17,7 +17,7 @@ def test_tick_mid():
         pair="EURUSD",
         bid=Decimal("1.1000"),
         ask=Decimal("1.1002"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
     assert tick.mid == Decimal("1.1001")
 
@@ -30,7 +30,7 @@ def test_trade_signal_confidence_bounds():
         stop_loss=Decimal("1.0950"),
         take_profit=Decimal("1.1100"),
         reasoning="test",
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         agent_id="test_agent",
     )
     signal = TradeSignal(**base, confidence=0.75)

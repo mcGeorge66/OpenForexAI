@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = Path(__file__).resolve().parent
 TARGET_DIR = REPO_ROOT / "openforexai" / "adapters" / "data"
@@ -102,11 +101,11 @@ def _register(args: argparse.Namespace) -> int:
     reg_repo_line = f'PluginRegistry.register_repository("{name}", {class_name})'
 
     lines = _read_lines()
-    if import_line not in [l.strip() for l in lines]:
+    if import_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, IMPORT_RE, import_line)
-    if reg_dc_line not in [l.strip() for l in lines]:
+    if reg_dc_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, REGISTER_DC_RE, reg_dc_line)
-    if reg_repo_line not in [l.strip() for l in lines]:
+    if reg_repo_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, REGISTER_REPO_RE, reg_repo_line)
     _write_lines(lines)
 
@@ -138,7 +137,7 @@ def _deregister(args: argparse.Namespace) -> int:
     import_line = f"from openforexai.adapters.data.{t.module} import {t.class_name}"
     reg_dc_line = f'PluginRegistry.register_data_container("{t.name}", {t.class_name})'
     reg_repo_line = f'PluginRegistry.register_repository("{t.name}", {t.class_name})'
-    lines = [l for l in _read_lines() if l.strip() not in {import_line, reg_dc_line, reg_repo_line}]
+    lines = [line for line in _read_lines() if line.strip() not in {import_line, reg_dc_line, reg_repo_line}]
     _write_lines(lines)
     if t.file_path.exists():
         moved = _safe_move_back(t.file_path)
@@ -166,7 +165,11 @@ def _help(p: argparse.ArgumentParser) -> None:
     print()
     print("Examples:")
     print("  python template/data/data_adapter_manager.py --list")
-    print("  python template/data/data_adapter_manager.py --register --name demo_data --source-file template/data/demo_data_adapter.py --class-name DemoDataContainer")
+    print(
+        "  python template/data/data_adapter_manager.py --register --name demo_data "
+        "--source-file template/data/demo_data_adapter.py "
+        "--class-name DemoDataContainer"
+    )
     print("  python template/data/data_adapter_manager.py --deregister --name demo_data")
 
 

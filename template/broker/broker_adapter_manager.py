@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = Path(__file__).resolve().parent
 TARGET_DIR = REPO_ROOT / "openforexai" / "adapters" / "brokers"
@@ -111,9 +110,9 @@ def _register(args: argparse.Namespace) -> int:
     import_line = f"from openforexai.adapters.brokers.{module} import {class_name}"
     register_line = f'PluginRegistry.register_broker("{name}", {class_name})'
     lines = _read_lines()
-    if import_line not in [l.strip() for l in lines]:
+    if import_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, IMPORT_RE, import_line)
-    if register_line not in [l.strip() for l in lines]:
+    if register_line not in [line.strip() for line in lines]:
         lines = _insert_after_last(lines, REGISTER_RE, register_line)
     _write_lines(lines)
 
@@ -147,7 +146,7 @@ def _deregister(args: argparse.Namespace) -> int:
     import_line = f"from openforexai.adapters.brokers.{target.module} import {target.class_name}"
     register_line = f'PluginRegistry.register_broker("{target.name}", {target.class_name})'
     lines = _read_lines()
-    lines = [l for l in lines if l.strip() not in {import_line, register_line}]
+    lines = [line for line in lines if line.strip() not in {import_line, register_line}]
     _write_lines(lines)
 
     if target.file_path.exists():
@@ -176,7 +175,11 @@ def _help(p: argparse.ArgumentParser) -> None:
     print()
     print("Examples:")
     print("  python template/broker/broker_adapter_manager.py --list")
-    print("  python template/broker/broker_adapter_manager.py --register --name demo --source-file template/broker/demo_broker_adapter.py --class-name DemoBrokerAdapter")
+    print(
+        "  python template/broker/broker_adapter_manager.py --register "
+        "--name demo --source-file template/broker/demo_broker_adapter.py "
+        "--class-name DemoBrokerAdapter"
+    )
     print("  python template/broker/broker_adapter_manager.py --deregister --name demo")
 
 

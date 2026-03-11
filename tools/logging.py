@@ -57,7 +57,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ── Timestamp helpers ─────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ _TS_FMT = "%Y%m%d%H%M"   # compact UTC timestamp used in filenames
 
 
 def _ts_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _ts_str(dt: datetime) -> str:
@@ -240,7 +240,7 @@ class _RotatingWriter:
 
 # ── Writer thread ─────────────────────────────────────────────────────────────
 
-def _writer_thread(writer: _RotatingWriter, q: "queue.Queue[dict | None]") -> None:
+def _writer_thread(writer: _RotatingWriter, q: queue.Queue[dict | None]) -> None:
     """Dequeue events and write them.  ``None`` is the shutdown sentinel."""
     while True:
         item = q.get()
@@ -345,17 +345,17 @@ def main() -> None:
     api_key: str | None = args.api_key or None
 
     # ── Banner ────────────────────────────────────────────────────────────────
-    print(f"OpenForexAI Event Logger")
+    print("OpenForexAI Event Logger")
     print(f"  API:       {base_url}")
     print(f"  Directory: {log_dir}")
     if args.max_size > 0:
         print(f"  Max size:  {args.max_size:.1f} MB per file")
     else:
-        print(f"  Max size:  unlimited")
+        print("  Max size:  unlimited")
     if args.max_files > 0:
         print(f"  Max files: {args.max_files} total")
     else:
-        print(f"  Max files: unlimited")
+        print("  Max files: unlimited")
     print(f"  Interval:  {args.interval}s  |  Ctrl+C to stop")
     print("─" * 60)
 

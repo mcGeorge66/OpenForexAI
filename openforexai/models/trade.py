@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class TradeDirection(str, Enum):
+class TradeDirection(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     """All order types that the system supports.
 
     Trailing stop is optional — only brokers that support it (e.g. OANDA)
@@ -27,7 +27,7 @@ class OrderType(str, Enum):
     TRAILING_STOP = "TRAILING_STOP" # SL follows price at trailing_distance pips
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     PENDING = "PENDING"             # sent to broker, not yet confirmed
     OPEN = "OPEN"                   # live position at the broker
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
@@ -36,7 +36,7 @@ class OrderStatus(str, Enum):
     CANCELLED = "CANCELLED"         # cancelled before fill
 
 
-class CloseReason(str, Enum):
+class CloseReason(StrEnum):
     SL_HIT = "SL_HIT"                   # stop-loss triggered by broker
     TP_HIT = "TP_HIT"                   # take-profit triggered by broker
     TRAILING_STOP = "TRAILING_STOP"     # trailing stop triggered
@@ -45,7 +45,7 @@ class CloseReason(str, Enum):
     SYNC_DETECTED = "SYNC_DETECTED"     # detected as closed during sync check
 
 
-class TradeStatus(str, Enum):
+class TradeStatus(StrEnum):
     """Kept for backward compatibility with TradeResult."""
 
     PENDING = "PENDING"

@@ -9,11 +9,12 @@ Usage::
 """
 from __future__ import annotations
 
-import json5
 import os
 import re
 from pathlib import Path
 from typing import Any
+
+import json5
 
 _ENV_RE = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
 

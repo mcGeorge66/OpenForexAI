@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import aiosqlite
 
-from openforexai.models.agent import AgentDecision, AgentRole
-from openforexai.models.market import Candle
 from openforexai.models.account import AccountStatus
+from openforexai.models.agent import AgentDecision
+from openforexai.models.market import Candle
 from openforexai.models.optimization import BacktestResult, PromptCandidate, TradePattern
 from openforexai.models.trade import (
     CloseReason,
     OrderBookEntry,
     OrderStatus,
-    OrderType,
     TradeDirection,
     TradeOrder,
     TradeResult,
@@ -152,7 +151,7 @@ class SQLiteRepository(AbstractRepository):
                 trade.close_reason,
                 signal.agent_id,
                 trade.broker_order_id,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self._db().commit()
@@ -183,7 +182,7 @@ class SQLiteRepository(AbstractRepository):
             take_profit=Decimal(r["take_profit"]),
             confidence=0.0,
             reasoning="",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             agent_id=r["agent_id"],
         )
         order = TradeOrder(signal=signal, units=r["units"], risk_pct=0.0, approved_by="supervisor")
@@ -460,7 +459,11 @@ class SQLiteRepository(AbstractRepository):
             for c in candles
         ]
         await self._db().executemany(
-            f"INSERT OR REPLACE INTO {table} (timestamp, open, high, low, close, tick_volume, spread) VALUES (?,?,?,?,?,?,?)",
+            (
+                f"INSERT OR REPLACE INTO {table} "
+                "(timestamp, open, high, low, close, tick_volume, spread) "
+                "VALUES (?,?,?,?,?,?,?)"
+            ),
             values,
         )
         await self._db().commit()
@@ -660,7 +663,11 @@ class SQLiteRepository(AbstractRepository):
                 entry.opened_at.isoformat() if entry.opened_at else None,
                 entry.closed_at.isoformat() if entry.closed_at else None,
                 entry.last_broker_sync.isoformat() if entry.last_broker_sync else None,
-                entry.close_reason.value if isinstance(entry.close_reason, CloseReason) else (entry.close_reason if entry.close_reason else None),
+                (
+                    entry.close_reason.value
+                    if isinstance(entry.close_reason, CloseReason)
+                    else (entry.close_reason if entry.close_reason else None)
+                ),
                 str(entry.close_price) if entry.close_price is not None else None,
                 entry.close_reasoning,
                 str(entry.pnl_pips) if entry.pnl_pips is not None else None,

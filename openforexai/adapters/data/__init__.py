@@ -2,8 +2,8 @@
 
 Imported by bootstrap.py to trigger PluginRegistry registration.
 """
-from openforexai.adapters.data.sqlite import SQLiteDataContainer
 from openforexai.adapters.data.postgresql import PostgreSQLDataContainer
+from openforexai.adapters.data.sqlite import SQLiteDataContainer
 from openforexai.registry.plugin_registry import PluginRegistry
 
 PluginRegistry.register_data_container("sqlite",      SQLiteDataContainer)

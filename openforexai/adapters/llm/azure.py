@@ -56,7 +56,7 @@ class AzureOpenAILLMProvider(AbstractLLMProvider):
         self._default_max_tokens = default_max_tokens
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "AzureOpenAILLMProvider":
+    def from_config(cls, cfg: dict) -> AzureOpenAILLMProvider:
         return cls(
             api_key=cfg.get("api_key", ""),
             endpoint=cfg.get("endpoint", ""),

@@ -1,5 +1,5 @@
-from openforexai.adapters.brokers.oanda import OANDABroker
 from openforexai.adapters.brokers.mt5 import MT5Broker
+from openforexai.adapters.brokers.oanda import OANDABroker
 from openforexai.registry.plugin_registry import PluginRegistry
 
 PluginRegistry.register_broker("oanda", OANDABroker)

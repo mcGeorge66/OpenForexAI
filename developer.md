@@ -18,84 +18,60 @@ pytest --cov=openforexai  # with coverage
 
 ## Project layout
 
-```
+```text
 OpenForexAI/
+├── README.md                         # Root overview + links to topic docs
+├── architecture.md                   # Architecture and runtime design
+├── setup.md                          # Setup, configuration, quick start
+├── developer.md                      # Developer reference (this file)
+├── CONTRIBUTING.md                   # Contribution rules and process
+├── CLA.md                            # Contributor license agreement
+├── LICENSE                           # MIT license
+├── AGENTS.md                         # Project-specific coding/agent guidance
+├── pyproject.toml                    # Build metadata and dependencies
 ├── config/
-│   ├── system.json5                   # central config — agents, modules, prompts
+│   ├── system.json5                  # Central runtime config
+│   ├── config.md                     # Config information document shown in UI
 │   ├── modules/
-│   │   ├── llm/
-│   │   │   └── anthropic_claude.json5 # LLM module config (credentials + settings)
-│   │   └── broker/
-│   │       ├── oanda.json5            # OANDA module config
-│   │       └── mt5.json5              # MT5 module config
-│   └── event_routing.json5            # EventBus routing rules (hot-reloadable)
-├── tools/
-│   └── monitor.py                    # console monitor — polls /monitoring/events
-├── test_llm.py                       # LLM module test script
-├── test_broker.py                    # Broker module test script
+│   │   ├── llm/                      # Per-LLM module configs
+│   │   └── broker/                   # Per-broker module configs
+│   └── RunTime/
+│       ├── agent_tools.json5         # Tool approvals / bridge tool config
+│       └── event_routing.json5       # Event routing rules
+├── docs/
+│   ├── README.md                     # Documentation index
+│   └── *.md                          # Package/topic docs
+├── migrations/                       # SQL migrations
 ├── openforexai/
-│   ├── agents/
-│   │   └── agent.py                  # THE single Agent class (AA, BA, GA)
-│   ├── adapters/
-│   │   ├── brokers/
-│   │   │   ├── base.py               # BrokerBase: _m5_loop, _account_poll, _sync_loop
-│   │   │   ├── oanda.py              # OANDABroker
-│   │   │   └── mt5.py                # MT5Broker
-│   │   ├── database/                 # SQLiteRepository, PostgreSQLRepository
-│   │   └── llm/
-│   │       ├── anthropic.py          # Native tool_use API
-│   │       ├── openai.py             # Native function_calling API
-│   │       └── base.py               # llm_retry helper
-│   ├── config/
-│   │   ├── json_loader.py            # JSON loader with ${ENV_VAR} substitution
-│   │   └── config_service.py         # ConfigService agent (SYSTM_ALL..._GA_CFGSV)
-│   ├── registry/
-│   │   ├── plugin_registry.py        # Adapter class registry (LLM, broker, DB)
-│   │   └── runtime_registry.py       # Live instance registry (name → instance)
-│   ├── messaging/
-│   │   ├── bus.py                    # EventBus: routing + direct target_agent_id
-│   │   ├── routing.py                # RoutingTable, RoutingRule, JSON loader
-│   │   └── agent_id.py               # AgentId parsing, formatting, wildcard matching
-│   ├── monitoring/
-│   │   └── bus.py                    # MonitoringBus: ring buffer + subscriber queues
-│   ├── ports/                        # Abstract interfaces (broker, database, llm, monitoring)
-│   ├── models/                       # Pydantic domain models
-│   │   ├── market.py                 # Candle, MarketSnapshot
-│   │   ├── trade.py                  # OrderType, OrderStatus, OrderBookEntry
-│   │   ├── account.py                # AccountStatus
-│   │   ├── messaging.py              # AgentMessage, EventType (incl. AGENT_CONFIG_*)
-│   │   └── monitoring.py             # MonitoringEvent, MonitoringEventType
-│   ├── data/
-│   │   ├── container.py              # DataContainer: multi-broker, event-driven
-│   │   ├── resampler.py              # M5 → higher timeframes
-│   │   ├── indicators.py             # Pure indicator functions
-│   │   ├── indicator_plugins.py      # IndicatorPlugin subclasses + DEFAULT_REGISTRY
-│   │   └── indicator_tools.py        # IndicatorToolset (broker-aware)
-│   ├── tools/
-│   │   ├── __init__.py               # DEFAULT_REGISTRY + all built-in tools registered
-│   │   ├── base.py                   # BaseTool ABC, ToolContext
-│   │   ├── registry.py               # ToolRegistry (plug-and-play)
-│   │   ├── dispatcher.py             # ToolDispatcher: context tiers, monitoring
-│   │   ├── market/                   # get_candles, calculate_indicator
-│   │   ├── account/                  # get_account_status, get_open_positions
-│   │   ├── orderbook/                # get_order_book
-│   │   ├── trading/                  # place_order, close_position
-│   │   └── system/                   # raise_alarm, trigger_sync
-│   ├── management/
-│   │   ├── api.py                    # FastAPI endpoints (incl. /monitoring/events)
-│   │   └── server.py                 # ManagementServer (uvicorn background task)
-│   ├── utils/                        # logging, metrics, retry, time utils
-│   ├── bootstrap.py                  # wires all components from system.json5
-│   └── main.py                       # entry point
-├── scripts/
-│   ├── db_migrate.py
-│   ├── run_backtest.py
-│   └── export_prompts.py
-└── tests/
-    ├── unit/
-    ├── integration/
-    └── e2e/
+│   ├── main.py                       # App entrypoint
+│   ├── bootstrap.py                  # System wiring/bootstrap
+│   ├── agents/                       # Unified agent implementation + optimizers
+│   ├── adapters/                     # Broker / LLM / DB adapters
+│   ├── config/                       # Config service + JSON loader
+│   ├── data/                         # Data container, resampling, indicators
+│   ├── management/                   # FastAPI management API/server
+│   ├── messaging/                    # EventBus and routing
+│   ├── models/                       # Domain models (pydantic)
+│   ├── monitoring/                   # Monitoring bus/events
+│   ├── ports/                        # Hexagonal interfaces
+│   ├── registry/                     # Plugin/runtime registries
+│   ├── tools/                        # Runtime tool plugins for agents
+│   ├── ui/                           # Backend UI support layer
+│   └── utils/                        # Logging, retries, metrics, time helpers
+├── scripts/                          # Utility scripts (db, backtest, export)
+├── tests/
+│   ├── unit/                         # Unit tests
+│   ├── integration/                  # Integration tests
+│   └── e2e/                          # End-to-end tests
+├── tools/
+│   ├── ask.py                        # CLI: query agents
+│   ├── monitor.py                    # CLI: live monitoring
+│   ├── logging.py                    # CLI: rotating event logger
+│   ├── test_llm.py                   # CLI: LLM diagnostics
+│   └── test_broker.py                # CLI: broker diagnostics
+└── ui/                               # Web frontend
 ```
+
 
 ---
 

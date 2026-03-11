@@ -37,15 +37,23 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import json5
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+import json5
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    WebSocket,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -222,7 +230,7 @@ def _emit_checker_monitoring(
         from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 
         _monitoring_bus.emit(MonitoringEvent(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_module=f"llm_checker:{llm_name}",
             event_type=MonitoringEventType[event_type],
             broker_name=broker_name,
@@ -419,7 +427,7 @@ async def health() -> HealthResponse:
         uptime_seconds=round(time.monotonic() - _start_time, 1),
         registered_agents=len(agents),
         routing_rules=len(rules),
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 
@@ -593,7 +601,7 @@ async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse
             agent_id=result.get("agent_id", agent_id),
             response=result.get("response", ""),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _pending_queries.pop(correlation_id, None)
         raise HTTPException(
             status_code=504,
@@ -627,7 +635,7 @@ async def reload_routing() -> dict:
     return {
         "status": "reloaded",
         "rule_count": len(_routing_table.rules) if _routing_table else 0,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -688,12 +696,11 @@ async def monitoring_events(
         return []
     since_dt = None
     if since:
-        from datetime import timezone
         try:
             from datetime import datetime as _dt
             since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
             if since_dt.tzinfo is None:
-                since_dt = since_dt.replace(tzinfo=timezone.utc)
+                since_dt = since_dt.replace(tzinfo=UTC)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid 'since' timestamp: {since!r}")
 
@@ -837,7 +844,7 @@ async def ws_monitoring(websocket: WebSocket) -> None:
         while True:
             try:
                 event = await asyncio.wait_for(q.get(), timeout=30.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send a heartbeat ping to keep the connection alive
                 try:
                     await websocket.send_text(json.dumps({"type": "ping"}))
@@ -907,8 +914,8 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
     if tool is None:
         raise HTTPException(status_code=404, detail=f"Tool {req.tool_name!r} not registered")
 
-    from openforexai.tools.base import ToolContext
     from openforexai.registry.runtime_registry import RuntimeRegistry
+    from openforexai.tools.base import ToolContext
 
     selected_agent_cfg: dict[str, Any] | None = None
     if req.agent_id:
@@ -1046,7 +1053,11 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
             )
         selected_agent_cfg = cfg
 
-    broker_module_name = req.broker_name.strip() if isinstance(req.broker_name, str) and req.broker_name.strip() else None
+    broker_module_name = (
+        req.broker_name.strip()
+        if isinstance(req.broker_name, str) and req.broker_name.strip()
+        else None
+    )
     broker_instance = _connected_brokers.get(broker_module_name) if broker_module_name else None
 
     # LLM checker is diagnostic-first: do not block the whole session when a
@@ -1125,7 +1136,7 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
                 ),
                 timeout=_LLM_CHECKER_LLM_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             _emit_checker_monitoring(
                 "LLM_ERROR",
                 llm_name=req.llm_name,
@@ -1315,7 +1326,7 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
                     "is_error": False,
                     "result": raw_result,
                 })
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 err_result = {
                     "error": (
                         f"Tool execution exceeded {_LLM_CHECKER_TOOL_TIMEOUT_SECONDS:.0f}s timeout"

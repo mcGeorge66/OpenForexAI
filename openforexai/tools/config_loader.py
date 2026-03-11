@@ -10,9 +10,10 @@ Usage::
 """
 from __future__ import annotations
 
-import json5
 import logging
 from pathlib import Path
+
+import json5
 
 from openforexai.messaging.agent_id import AgentId
 

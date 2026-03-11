@@ -11,7 +11,7 @@ def setup_metrics(port: int = 9090) -> None:
     """Start the Prometheus HTTP metrics server on *port*."""
     global _enabled, _registry
     try:
-        from prometheus_client import Counter, Gauge, Histogram, start_http_server  # type: ignore[import]
+        from prometheus_client import start_http_server  # type: ignore[import]
 
         start_http_server(port)
         _enabled = True

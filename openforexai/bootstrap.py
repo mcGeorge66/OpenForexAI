@@ -16,7 +16,6 @@ Flow
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -52,9 +51,9 @@ async def bootstrap(
     Optionally pass a *monitoring_bus* so broker tasks and agents can emit events.
     """
     # ── Trigger adapter self-registration ────────────────────────────────────
-    import openforexai.adapters.brokers   # noqa: F401
-    import openforexai.adapters.llm       # noqa: F401
+    import openforexai.adapters.brokers  # noqa: F401
     import openforexai.adapters.database  # noqa: F401
+    import openforexai.adapters.llm  # noqa: F401
 
     db_cfg    = system_config.get("database", {})
     mod_cfg   = system_config.get("modules",  {})
@@ -167,7 +166,6 @@ async def bootstrap(
         _log.info("Registered bridge tools from config", count=bridge_count)
 
     # ── DataContainer ─────────────────────────────────────────────────────────
-    data_cfg = system_config.get("data", {})
     data_container = DataContainer(repository=repository, event_bus=bus, monitoring_bus=monitoring_bus)
 
     # Register each unique broker + its pairs (derived from agent configs)

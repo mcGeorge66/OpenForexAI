@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from openforexai.models.optimization import BacktestResult, PromptCandidate
 from openforexai.models.trade import TradeResult
@@ -21,15 +21,15 @@ def backtest_prompt(
         return BacktestResult(
             prompt_candidate_id=str(candidate.id),
             pair=candidate.pair,
-            period_start=datetime.now(timezone.utc),
-            period_end=datetime.now(timezone.utc),
+            period_start=datetime.now(UTC),
+            period_end=datetime.now(UTC),
             total_trades=0,
             win_rate=0.0,
             total_pnl=0.0,
             max_drawdown=0.0,
             sharpe_ratio=0.0,
             vs_baseline_pnl_delta=0.0,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
 
     pnls = [float(t.pnl or 0) for t in historical_trades]
@@ -57,8 +57,8 @@ def backtest_prompt(
         sharpe = 0.0
 
     closed_times = [t.closed_at for t in historical_trades if t.closed_at]
-    period_start = min(closed_times) if closed_times else datetime.now(timezone.utc)
-    period_end = max(closed_times) if closed_times else datetime.now(timezone.utc)
+    period_start = min(closed_times) if closed_times else datetime.now(UTC)
+    period_end = max(closed_times) if closed_times else datetime.now(UTC)
 
     return BacktestResult(
         prompt_candidate_id=str(candidate.id),
@@ -71,6 +71,6 @@ def backtest_prompt(
         max_drawdown=max_dd,
         sharpe_ratio=sharpe,
         vs_baseline_pnl_delta=0.0,  # set by OptimizationAgent after comparing to baseline
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
 

@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_TOOL_DIR = Path(__file__).resolve().parent
 SYSTEM_TOOLS_DIR = REPO_ROOT / "openforexai" / "tools"

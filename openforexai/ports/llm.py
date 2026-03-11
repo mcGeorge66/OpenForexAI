@@ -34,7 +34,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ── Shared data classes ───────────────────────────────────────────────────────
 
 @dataclass
@@ -92,7 +91,7 @@ class AbstractLLMProvider(ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, cfg: dict[str, Any]) -> "AbstractLLMProvider":
+    def from_config(cls, cfg: dict[str, Any]) -> AbstractLLMProvider:
         """Instantiate the adapter from a module config dict.
 
         Each adapter reads the fields it needs from *cfg* — no caller-side

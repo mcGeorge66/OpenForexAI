@@ -21,7 +21,6 @@ Exit codes:
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import time
 import traceback
@@ -67,7 +66,6 @@ def _load_config(name: str) -> tuple[Path, dict[str, Any]]:
 
 
 def _create_llm(name: str, cfg: dict[str, Any]):
-    import openforexai.adapters.llm  # trigger registration
     from openforexai.registry.plugin_registry import PluginRegistry
 
     adapter = cfg.get("adapter", name)
@@ -196,7 +194,10 @@ async def _check_tool_loop_adapter(llm) -> CheckResult:
         ])
         if result.status == "WARN":
             result.details.append(
-                "No tool call requested although prompt explicitly requested one; this can indicate model/tool-routing issues or adapter fallback behavior."
+                
+                    "No tool call requested although prompt explicitly requested one; "
+                    "this can indicate model/tool-routing issues or adapter fallback behavior."
+                
             )
     except Exception as exc:
         result.status = "FAIL"

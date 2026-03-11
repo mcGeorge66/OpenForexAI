@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.ports.monitoring import AbstractMonitoringBus
@@ -84,7 +83,7 @@ class MonitoringBus(AbstractMonitoringBus):
         self,
         since: datetime | None = None,
         limit: int = 100,
-    ) -> List[MonitoringEvent]:
+    ) -> list[MonitoringEvent]:
         """Return recent events from the ring buffer, optionally filtered.
 
         ``since`` — return only events with timestamp > since (UTC).
@@ -107,7 +106,7 @@ class MonitoringBus(AbstractMonitoringBus):
     ) -> MonitoringEvent:
         """Build a MonitoringEvent with current UTC timestamp."""
         return MonitoringEvent(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_module=source_module,
             event_type=event_type,
             broker_name=broker_name,
