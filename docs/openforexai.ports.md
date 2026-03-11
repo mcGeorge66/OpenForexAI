@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/ports — Abstract Interfaces (Hexagonal Ports)
 
 Abstract base classes that define the contracts for all external integrations. No implementation code lives here — only interfaces. The concrete implementations are in `openforexai/adapters/`.

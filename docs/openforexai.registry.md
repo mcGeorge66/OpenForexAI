@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/registry — Component Registry
 
 Two registries that together manage all pluggable components: `PluginRegistry` for class-level registration at import time, and `RuntimeRegistry` for live instances created by `bootstrap.py`.

@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tools/trading — Trading Execution Tools
 
 Tools that execute live trades. These are the most sensitive tools in the system — they interact directly with the broker API to place and close orders with real financial consequences.

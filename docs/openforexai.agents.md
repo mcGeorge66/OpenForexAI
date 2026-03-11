@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/agents — Agent System
 
 The core agent implementation. All agent types (Analysis Agent `AA`, Broker Agent `BA`, Global Agent `GA`) use a single parameterised `Agent` class. Behaviour is entirely determined by configuration — not by subclassing.

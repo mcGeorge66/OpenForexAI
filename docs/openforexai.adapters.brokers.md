@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # adapters/brokers — Broker Adapters
 
 Concrete implementations of `AbstractBroker` for supported forex brokers. Each adapter handles live market connectivity: candle streaming, order execution, account monitoring.

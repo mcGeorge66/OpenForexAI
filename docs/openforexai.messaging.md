@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/messaging — EventBus & Routing
 
 The message-passing backbone of OpenForexAI. All inter-component and inter-agent communication flows through the `EventBus`. Routing is rule-based and hot-reloadable.

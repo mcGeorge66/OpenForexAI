@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tests/integration — Integration Tests
 
 Per-agent integration tests. The agent class, EventBus, ToolDispatcher, and DataContainer are real. External dependencies (LLM, broker, database) are mocked.

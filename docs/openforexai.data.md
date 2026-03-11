@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/data — Market Data Management
 
 All market data handling: storage, retrieval, resampling, technical indicators, and correlation analysis.

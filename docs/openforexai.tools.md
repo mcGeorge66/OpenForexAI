@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/tools — LLM Tool Plugin System
 
 The tool system enables agents to call external functions during their LLM decision cycle. Tools provide access to market data, indicators, broker operations, and system utilities.

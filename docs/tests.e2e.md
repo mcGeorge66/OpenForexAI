@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tests/e2e — End-to-End Tests
 
 Full system test: bootstraps all components, runs a complete agent cycle, verifies end-to-end behaviour from event to database record.

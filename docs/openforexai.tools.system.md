@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tools/system — System Tools
 
 Administrative tools for system operations: raising alarms and triggering synchronisation.

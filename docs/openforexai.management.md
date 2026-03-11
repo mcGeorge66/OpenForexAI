@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/management — Management API
 
 The control plane for the running system. A FastAPI application served by a non-blocking uvicorn task, exposing REST endpoints for monitoring, introspection, and agent interaction.
@@ -197,6 +199,6 @@ curl -X POST http://127.0.0.1:8765/routing/reload
 curl "http://127.0.0.1:8765/monitoring/events?limit=50"
 ```
 
-See also: [`tools/ask.py`](../../tools/README.md) for a CLI wrapper around the agent query endpoint.
+See also: [`tools/ask.py`](./openforexai.tools.md) for a CLI wrapper around the agent query endpoint.
 
 

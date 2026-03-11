@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # tools/market — Market Data Tools
 
 Tools for retrieving price data and computing technical indicators. These are the primary tools used by Analysis Agents (AA) to perform market analysis.

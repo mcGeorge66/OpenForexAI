@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # agents/optimization — Prompt & Strategy Optimization
 
 Automated optimization of agent system prompts using backtesting, pattern detection, and evolutionary algorithms. This subsystem allows the system to improve its trading prompts over time based on historical performance.

@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # openforexai/monitoring — Observability Bus
 
 Fire-and-forget event bus for system-wide observability. Every significant action in the system emits a `MonitoringEvent` — LLM calls, tool executions, candle fetches, account updates, errors. These events power the `tools/monitor.py` console tool.
@@ -119,7 +121,7 @@ Defined in `openforexai/models/monitoring.py`:
 
 `tools/monitor.py` polls `GET /monitoring/events` every 2 seconds (configurable). The Management API reads from `MonitoringBus.recent_events()` and returns the events as JSON. The monitor then displays them with colour-coded formatting.
 
-See [`tools/README.md`](../../tools/README.md) for full monitor.py documentation.
+See [`tools/README.md`](./openforexai.tools.md) for full monitor.py documentation.
 
 ---
 

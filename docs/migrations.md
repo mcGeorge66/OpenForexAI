@@ -1,3 +1,5 @@
+[Back to Documentation Index](./README.md)
+
 # migrations — Database Schema
 
 SQL migration files that define the database schema for OpenForexAI. Migrations are applied automatically at startup by the SQLite adapter, or manually via `scripts/db_migrate.py`.
