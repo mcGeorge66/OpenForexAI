@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
 from openforexai.agents.optimization.optimization_agent import OptimizationAgent
 from openforexai.agents.supervisor.supervisor_agent import SupervisorAgent
-from openforexai.agents.technical_analysis.technical_analysis_agent import TechnicalAnalysisAgent
+from openforexai.agents.technical_analysis.technical_analysis_agent import (
+    TechnicalAnalysisAgent,
+)
 from openforexai.agents.trading.trading_agent import TradingAgent
-
 from openforexai.data.container import DataContainer
 from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
@@ -15,8 +17,12 @@ from openforexai.models.risk import RiskParameters
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.base import ToolContext
 from openforexai.tools.dispatcher import ToolDispatcher
-from tests.conftest import MOCK_BROKER_NAME, MockBroker, MockLLMProvider, MockRepository
-
+from tests.conftest import (
+    MOCK_BROKER_NAME,
+    MockBroker,
+    MockLLMProvider,
+    MockRepository,
+)
 
 async def _build_system(pairs: list[str]):
     broker = MockBroker()
