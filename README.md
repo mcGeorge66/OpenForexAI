@@ -4,6 +4,10 @@
 
 OpenForexAI uses configurable AI agents for market analysis, risk-aware trade execution, and strategy optimization.
 
+> [!NOTE]
+> Here some interesting [`Screenshots`](../Screenshots.md) 
+
+
 ![Status](https://img.shields.io/badge/status-beta-orange)
 ![Safety](https://img.shields.io/badge/trading-practice%20only-red)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)

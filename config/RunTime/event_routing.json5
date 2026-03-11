@@ -1,22 +1,22 @@
 {
-  "_comment": "OpenForexAI — Event Routing Rules v2",
-  "_doc": [
-    "Rules are evaluated in ascending priority order (lower number = higher priority).",
-    "Multiple rules may match a single message — all matching targets receive it.",
-    "",
-    "Agent ID format: [BROKER(5)]-[PAIR(6)]-[TYPE(2)]-[NAME(1-5)]",
-    "  AA (Analysis Agent) | BA (Broker Agent) | GA (Global Agent)",
-    "",
-    "Communication topology:",
-    "  AA ↔ BA  same broker (bidirectional)",
-    "  BA ↔ GA  any broker ↔ any global agent",
-    "  GA  →  all agents (broadcast capable)",
-    "",
-    "Special 'to' values:",
-    "  '@handlers'  — legacy handler-subscribers (DataContainer, BrokerBase)",
-    "  '*'          — broadcast to ALL registered agents",
-    "  '{sender.broker}-...' — template substitution from sender ID parts"
-  ],
+  // OpenForexAI — Event Routing Rules v2
+  // 
+  // Rules are evaluated in ascending priority order (lower number = higher priority).",
+  // Multiple rules may match a single message — all matching targets receive it.",
+  // 
+  // Agent ID format: [BROKER(5)]-[PAIR(6)]-[TYPE(2)]-[NAME(1-5)]",
+  //   AA (Analysis Agent) | BA (Broker Agent) | GA (Global Agent)",
+  // 
+  // Communication topology:",
+  //   AA ↔ BA  same broker (bidirectional)",
+  //   BA ↔ GA  any broker ↔ any global agent",
+  //   GA  →  all agents (broadcast capable)",
+  // 
+  // Special 'to' values:",
+  //   '@handlers'  — legacy handler-subscribers (DataContainer, BrokerBase)",
+  //   '*'          — broadcast to ALL registered agents",
+  //   '{sender.broker}-...' — template substitution from sender ID parts"
+
 
   "rules": [
 

@@ -7,7 +7,7 @@ This folder contains the consolidated technical documentation. Use this index as
 ### Config
 The folder [config] contains the Central configuration files for OpenForexAI and is the **single source of truth** for all system settings.
 
-- [config.md](config.md.md)
+- [config.md](../config/config.md)
 
 ### Core
 High-level and cross-cutting documents for project-wide setup, operations, tooling, UI, and migration workflows.

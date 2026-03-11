@@ -1,4 +1,6 @@
 {
+  // Azure OpenAI LLM module configuration
+  // This file is managed by the module owner. The system only loads it by name.
   "adapter": "azure",
   "api_key": "${OAI-AZURE-KEY}",
   "endpoint": "${OAI-AZURE-ENDPOINT}",
