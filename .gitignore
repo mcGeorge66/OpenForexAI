@@ -44,3 +44,11 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# Me
+.claude
+.obsidian
+AGENTS.md
+CLAUDE.md
+*.drawio
+*.cmd
