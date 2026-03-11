@@ -1501,19 +1501,33 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
     }
 
 
+def _resolve_information_doc_path() -> Path:
+    """Resolve information document under config/ with compatibility fallbacks."""
+    cfg_root = _project_root() / "config"
+    candidates = [
+        cfg_root / "config.md",
+        cfg_root / "config.md.md",  # compatibility for accidental double extension
+        cfg_root / "README.md",      # legacy filename
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise HTTPException(status_code=404, detail="Config file not found on disk: config.md")
+
+
 @router.get("/config/information/readme")
 async def get_information_readme_text() -> dict[str, str]:
     """Return config/config.md as raw text for the Information view."""
-    readme_path = _project_root() / "config" / "config.md"
-    return {"text": _read_text_file(readme_path)}
+    doc_path = _resolve_information_doc_path()
+    return {"text": _read_text_file(doc_path)}
 
 
 @router.put("/config/information/readme")
 async def save_information_readme_text(content: str = Body(..., embed=False)) -> dict[str, str]:
     """Save config/config.md raw text from the Information editor."""
-    readme_path = _project_root() / "config" / "config.md"
-    _write_text_file(readme_path, content)
-    return {"status": "saved", "file": "config/config.md"}
+    doc_path = _resolve_information_doc_path()
+    _write_text_file(doc_path, content)
+    return {"status": "saved", "file": f"config/{doc_path.name}"}
 
 
 # Known config file names that can be served

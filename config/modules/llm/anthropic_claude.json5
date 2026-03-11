@@ -1,6 +1,6 @@
 {
-  "_comment": "Anthropic Claude LLM module configuration",
-  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  // Anthropic Claude LLM module configuration",
+  // This file is managed by the module owner. The system only loads it by name.",
   "adapter":         "anthropic",
   "api_key":         "${ANTHROPIC_API_KEY}",
   "model":           "${ANTHROPIC_MODEL:-claude-opus-4-6}",

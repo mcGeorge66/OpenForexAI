@@ -1,6 +1,6 @@
 {
-  "_comment": "OANDA broker module configuration",
-  "_doc": "This file is managed by the module owner. The system only loads it by name.",
+  // OANDA broker module configuration",
+  // This file is managed by the module owner. The system only loads it by name.",
   "adapter":    "oanda",
   "short_name": "OAPR1",
   "api_url":    "${OAPR1-API-URL}",
