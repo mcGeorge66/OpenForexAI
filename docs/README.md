@@ -4,6 +4,10 @@ This folder contains the consolidated technical documentation. Use this index as
 
 ## Table of Contents
 
+### Config
+
+- [config.md](../config/README.md)
+
 ### Core
 High-level and cross-cutting documents for project-wide setup, operations, tooling, UI, and migration workflows.
 
