@@ -23,7 +23,7 @@ def _make_container(pairs: list[str] | None = None):
 async def test_initialize_loads_candles():
     container, _ = _make_container()
     await container.initialize()
-    candles = container.get_candles(MOCK_BROKER_NAME, "EURUSD", "H1")
+    candles = await container.get_candles(MOCK_BROKER_NAME, "EURUSD", "H1")
     assert len(candles) > 0
 
 
