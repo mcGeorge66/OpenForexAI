@@ -56,6 +56,7 @@ async def bootstrap(
     import openforexai.adapters.llm  # noqa: F401
 
     db_cfg    = system_config.get("database", {})
+    data_cfg  = system_config.get("data", {})
     mod_cfg   = system_config.get("modules",  {})
     agent_cfg = system_config.get("agents",   {})
     enabled_agent_cfg = {
@@ -182,7 +183,12 @@ async def bootstrap(
         _log.info("Registered bridge tools from config", count=bridge_count)
 
     # ── DataContainer ─────────────────────────────────────────────────────────
-    data_container = DataContainer(store=repository, event_bus=bus, monitoring_bus=monitoring_bus)
+    data_container = DataContainer(
+        store=repository,
+        event_bus=bus,
+        monitoring_bus=monitoring_bus,
+        resample_bucket_offset_hours=int(data_cfg.get("resample_bucket_offset_hours", 0)),
+    )
 
     # Register each unique broker + its pairs (derived from agent configs)
     broker_pairs: dict[str, set[str]] = {}

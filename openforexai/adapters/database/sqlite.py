@@ -399,6 +399,14 @@ class SQLiteRepository(AbstractRepository):
         )
         await self._db().commit()
 
+    async def _candle_table_exists(self, broker_name: str, pair: str, timeframe: str) -> bool:
+        table = self._series_table(broker_name, pair, timeframe)
+        cursor = await self._db().execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (table,),
+        )
+        return await cursor.fetchone() is not None
+
     @staticmethod
     def _row_to_candle(row: aiosqlite.Row, timeframe: str) -> Candle:
         r = dict(row)
@@ -475,7 +483,8 @@ class SQLiteRepository(AbstractRepository):
         timeframe: str,
         limit: int = 500,
     ) -> list[Candle]:
-        await self._ensure_candle_table(broker_name, pair, timeframe)
+        if not await self._candle_table_exists(broker_name, pair, timeframe):
+            return []
         table = self._series_table(broker_name, pair, timeframe)
         cursor = await self._db().execute(
             f"SELECT * FROM {table} ORDER BY timestamp DESC LIMIT ?",
@@ -484,8 +493,10 @@ class SQLiteRepository(AbstractRepository):
         rows = await cursor.fetchall()
         return [self._row_to_candle(r, timeframe) for r in rows]
 
+
     async def get_candle_count(self, broker_name: str, pair: str, timeframe: str) -> int:
-        await self._ensure_candle_table(broker_name, pair, timeframe)
+        if not await self._candle_table_exists(broker_name, pair, timeframe):
+            return 0
         table = self._series_table(broker_name, pair, timeframe)
         cursor = await self._db().execute(f"SELECT COUNT(*) AS c FROM {table}")
         row = await cursor.fetchone()
@@ -808,4 +819,3 @@ class SQLiteRepository(AbstractRepository):
             )
         rows = await cursor.fetchall()
         return [await self._row_to_order_book_entry(r) for r in rows]
-

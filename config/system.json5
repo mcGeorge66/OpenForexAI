@@ -12,7 +12,8 @@
     "timeframes": [
       "M5"
     ],
-    "indicator_cache_ttl_seconds": 30
+    "indicator_cache_ttl_seconds": 30,
+    "resample_bucket_offset_hours": 0
   },
   "database": {
     "backend": "${OPENFOREXAI_DB_BACKEND:-sqlite}",

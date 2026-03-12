@@ -79,7 +79,7 @@ class DataContainer:
         container = DataContainer(store=data_container, event_bus=bus, monitoring_bus=mon)
         container.register_broker(oanda_broker, ["EURUSD", "USDJPY"])
         container.subscribe_to_bus()   # wires EventBus subscriptions
-        await container.initialize()   # back-fills from broker if DB is empty
+        await container.initialize()   # no-op; data loads lazily on demand
     """
 
     def __init__(
@@ -87,6 +87,7 @@ class DataContainer:
         store: AbstractDataContainer | None = None,
         event_bus=None,
         monitoring_bus=None,
+        resample_bucket_offset_hours: int = 0,
     ) -> None:
         if store is None:
             raise ValueError(
@@ -96,6 +97,7 @@ class DataContainer:
         self._store = store
         self._event_bus = event_bus
         self._monitoring = monitoring_bus
+        self._resample_bucket_offset_hours = int(resample_bucket_offset_hours)
 
         # Tracks which (broker_name, pair) tuples have been registered
         self._registered: set[tuple[str, str]] = set()
@@ -131,17 +133,12 @@ class DataContainer:
     # ── Initialisation ────────────────────────────────────────────────────────
 
     async def initialize(self) -> None:
-        """Ensure the DB has M5 history for every registered (broker, pair).
+        """Initialize state without pre-loading broker/pair series.
 
-        If the DB is empty for a pair, the last ``_M5_BACKFILL`` M5 candles are
-        fetched from the broker and persisted.  If the DB already has data, no
-        broker call is made.
+        No broker/pair table is created during initialization. Candle data is
+        loaded lazily on incoming candles or explicit read requests.
         """
-        tasks = [
-            self._init_pair(broker_name, pair)
-            for (broker_name, pair) in self._registered
-        ]
-        await asyncio.gather(*tasks)
+        return
 
 
     async def ensure_pair_ready(self, broker: AbstractBroker, pair: str) -> None:
@@ -164,7 +161,6 @@ class DataContainer:
                 f"Broker {broker_name!r} is not registered in DataContainer."
             )
         self.register_broker(broker, [pair])
-        await self._init_pair(broker_name, pair)
 
     async def _init_pair(self, broker_name: str, pair: str) -> None:
         key = (broker_name, pair)
@@ -442,6 +438,13 @@ class DataContainer:
             refreshed = await self._store.get_candles(
                 broker_name, pair, "M5", limit=required_m5_count
             )
+            if not refreshed:
+                _log.warning(
+                    "Cannot synthesize missing M5 bars: no source candles",
+                    broker=broker_name,
+                    pair=pair,
+                )
+                return
             missing_after_fetch = self._missing_slots_in_recent_window(refreshed, required_m5_count)
             if missing_after_fetch:
                 nulls = [self._build_null_m5_candle(ts) for ts in missing_after_fetch]
@@ -514,7 +517,11 @@ class DataContainer:
                 broker_name, pair, "M5", limit=m5_limit
             )
             m5 = self._drop_null_candles(list(reversed(raw_m5)))   # oldest first for resampler
-            result = resample_candles(m5, timeframe)[-effective_limit:]
+            result = resample_candles(
+                m5,
+                timeframe,
+                bucket_offset_hours=self._resample_bucket_offset_hours,
+            )[-effective_limit:]
 
         else:
             _log.warning("Unknown timeframe %r requested for %s/%s", timeframe, broker_name, pair)
@@ -552,6 +559,11 @@ class DataContainer:
             _SNAPSHOT_LIMITS["D1"] * _TF_M5_MULTIPLIER["D1"]
             + _TF_M5_MULTIPLIER["D1"]   # one extra for boundary alignment
         )
+        await self._ensure_m5_complete_for_read(
+            broker_name=broker_name,
+            pair=pair,
+            required_m5_count=max_m5_needed,
+        )
         raw_m5 = await self._store.get_candles(
             broker_name, pair, "M5", limit=max_m5_needed + _NULL_FILTER_BUFFER_M5
         )
@@ -560,7 +572,7 @@ class DataContainer:
         if not m5:
             raise ValueError(
                 f"No M5 data available for {broker_name}/{pair}. "
-                "Run initialize() first."
+                "No broker data available yet for this pair."
             )
 
         last = m5[-1]
@@ -574,11 +586,11 @@ class DataContainer:
         )
 
         # Derive all higher timeframes from the fetched M5 data
-        m15 = resample_candles(m5, "M15") if m5 else []
-        m30 = resample_candles(m5, "M30") if m5 else []
-        h1  = resample_candles(m5, "H1")  if m5 else []
-        h4  = resample_candles(m5, "H4")  if m5 else []
-        d1  = resample_candles(m5, "D1")  if m5 else []
+        m15 = resample_candles(m5, "M15", bucket_offset_hours=self._resample_bucket_offset_hours) if m5 else []
+        m30 = resample_candles(m5, "M30", bucket_offset_hours=self._resample_bucket_offset_hours) if m5 else []
+        h1  = resample_candles(m5, "H1", bucket_offset_hours=self._resample_bucket_offset_hours)  if m5 else []
+        h4  = resample_candles(m5, "H4", bucket_offset_hours=self._resample_bucket_offset_hours)  if m5 else []
+        d1  = resample_candles(m5, "D1", bucket_offset_hours=self._resample_bucket_offset_hours)  if m5 else []
 
         snapshot = MarketSnapshot(
             pair=pair,
@@ -637,5 +649,3 @@ class DataContainer:
             ))
         except Exception:
             pass
-
-
