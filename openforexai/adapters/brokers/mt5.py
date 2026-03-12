@@ -34,9 +34,10 @@ class MT5Broker(BrokerBase):
 
         broker = MT5Broker(
             short_name="MT5_PEPPERSTONE",
-            login=12345678,
+            account_id=12345678,
             password="secret",
             server="Pepperstone-Demo",
+            installation_path=r"C:\Program Files\MetaTrader 5\terminal64.exe",
         )
         await broker.connect()
         broker.start_background_tasks(pairs, event_bus, repository)
@@ -45,9 +46,10 @@ class MT5Broker(BrokerBase):
     def __init__(
         self,
         short_name: str,
-        login: int,
+        account_id: int,
         password: str,
         server: str,
+        installation_path: str | None = None,
         monitoring_bus=None,
     ) -> None:
         if not short_name or len(short_name) > 5:
@@ -59,18 +61,21 @@ class MT5Broker(BrokerBase):
             raise RuntimeError("MT5Broker is only supported on Windows.")
         super().__init__(monitoring_bus=monitoring_bus)
         self._short_name = short_name
-        self._login = login
+        self._account_id = account_id
         self._password = password
         self._server = server
+        self._installation_path = installation_path
         self._mt5 = None  # set in connect()
 
     @classmethod
     def from_config(cls, cfg: dict) -> MT5Broker:
+        account_id_raw = cfg.get("account_id", 0)
         return cls(
             short_name=cfg.get("short_name", "MT5"),
-            login=int(cfg.get("login", 0)),
+            account_id=int(account_id_raw),
             password=cfg.get("password", ""),
             server=cfg.get("server", ""),
+            installation_path=cfg.get("installation_path", None),
         )
 
     # ── Identity ──────────────────────────────────────────────────────────────
@@ -84,9 +89,15 @@ class MT5Broker(BrokerBase):
     async def connect(self) -> None:
         import MetaTrader5 as mt5  # type: ignore[import]
 
-        if not mt5.initialize(
-            login=self._login, password=self._password, server=self._server
-        ):
+        init_kwargs: dict[str, str | int] = {
+            "login": self._account_id,
+            "password": self._password,
+            "server": self._server,
+        }
+        if isinstance(self._installation_path, str) and self._installation_path.strip():
+            init_kwargs["path"] = self._installation_path.strip()
+
+        if not mt5.initialize(**init_kwargs):
             raise ConnectionError(f"MT5 initialize failed: {mt5.last_error()}")
         self._mt5 = mt5
 
@@ -303,4 +314,12 @@ class MT5Broker(BrokerBase):
             fill_price=Decimal(str(result.price)) if result.price else None,
             closed_at=datetime.now(UTC),
         )
+
+
+
+
+
+
+
+
 

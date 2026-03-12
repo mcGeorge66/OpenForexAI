@@ -87,19 +87,13 @@ class DataContainer:
         store: AbstractDataContainer | None = None,
         event_bus=None,
         monitoring_bus=None,
-        *,
-        # Backward-compat: old code passed repository=... as a keyword arg
-        repository: AbstractDataContainer | None = None,
     ) -> None:
-        effective_store = store if store is not None else repository
-        if effective_store is None:
+        if store is None:
             raise ValueError(
                 "DataContainer requires a store (AbstractDataContainer). "
-                "Pass it as the first positional argument or as store=... / repository=..."
+                "Pass it as the first positional argument or as store=..."
             )
-        self._store = effective_store
-        # Backward-compat alias: code that accesses self._repository still works
-        self._repository = effective_store
+        self._store = store
         self._event_bus = event_bus
         self._monitoring = monitoring_bus
 
@@ -618,4 +612,5 @@ class DataContainer:
             ))
         except Exception:
             pass
+
 

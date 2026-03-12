@@ -6,7 +6,7 @@ from openforexai.models.account import AccountStatus
 from openforexai.models.agent import AgentDecision
 from openforexai.models.market import Candle
 from openforexai.models.optimization import BacktestResult, PromptCandidate, TradePattern
-from openforexai.models.trade import OrderBookEntry, TradeResult
+from openforexai.models.trade import OrderBookEntry
 
 
 class AbstractRepository(ABC):
@@ -127,16 +127,6 @@ class AbstractRepository(ABC):
         """
         ...
 
-    # ── Trades (legacy, kept for backward compat with existing agents) ────────
-
-    @abstractmethod
-    async def save_trade(self, trade: TradeResult) -> str: ...
-
-    @abstractmethod
-    async def get_trades(
-        self, pair: str | None = None, limit: int = 500
-    ) -> list[TradeResult]: ...
-
     # ── Agent decisions ───────────────────────────────────────────────────────
 
     @abstractmethod
@@ -163,4 +153,6 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     async def save_backtest_result(self, result: BacktestResult) -> str: ...
+
+
 

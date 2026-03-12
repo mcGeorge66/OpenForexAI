@@ -1,13 +1,20 @@
 {
-  // MetaTrader 5 broker module configuration",
-  // This file is managed by the module owner. The system only loads it by name.",
+  // MetaTrader 5 broker module configuration
+  // This file is managed by the module owner. The system only loads it by name.
   "adapter":  "mt5",
-  "login":    "${MT5_LOGIN}",
+  "account_id": "${MT5_ACCOUNT_ID:-0}",
   "password": "${MT5_PASSWORD}",
   "server":   "${MT5_SERVER}",
+  // Optional explicit terminal path, e.g. C:/Program Files/MetaTrader 5/terminal64.exe
+  "installation_path": "${MT5_INSTALLATION_PATH:-}",
   "background_tasks": {
     "account_poll_interval_seconds": 60,
     "sync_interval_seconds": 60,
     "request_agent_reasoning": false
   }
 }
+
+
+
+
+

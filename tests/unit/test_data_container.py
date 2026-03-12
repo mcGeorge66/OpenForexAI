@@ -14,7 +14,7 @@ def _make_container(pairs: list[str] | None = None):
     repo = MockRepository()
     bus = EventBus()
 
-    container = DataContainer(repository=repo, event_bus=bus)
+    container = DataContainer(store=repo, event_bus=bus)
     container.register_broker(broker, pairs)
     return container, broker
 
@@ -42,3 +42,4 @@ async def test_unknown_pair_raises():
     await container.initialize()
     with pytest.raises(ValueError, match="GBPUSD"):
         await container.get_snapshot(MOCK_BROKER_NAME, "GBPUSD")
+

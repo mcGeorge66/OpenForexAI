@@ -134,7 +134,7 @@ function normalizeAgent(raw: Record<string, unknown>, agentId: string): AgentFor
     broker: toText(raw.broker),
     timer_enabled: toBool(timer.enabled, false),
     timer_interval_seconds: toNum(timer.interval_seconds, 300),
-    any_candle: Math.max(1, Math.trunc(toNum(raw.AnyCandle ?? raw.any_candle, 1))),
+    any_candle: Math.max(1, Math.trunc(toNum(raw.AnyCandle, 1))),
     system_prompt: toText(raw.system_prompt),
     event_triggers: toStringList(raw.event_triggers),
     allowed_tools: toStringList(toolCfg.allowed_tools),
@@ -175,7 +175,6 @@ function serializeAgent(form: AgentForm, raw: Record<string, unknown>): Record<s
 
   next.event_triggers = form.event_triggers
   next.AnyCandle = Math.max(1, Math.trunc(form.any_candle))
-  delete next.any_candle
   next.system_prompt = form.system_prompt
   delete next.chat_instruction
 
@@ -628,4 +627,6 @@ export function AgentConfigWizard() {
     </div>
   )
 }
+
+
 
