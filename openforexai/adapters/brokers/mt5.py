@@ -322,12 +322,3 @@ class MT5Broker(BrokerBase):
             fill_price=Decimal(str(result.price)) if result.price else None,
             closed_at=datetime.now(UTC),
         )
-
-
-
-
-
-
-
-
-

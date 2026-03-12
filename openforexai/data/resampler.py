@@ -17,14 +17,23 @@ _TF_MINUTES: dict[str, int] = {
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-def _bucket_start(ts: datetime, target_mins: int) -> datetime:
-    """Floor *ts* down to the nearest *target_mins* boundary (UTC)."""
-    total_mins = int((ts - _EPOCH).total_seconds() / 60)
+def _bucket_start(
+    ts: datetime,
+    target_mins: int,
+    bucket_offset_minutes: int = 0,
+) -> datetime:
+    """Floor *ts* to target boundary, shifted by *bucket_offset_minutes*."""
+    shifted = ts - timedelta(minutes=bucket_offset_minutes)
+    total_mins = int((shifted - _EPOCH).total_seconds() / 60)
     bucketed_mins = (total_mins // target_mins) * target_mins
-    return _EPOCH + timedelta(minutes=bucketed_mins)
+    return _EPOCH + timedelta(minutes=bucketed_mins + bucket_offset_minutes)
 
 
-def resample_candles(candles: list[Candle], target_tf: str) -> list[Candle]:
+def resample_candles(
+    candles: list[Candle],
+    target_tf: str,
+    bucket_offset_hours: int = 0,
+) -> list[Candle]:
     """Aggregate *candles* (oldest-first) into *target_tf* OHLCV bars.
 
     The source timeframe is inferred from ``candles[0].timeframe``.
@@ -54,9 +63,11 @@ def resample_candles(candles: list[Candle], target_tf: str) -> list[Candle]:
             f"of source {source_tf} ({source_mins}m)"
         )
 
+    bucket_offset_minutes = int(bucket_offset_hours) * 60
+
     buckets: dict[datetime, list[Candle]] = {}
     for c in candles:
-        key = _bucket_start(c.timestamp, target_mins)
+        key = _bucket_start(c.timestamp, target_mins, bucket_offset_minutes)
         buckets.setdefault(key, []).append(c)
 
     result: list[Candle] = []
@@ -77,4 +88,3 @@ def resample_candles(candles: list[Candle], target_tf: str) -> list[Candle]:
             )
         )
     return result
-
