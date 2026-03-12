@@ -143,6 +143,29 @@ class DataContainer:
         ]
         await asyncio.gather(*tasks)
 
+
+    async def ensure_pair_ready(self, broker: AbstractBroker, pair: str) -> None:
+        """Register and initialize a broker/pair on demand.
+
+        Useful for ad-hoc tool execution where no active agent has registered
+        the pair during bootstrap.
+        """
+        self.register_broker(broker, [pair])
+        await self._init_pair(broker.short_name, pair)
+
+    async def _ensure_pair_registered_for_read(self, broker_name: str, pair: str) -> None:
+        """Ensure broker/pair is known to the container for read operations."""
+        key = (broker_name, pair)
+        if key in self._registered:
+            return
+        broker = self._brokers.get(broker_name)
+        if broker is None:
+            raise ValueError(
+                f"Broker {broker_name!r} is not registered in DataContainer."
+            )
+        self.register_broker(broker, [pair])
+        await self._init_pair(broker_name, pair)
+
     async def _init_pair(self, broker_name: str, pair: str) -> None:
         key = (broker_name, pair)
 
@@ -187,9 +210,11 @@ class DataContainer:
 
         key = (broker_name, pair)
         if key not in self._registered:
-            _log.debug("Ignoring candle for unregistered key %s/%s", broker_name, pair)
-            return
-
+            broker = self._brokers.get(broker_name)
+            if broker is None:
+                _log.debug("Ignoring candle for unknown broker/pair %s/%s", broker_name, pair)
+                return
+            self.register_broker(broker, [pair])
         candle = Candle(**candle_data)
 
         lock = self._write_locks.get(key)
@@ -456,6 +481,9 @@ class DataContainer:
             Maximum number of *timeframe* candles to return.  Defaults to
             ``_SNAPSHOT_LIMITS[timeframe]`` (300 for M5, 150 for M15, etc.).
         """
+        broker_name = str(broker_name).strip()
+        pair = str(pair).strip().upper()
+        await self._ensure_pair_registered_for_read(broker_name, pair)
         timeframe = timeframe.upper()
         effective_limit = limit if limit is not None else _SNAPSHOT_LIMITS.get(timeframe, 300)
 
@@ -514,12 +542,9 @@ class DataContainer:
         The ``current_tick`` is derived from the last M5 candle close price and
         spread — no separate live-tick API call is needed.
         """
-        key = (broker_name, pair)
-        if key not in self._registered:
-            raise ValueError(
-                f"Pair {pair!r} is not tracked for broker {broker_name!r}. "
-                "Call register_broker() first."
-            )
+        broker_name = str(broker_name).strip()
+        pair = str(pair).strip().upper()
+        await self._ensure_pair_registered_for_read(broker_name, pair)
 
         # Fetch enough M5 bars to derive D1 (the most expensive TF):
         #   60 D1 bars × 288 M5/D1 = 17 280 M5 bars.
