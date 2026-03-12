@@ -20,15 +20,26 @@ Exit codes:
 """
 from __future__ import annotations
 
-import asyncio
+import importlib.util
 import sys
+import sysconfig
 import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).parent
+_THIS_DIR = Path(__file__).resolve().parent
+_ROOT = _THIS_DIR.parent
+
+# Prevent local tools/logging.py from shadowing stdlib logging when running from tools/.
+_this_dir_str = str(_THIS_DIR)
+while _this_dir_str in sys.path:
+    sys.path.remove(_this_dir_str)
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+
 
 
 @dataclass
@@ -54,6 +65,17 @@ def _print_kv(key: str, value: Any) -> None:
     print(f"  {key:<24}: {value}")
 
 
+
+def _force_stdlib_logging_module() -> None:
+    """Ensure stdlib logging is loaded even if local logging.py shadows it."""
+    stdlib_logging = Path(sysconfig.get_paths()["stdlib"]) / "logging" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("logging", stdlib_logging)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["logging"] = module
+
 def _load_config(name: str) -> tuple[Path, dict[str, Any]]:
     cfg_path = _ROOT / "config" / "modules" / "llm" / f"{name}.json5"
     if not cfg_path.exists():
@@ -66,6 +88,7 @@ def _load_config(name: str) -> tuple[Path, dict[str, Any]]:
 
 
 def _create_llm(name: str, cfg: dict[str, Any]):
+    import openforexai.adapters.llm  # noqa: F401
     from openforexai.registry.plugin_registry import PluginRegistry
 
     adapter = cfg.get("adapter", name)
@@ -384,6 +407,8 @@ async def _run_tests(name: str) -> tuple[list[CheckResult], dict[str, Any]]:
 
 
 def main() -> None:
+    _force_stdlib_logging_module()
+    import asyncio
     if len(sys.argv) < 2:
         print(f"Usage: python {sys.argv[0]} <llm_module_name>")
         print(f"  e.g. python {sys.argv[0]} azure_openai")

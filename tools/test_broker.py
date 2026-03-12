@@ -20,13 +20,35 @@ Exit code: 0 = all tests passed, 1 = at least one test failed.
 """
 from __future__ import annotations
 
-import asyncio
+import importlib.util
 import sys
+import sysconfig
 from datetime import UTC
 from pathlib import Path
 
-_ROOT = Path(__file__).parent
+_THIS_DIR = Path(__file__).resolve().parent
+_ROOT = _THIS_DIR.parent
 
+# Prevent local tools/logging.py from shadowing stdlib logging when running from tools/.
+_this_dir_str = str(_THIS_DIR)
+while _this_dir_str in sys.path:
+    sys.path.remove(_this_dir_str)
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+
+
+
+
+def _force_stdlib_logging_module() -> None:
+    """Ensure stdlib logging is loaded even if local logging.py shadows it."""
+    stdlib_logging = Path(sysconfig.get_paths()["stdlib"]) / "logging" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("logging", stdlib_logging)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["logging"] = module
 
 def _load_module_config(name: str) -> dict:
     cfg_path = _ROOT / "config" / "modules" / "broker" / f"{name}.json5"
@@ -37,10 +59,10 @@ def _load_module_config(name: str) -> dict:
     return load_json_config(cfg_path)
 
 
-def _get_test_pair(name: str, cfg: dict) -> str:
-    """Pick a test pair: module config first, then system.json5 fallback."""
-    if cfg.get("pair"):
-        return cfg["pair"]
+def _get_test_pair(name: str, cfg: dict, pair_override: str | None = None) -> str:
+    """Pick a test pair: CLI override, then system.json5 fallback."""
+    if pair_override:
+        return pair_override.strip().upper()
     try:
         from openforexai.config.json_loader import load_json_config
         sys_cfg = load_json_config(_ROOT / "config" / "system.json5")
@@ -53,6 +75,7 @@ def _get_test_pair(name: str, cfg: dict) -> str:
 
 
 def _create_broker(cfg: dict):
+    import openforexai.adapters.brokers  # noqa: F401
     from openforexai.registry.plugin_registry import PluginRegistry
 
     adapter = cfg.get("adapter", "")
@@ -60,9 +83,11 @@ def _create_broker(cfg: dict):
     return BrokerClass.from_config(cfg)
 
 
-async def _run_tests(name: str) -> bool:
+async def _run_tests(name: str, pair_override: str | None = None) -> bool:
+    _force_stdlib_logging_module()
+    import asyncio
     cfg = _load_module_config(name)
-    pair = _get_test_pair(name, cfg)
+    pair = _get_test_pair(name, cfg, pair_override=pair_override)
 
     print(f"\nBroker module : {name!r}")
     print(f"  adapter     : {cfg.get('adapter')}")
@@ -70,7 +95,7 @@ async def _run_tests(name: str) -> bool:
     print(f"  practice    : {cfg.get('practice', 'N/A')}")
     print(f"  api_url     : {cfg.get('api_url', '(default)')}")
     print(f"  api_key     : {'SET' if cfg.get('api_key') else 'MISSING'}")
-    print(f"  pair        : {cfg.get('pair', '(from system.json5)')}")
+    print("  pair        : (from CLI or system.json5)")
     print(f"  test pair   : {pair}")
     print()
 
@@ -248,13 +273,15 @@ async def _run_tests(name: str) -> bool:
 
 
 def main() -> None:
+    import asyncio
     if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} <broker_module_name>")
-        print(f"  e.g. python {sys.argv[0]} oanda")
+        print(f"Usage: python {sys.argv[0]} <broker_module_name> [PAIR]")
+        print(f"  e.g. python {sys.argv[0]} oanda EURUSD")
         sys.exit(1)
 
     name = sys.argv[1]
-    ok = asyncio.run(_run_tests(name))
+    pair_override = sys.argv[2] if len(sys.argv) >= 3 else None
+    ok = asyncio.run(_run_tests(name, pair_override=pair_override))
 
     print()
     if ok:
@@ -267,4 +294,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 

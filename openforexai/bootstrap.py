@@ -176,12 +176,14 @@ async def bootstrap(
         if b and p:
             broker_pairs.setdefault(b, set()).add(p)
 
-    for broker_name, pairs in broker_pairs.items():
-        broker_instance = connected_brokers.get(broker_name)
-        if broker_instance is None:
-            _log.warning("No connected broker for %r — skipping DataContainer registration", broker_name)
-            continue
-        data_container.register_broker(broker_instance, list(pairs))
+    for broker_name, broker_instance in connected_brokers.items():
+        pairs = sorted(broker_pairs.get(broker_name, set()))
+        data_container.register_broker(broker_instance, pairs)
+        if not pairs:
+            _log.info(
+                "Broker registered in DataContainer without startup pairs",
+                broker=broker_name,
+            )
 
     data_container.subscribe_to_bus()
     await data_container.initialize()

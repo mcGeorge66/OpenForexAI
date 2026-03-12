@@ -37,9 +37,10 @@ async def test_get_snapshot_returns_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_unknown_pair_raises():
+async def test_unknown_pair_is_initialized_on_demand():
     container, _ = _make_container()
     await container.initialize()
-    with pytest.raises(ValueError, match="GBPUSD"):
-        await container.get_snapshot(MOCK_BROKER_NAME, "GBPUSD")
+    snapshot = await container.get_snapshot(MOCK_BROKER_NAME, "GBPUSD")
+    assert snapshot.pair == "GBPUSD"
+    assert snapshot.candles_h1
 

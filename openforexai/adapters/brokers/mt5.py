@@ -126,8 +126,10 @@ class MT5Broker(BrokerBase):
         rates = mt5.copy_rates_from_pos(pair, mt5.TIMEFRAME_M5, 0, count)
         if rates is None:
             return []
+        rate_fields = set(getattr(getattr(rates, "dtype", None), "names", ()) or ())
         result: list[Candle] = []
         for r in rates:
+            spread_raw = r["spread"] if "spread" in rate_fields else 0
             result.append(Candle(
                 timestamp=datetime.fromtimestamp(r["time"], tz=UTC),
                 open=Decimal(str(r["open"])),
@@ -135,7 +137,7 @@ class MT5Broker(BrokerBase):
                 low=Decimal(str(r["low"])),
                 close=Decimal(str(r["close"])),
                 tick_volume=int(r["tick_volume"]),
-                spread=Decimal(str(r.get("spread", 0))),
+                spread=Decimal(str(spread_raw)),
                 timeframe="M5",
             ))
         return result
