@@ -39,9 +39,17 @@ OpenForexAI uses configurable AI agents for market analysis, risk-aware trade ex
 ## Quick Start
 
 ```bash
+# You have to be in the install folder
+
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # Linux/macOS: source .venv/bin/activate
+
+# Prepare the frontend
+cd ui
+npm install
+npm run build
+cd ..
 
 pip install -e ".[all]"
 python -m openforexai.main
