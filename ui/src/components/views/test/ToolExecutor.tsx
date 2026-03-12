@@ -110,11 +110,13 @@ export function ToolExecutor() {
   const [selectedTool, setSelectedTool] = useState<string>('')
   const [values, setValues] = useState<Record<string, string>>({})
   const [agentOptions, setAgentOptions] = useState<string[]>([])
+  const [pairOptions, setPairOptions] = useState<string[]>([])
   const [brokerOptions, setBrokerOptions] = useState<string[]>([])
   const [llmOptions, setLlmOptions] = useState<string[]>([])
   const [agentId, setAgentId] = useState<string>('')
   const [brokerName, setBrokerName] = useState<string>('')
   const [llmName, setLlmName] = useState<string>('')
+  const [pair, setPair] = useState<string>('')
   const [contextError, setContextError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<unknown>(null)
@@ -123,7 +125,16 @@ export function ToolExecutor() {
 
   useEffect(() => {
     api.getAgents()
-      .then(resp => setAgentOptions(resp.map(a => a.agent_id)))
+       .then(resp => {
+        const ids = resp.map(a => a.agent_id)
+        setAgentOptions(ids)
+        const pairs = Array.from(new Set(
+          ids
+            .map(id => id.split('-')[1]?.trim().toUpperCase() ?? '')
+            .filter(p => p && p !== 'ALL___'),
+        )).sort()
+        setPairOptions(pairs)
+      })
       .catch(err => setContextError(String(err)))
     api.getModuleNames('broker')
       .then(resp => setBrokerOptions(resp.names))
@@ -146,6 +157,12 @@ export function ToolExecutor() {
       return { ...prev, agent: nextAgent }
     })
   }, [agentId, tool])
+  useEffect(() => {
+    if (!agentId) return
+    const parts = agentId.split('-')
+    const fromId = (parts[1] ?? '').trim().toUpperCase()
+    if (fromId && fromId !== 'ALL___') setPair(fromId)
+  }, [agentId])
 
   const placeOrderIssues = useMemo(() => {
     if (!isPlaceOrder) return [] as string[]
@@ -223,6 +240,7 @@ export function ToolExecutor() {
         agentId.trim() || null,
         brokerName.trim() || null,
         llmName.trim() || null,
+        pair.trim() ? pair.trim().toUpperCase() : null,
       )
       setResult(resp.result)
       setIsError(resp.is_error)
@@ -255,8 +273,8 @@ export function ToolExecutor() {
           </select>
         </div>
 
-        {/* Context: agent + broker adapter + llm */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Context: agent + broker adapter + llm + pair */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="flex-1">
             <label className="block text-xs text-gray-400 mb-1">
               Agent
@@ -304,6 +322,24 @@ export function ToolExecutor() {
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">
+              Pair
+              <span className="text-gray-600 ml-1">(optional)</span>
+            </label>
+            <input
+              list="tool-exec-pair-options"
+              value={pair}
+              onChange={e => setPair(e.target.value.toUpperCase())}
+              placeholder="EURUSD"
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
+            />
+            <datalist id="tool-exec-pair-options">
+              {pairOptions.map(p => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
           </div>
         </div>
         {contextError && (
@@ -415,3 +451,18 @@ export function ToolExecutor() {
     </div>
   )
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

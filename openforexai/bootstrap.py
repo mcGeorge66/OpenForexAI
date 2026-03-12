@@ -124,11 +124,11 @@ async def bootstrap(
         bg_cfg_raw = broker_mod.get("background_tasks", {})
         bg_cfg = bg_cfg_raw if isinstance(bg_cfg_raw, dict) else {}
         account_poll_interval = _int_at_least_one(
-            bg_cfg.get("account_poll_interval_seconds", bg_cfg.get("account_poll_interval", 60)),
+            bg_cfg.get("account_poll_interval_seconds", 60),
             60,
         )
         sync_interval = _int_at_least_one(
-            bg_cfg.get("sync_interval_seconds", bg_cfg.get("sync_interval", 60)),
+            bg_cfg.get("sync_interval_seconds", 60),
             60,
         )
         request_agent_reasoning = bool(bg_cfg.get("request_agent_reasoning", False))
@@ -166,7 +166,7 @@ async def bootstrap(
         _log.info("Registered bridge tools from config", count=bridge_count)
 
     # ── DataContainer ─────────────────────────────────────────────────────────
-    data_container = DataContainer(repository=repository, event_bus=bus, monitoring_bus=monitoring_bus)
+    data_container = DataContainer(store=repository, event_bus=bus, monitoring_bus=monitoring_bus)
 
     # Register each unique broker + its pairs (derived from agent configs)
     broker_pairs: dict[str, set[str]] = {}
@@ -220,6 +220,8 @@ async def bootstrap(
             )
 
     return agents, config_service, bus, data_container, repository, connected_brokers
+
+
 
 
 

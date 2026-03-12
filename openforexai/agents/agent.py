@@ -164,7 +164,7 @@ class Agent:
         self._system_prompt = cfg.get("system_prompt", "")
         self._event_triggers = set(cfg.get("event_triggers", []))
         self._any_candle_divider = self._parse_any_candle_divider(
-            cfg.get("AnyCandle", cfg.get("any_candle", _DEFAULT_ANY_CANDLE_DIVIDER))
+            cfg.get("AnyCandle", _DEFAULT_ANY_CANDLE_DIVIDER)
         )
         self._m5_candle_event_count = 0
 
@@ -191,14 +191,8 @@ class Agent:
                 llm_defaults[key] = llm_module_cfg.get(key)
 
         llm_overrides: dict[str, Any] = {}
-        if isinstance(cfg.get("llm_params"), dict):
-            llm_overrides.update(cfg["llm_params"])
         if isinstance(cfg.get("llm_config"), dict):
             llm_overrides.update(cfg["llm_config"])
-        # Backward compatibility for any legacy top-level keys on agent config.
-        for key in ("temperature", "max_tokens"):
-            if key in cfg:
-                llm_overrides[key] = cfg.get(key)
 
         resolved_llm = {**llm_defaults, **llm_overrides}
 
@@ -613,5 +607,6 @@ class Agent:
             ))
         except Exception:
             pass
+
 
 

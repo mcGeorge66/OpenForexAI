@@ -18,7 +18,6 @@ class EventType(StrEnum):
     ACCOUNT_STATUS_UPDATED = "account_status_updated"
 
     # ── Trading flow ──────────────────────────────────────────────────────────
-    MARKET_DATA_UPDATED = "market_data_updated"     # kept for backward compat
     SIGNAL_GENERATED = "signal_generated"
     SIGNAL_APPROVED = "signal_approved"
     SIGNAL_REJECTED = "signal_rejected"
@@ -69,4 +68,5 @@ class MessageEnvelope(BaseModel):
     acknowledged: bool = False
     processed_at: datetime | None = None
     error: str | None = None
+
 

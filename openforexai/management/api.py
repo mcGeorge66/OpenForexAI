@@ -268,14 +268,8 @@ def _resolve_llm_checker_params(
     resolved = _extract_llm_defaults(module_cfg)
 
     if isinstance(agent_cfg, dict):
-        if isinstance(agent_cfg.get("llm_params"), dict):
-            resolved.update(agent_cfg["llm_params"])
         if isinstance(agent_cfg.get("llm_config"), dict):
             resolved.update(agent_cfg["llm_config"])
-        for key in ("temperature", "max_tokens"):
-            if key in agent_cfg:
-                resolved[key] = agent_cfg.get(key)
-
     if request_temperature is not None:
         resolved["temperature"] = request_temperature
     if request_max_tokens is not None:
@@ -358,12 +352,15 @@ class ToolExecuteRequest(BaseModel):
     )
     broker_name: str | None = Field(
         default=None,
-        description="Configured broker adapter name for tool context. "
-                    "If set, pair is derived from enabled agent config.",
+        description="Configured broker adapter name for tool context.",
     )
     llm_name: str | None = Field(
         default=None,
         description="Configured LLM module name for tool context.",
+    )
+    pair: str | None = Field(
+        default=None,
+        description="Optional pair override for tool context, e.g. EURUSD.",
     )
 
 
@@ -958,30 +955,13 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     derived_pair: str | None = None
-    if selected_agent_cfg and selected_agent_cfg.get("pair"):
+    manual_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
+    if manual_pair:
+        derived_pair = manual_pair
+    elif selected_agent_cfg and selected_agent_cfg.get("pair"):
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
-    elif broker_module_name:
-        enabled_agents = [
-            cfg
-            for cfg in _system_config.get("agents", {}).values()
-            if cfg.get("enable", True)
-        ]
-        pairs = {
-            str(cfg.get("pair")).upper()
-            for cfg in enabled_agents
-            if cfg.get("broker") == broker_module_name and cfg.get("pair")
-        }
-        if len(pairs) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Broker adapter {broker_module_name!r} maps to multiple pairs: {sorted(pairs)}. "
-                    "Tool execution requires one pair per broker adapter."
-                ),
-            )
-        if len(pairs) == 1:
-            derived_pair = next(iter(pairs))
-
+    else:
+        derived_pair = None
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
         broker_name=context_broker_name,
@@ -1065,7 +1045,13 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
     # live broker will fail with their own error, but pure LLM exchange still works.
     broker_disconnected = bool(broker_module_name and broker_instance is None)
 
-    derived_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
+    manual_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
+    if manual_pair:
+        derived_pair = manual_pair
+    elif selected_agent_cfg and selected_agent_cfg.get("pair"):
+        derived_pair = str(selected_agent_cfg.get("pair")).upper()
+    else:
+        derived_pair = None
 
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
@@ -1513,16 +1499,11 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
 
 
 def _resolve_information_doc_path() -> Path:
-    """Resolve information document under config/ with compatibility fallbacks."""
+    """Resolve information document under config/."""
     cfg_root = _project_root() / "config"
-    candidates = [
-        cfg_root / "config.md",
-        cfg_root / "config.md.md",  # compatibility for accidental double extension
-        cfg_root / "README.md",      # legacy filename
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
+    path = cfg_root / "config.md"
+    if path.exists():
+        return path
     raise HTTPException(status_code=404, detail="Config file not found on disk: config.md")
 
 
@@ -1748,6 +1729,19 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

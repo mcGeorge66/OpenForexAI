@@ -99,13 +99,15 @@ export const api = {
                     agent_id?: string | null,
                     broker_name?: string | null,
                     llm_name?: string | null,
+                    pair?: string | null,
                   ) =>
-                    post<ToolExecuteResponse>('/tools/execute', {
+                    post<ToolExecuteResponse>("/tools/execute", {
                       tool_name,
                       arguments: arguments_,
                       agent_id: agent_id || null,
                       broker_name: broker_name || null,
                       llm_name: llm_name || null,
+                      pair: pair || null,
                     }),
   runLlmChecker: (body: LlmCheckerRequest) => post<LlmCheckerResponse>('/test/llm/check', body),
   getConfigView:   () => get<Record<string, unknown>>('/config/view'),
@@ -225,6 +227,8 @@ export interface CandleBar {
   tick_volume: number
   spread: number
 }
+
+
 
 
 
