@@ -69,9 +69,15 @@ class MT5Broker(BrokerBase):
 
     @classmethod
     def from_config(cls, cfg: dict) -> MT5Broker:
+        short_name = str(cfg.get("short_name", "")).strip()
+        if not short_name:
+            raise ValueError(
+                "Missing 'short_name' in broker config. "
+                "Set a unique short_name (1-5 chars)."
+            )
         account_id_raw = cfg.get("account_id", 0)
         return cls(
-            short_name=cfg.get("short_name", "MT5"),
+            short_name=short_name,
             account_id=int(account_id_raw),
             password=cfg.get("password", ""),
             server=cfg.get("server", ""),
@@ -316,14 +322,3 @@ class MT5Broker(BrokerBase):
             fill_price=Decimal(str(result.price)) if result.price else None,
             closed_at=datetime.now(UTC),
         )
-
-
-
-
-
-
-
-
-
-
-
