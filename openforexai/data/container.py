@@ -163,27 +163,6 @@ class DataContainer:
         self.register_broker(broker, [pair])
 
 
-    async def ensure_pair_readyX(self, broker: AbstractBroker, pair: str) -> None:
-        """Register and initialize a broker/pair on demand.
-
-        Useful for ad-hoc tool execution where no active agent has registered
-        the pair during bootstrap.
-        """
-        self.register_broker(broker, [pair])
-        await self._init_pair(broker.short_name, pair)
-
-    async def _ensure_pair_registered_for_read(self, broker_name: str, pair: str) -> None:
-        """Ensure broker/pair is known to the container for read operations."""
-        key = (broker_name, pair)
-        if key in self._registered:
-            return
-        broker = self._brokers.get(broker_name)
-        if broker is None:
-            raise ValueError(
-                f"Broker {broker_name!r} is not registered in DataContainer."
-            )
-        self.register_broker(broker, [pair])
-        await self._init_pair(broker_name, pair)
 
     async def _init_pair(self, broker_name: str, pair: str) -> None:
         key = (broker_name, pair)
