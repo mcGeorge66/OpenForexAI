@@ -107,6 +107,12 @@ class OANDABroker(BrokerBase):
 
     @classmethod
     def from_config(cls, cfg: dict) -> OANDABroker:
+        short_name = str(cfg.get("short_name", "")).strip()
+        if not short_name:
+            raise ValueError(
+                "Missing 'short_name' in broker config. "
+                "Set a unique short_name (1-5 chars)."
+            )
         api_url = cfg.get("api_url", "")
         if not api_url:
             raise ValueError(
@@ -115,7 +121,7 @@ class OANDABroker(BrokerBase):
                 "Live:     https://api-fxtrade.oanda.com/v3"
             )
         return cls(
-            short_name=cfg.get("short_name", "OANDA"),
+            short_name=short_name,
             api_key=cfg.get("api_key", ""),
             account_id=cfg.get("account_id", ""),
             api_url=api_url,
@@ -408,4 +414,3 @@ class OANDABroker(BrokerBase):
             pnl=Decimal(data.get("pl", "0")),
             closed_at=datetime.now(UTC),
         )
-

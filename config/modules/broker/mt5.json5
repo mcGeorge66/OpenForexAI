@@ -2,6 +2,7 @@
   // MetaTrader 5 broker module configuration
   // This file is managed by the module owner. The system only loads it by name.
   "adapter":  "mt5",
+  "short_name": "${MT5_SHORT_NAME:-OXS_T}",
   "account_id": "${MT5_ACCOUNT_ID:-0}",
   "password": "${MT5_PASSWORD}",
   "server":   "${MT5_SERVER}",

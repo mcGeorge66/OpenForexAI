@@ -98,6 +98,7 @@ async def bootstrap(
     broker_module_paths = mod_cfg.get("broker", {})
     connected_brokers: dict[str, Any] = {}
     broker_task_cfg: dict[str, dict[str, Any]] = {}
+    broker_short_name_owner: dict[str, str] = {}
 
     def _int_at_least_one(value: Any, default: int) -> int:
         if isinstance(value, int):
@@ -120,6 +121,20 @@ async def bootstrap(
             continue
 
         broker_instance = BrokerClass.from_config(broker_mod)
+        short_name = str(getattr(broker_instance, "short_name", "")).strip()
+        if not short_name:
+            raise ValueError(
+                f"Broker module {broker_name!r} produced an empty short_name. "
+                "Set a unique short_name (1-5 chars) in the broker module config."
+            )
+        existing_owner = broker_short_name_owner.get(short_name)
+        if existing_owner and existing_owner != broker_name:
+            raise ValueError(
+                "Duplicate broker short_name detected: "
+                f"{short_name!r} is used by both {existing_owner!r} and {broker_name!r}. "
+                "Broker short_name must be globally unique."
+            )
+        broker_short_name_owner[short_name] = broker_name
 
         bg_cfg_raw = broker_mod.get("background_tasks", {})
         bg_cfg = bg_cfg_raw if isinstance(bg_cfg_raw, dict) else {}
@@ -144,6 +159,7 @@ async def bootstrap(
         _log.info(
             "Broker module connected",
             name=broker_name,
+            short_name=short_name,
             adapter=adapter,
             account_poll_interval=account_poll_interval,
             sync_interval=sync_interval,
@@ -222,9 +238,3 @@ async def bootstrap(
             )
 
     return agents, config_service, bus, data_container, repository, connected_brokers
-
-
-
-
-
-

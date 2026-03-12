@@ -113,6 +113,44 @@ _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 _EXPECTED_KEY: str | None = os.environ.get("MANAGEMENT_API_KEY")
 
 
+def _normalize_broker_selector(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _resolve_connected_broker(
+    selector: str | None,
+) -> tuple[str | None, Any | None]:
+    """Resolve a broker by module name or short_name."""
+    normalized = _normalize_broker_selector(selector)
+    if normalized is None:
+        return None, None
+
+    by_module = _connected_brokers.get(normalized)
+    if by_module is not None:
+        return normalized, by_module
+
+    matches: list[tuple[str, Any]] = [
+        (module_name, broker)
+        for module_name, broker in _connected_brokers.items()
+        if str(getattr(broker, "short_name", "")).strip() == normalized
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        modules = ", ".join(module for module, _ in matches)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Broker selector {normalized!r} is ambiguous (matches modules: {modules}). "
+                "Use broker module name."
+            ),
+        )
+    return normalized, None
+
+
 def _check_api_key(api_key: str | None = Depends(_API_KEY_HEADER)) -> None:
     if _EXPECTED_KEY and api_key != _EXPECTED_KEY:
         raise HTTPException(
@@ -931,16 +969,19 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
             )
         selected_agent_cfg = cfg
 
-    broker_module_name = req.broker_name or (
+    broker_selector = req.broker_name or (
         str(selected_agent_cfg.get("broker"))
         if selected_agent_cfg and selected_agent_cfg.get("broker")
         else None
     )
-    broker_instance = _connected_brokers.get(broker_module_name) if broker_module_name else None
-    if broker_module_name and broker_instance is None:
+    broker_module_name, broker_instance = _resolve_connected_broker(broker_selector)
+    if broker_selector and broker_instance is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Broker adapter {broker_module_name!r} is not connected",
+            detail=(
+                f"Broker {broker_selector!r} is not connected "
+                "(use module name or short_name)."
+            ),
         )
     context_broker_name = broker_instance.short_name if broker_instance is not None else None
 
@@ -964,6 +1005,7 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
     else:
         derived_pair = None
+
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
         broker_name=context_broker_name,
@@ -1035,17 +1077,13 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
             )
         selected_agent_cfg = cfg
 
-    broker_module_name = (
-        req.broker_name.strip()
-        if isinstance(req.broker_name, str) and req.broker_name.strip()
-        else None
-    )
-    broker_instance = _connected_brokers.get(broker_module_name) if broker_module_name else None
+    broker_selector = _normalize_broker_selector(req.broker_name)
+    broker_module_name, broker_instance = _resolve_connected_broker(broker_selector)
 
     # LLM checker is diagnostic-first: do not block the whole session when a
-    # selected broker adapter is currently disconnected. Tools that depend on a
+    # selected broker is currently disconnected. Tools that depend on a
     # live broker will fail with their own error, but pure LLM exchange still works.
-    broker_disconnected = bool(broker_module_name and broker_instance is None)
+    broker_disconnected = bool(broker_selector and broker_instance is None)
 
     manual_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
     if manual_pair:
@@ -1054,6 +1092,7 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
     else:
         derived_pair = None
+
 
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
@@ -1074,7 +1113,7 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
         trace.append({
             "type": "warning",
             "stage": "context",
-            "message": f"Broker adapter {broker_module_name!r} is not connected; broker-dependent tools may fail",
+            "message": f"Broker {broker_selector!r} is not connected; broker-dependent tools may fail",
         })
     if unknown_tools:
         trace.append({
@@ -1805,41 +1844,3 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

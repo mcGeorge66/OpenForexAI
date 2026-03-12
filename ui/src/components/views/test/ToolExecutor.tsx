@@ -105,13 +105,18 @@ function coerceArguments(
   return result
 }
 
+type BrokerOption = {
+  value: string
+  label: string
+}
+
 export function ToolExecutor() {
   const { tools, loading: toolsLoading } = useTools()
   const [selectedTool, setSelectedTool] = useState<string>('')
   const [values, setValues] = useState<Record<string, string>>({})
   const [agentOptions, setAgentOptions] = useState<string[]>([])
   const [pairOptions, setPairOptions] = useState<string[]>([])
-  const [brokerOptions, setBrokerOptions] = useState<string[]>([])
+  const [brokerOptions, setBrokerOptions] = useState<BrokerOption[]>([])
   const [llmOptions, setLlmOptions] = useState<string[]>([])
   const [agentId, setAgentId] = useState<string>('')
   const [brokerName, setBrokerName] = useState<string>('')
@@ -137,7 +142,26 @@ export function ToolExecutor() {
       })
       .catch(err => setContextError(String(err)))
     api.getModuleNames('broker')
-      .then(resp => setBrokerOptions(resp.names))
+      .then(async resp => {
+        const rows = await Promise.all(resp.names.map(async moduleName => {
+          try {
+            const cfg = await api.getModuleConfig('broker', moduleName)
+            const configured = typeof cfg.short_name === 'string' ? cfg.short_name.trim() : ''
+            const shortName = configured || moduleName
+            return {
+              value: shortName,
+              label: `${shortName} (${moduleName})`,
+            }
+          } catch {
+            return {
+              value: moduleName,
+              label: moduleName,
+            }
+          }
+        }))
+        rows.sort((a, b) => a.label.localeCompare(b.label))
+        setBrokerOptions(rows)
+      })
       .catch(err => setContextError(String(err)))
     api.getModuleNames('llm')
       .then(resp => setLlmOptions(resp.names))
@@ -170,7 +194,7 @@ export function ToolExecutor() {
     const orderType = (values.order_type || '').toUpperCase()
     const units = Number(values.units)
     if (!brokerName && !agentId) {
-      issues.push('Select a Broker adapter or an Agent context for realistic execution tests.')
+      issues.push('Select a Broker (short name) or an Agent context for realistic execution tests.')
     }
     if (!values.direction) issues.push('direction is required.')
     if (!orderType) issues.push('order_type is required.')
@@ -273,7 +297,7 @@ export function ToolExecutor() {
           </select>
         </div>
 
-        {/* Context: agent + broker adapter + llm + pair */}
+        {/* Context: agent + broker + llm + pair */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="flex-1">
             <label className="block text-xs text-gray-400 mb-1">
@@ -293,7 +317,7 @@ export function ToolExecutor() {
           </div>
           <div className="flex-1">
             <label className="block text-xs text-gray-400 mb-1">
-              Broker adapter
+              Broker
               <span className="text-gray-600 ml-1">(optional)</span>
             </label>
             <select
@@ -302,8 +326,8 @@ export function ToolExecutor() {
               className="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 font-mono"
             >
               <option value="">— none —</option>
-              {brokerOptions.map(name => (
-                <option key={name} value={name}>{name}</option>
+              {brokerOptions.map(opt => (
+                <option key={opt.label} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
