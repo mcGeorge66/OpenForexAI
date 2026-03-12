@@ -163,7 +163,7 @@ class DataContainer:
         self.register_broker(broker, [pair])
 
 
-    async def ensure_pair_ready(self, broker: AbstractBroker, pair: str) -> None:
+    async def ensure_pair_readyX(self, broker: AbstractBroker, pair: str) -> None:
         """Register and initialize a broker/pair on demand.
 
         Useful for ad-hoc tool execution where no active agent has registered
