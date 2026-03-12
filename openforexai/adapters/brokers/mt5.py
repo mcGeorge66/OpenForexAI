@@ -37,7 +37,7 @@ class MT5Broker(BrokerBase):
             account_id=12345678,
             password="secret",
             server="Pepperstone-Demo",
-            installation_path="C:/Program Files/MetaTrader 5/terminal64.exe",
+            installation_path=r"C:\Program Files\MetaTrader 5\terminal64.exe",
         )
         await broker.connect()
         broker.start_background_tasks(pairs, event_bus, repository)
@@ -316,8 +316,6 @@ class MT5Broker(BrokerBase):
             fill_price=Decimal(str(result.price)) if result.price else None,
             closed_at=datetime.now(UTC),
         )
-
-
 
 
 

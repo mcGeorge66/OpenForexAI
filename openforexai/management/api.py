@@ -964,7 +964,6 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
     else:
         derived_pair = None
-
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
         broker_name=context_broker_name,
@@ -1055,7 +1054,6 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
     else:
         derived_pair = None
-
 
     context = ToolContext(
         agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
@@ -1807,10 +1805,6 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
-
-
-
-
 
 
 
