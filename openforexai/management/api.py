@@ -102,6 +102,8 @@ _data_container = None       # DataContainer — shared market data cache
 _repository = None           # AbstractRepository — database access
 _connected_brokers: dict = {}  # broker_name → AbstractBroker live instances
 _config_service = None
+_runtime_agents: dict[str, Any] = {}
+_runtime_agent_tasks: dict[str, asyncio.Task] = {}
 _start_time: float = time.monotonic()
 
 _LLM_CHECKER_LLM_TIMEOUT_SECONDS = 45.0
@@ -1479,24 +1481,95 @@ async def _trigger_agent_config_refresh() -> dict[str, int]:
     }
 
 
+async def _run_runtime_agent(agent) -> None:
+    try:
+        await agent.start()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass
+
+
+async def _apply_runtime_agent_changes(previous_system_config: dict[str, Any]) -> dict[str, Any]:
+    """Start newly enabled agents and stop dynamically started disabled ones."""
+    if _bus is None or _data_container is None or _repository is None:
+        return {"started": 0, "stopped": 0, "refresh": await _trigger_agent_config_refresh()}
+
+    global _runtime_agents, _runtime_agent_tasks
+
+    prev_agents = previous_system_config.get("agents", {}) if isinstance(previous_system_config, dict) else {}
+    next_agents = _system_config.get("agents", {}) if isinstance(_system_config, dict) else {}
+
+    prev_enabled = {
+        agent_id
+        for agent_id, cfg in prev_agents.items()
+        if isinstance(cfg, dict) and cfg.get("enable", True)
+    }
+    next_enabled = {
+        agent_id
+        for agent_id, cfg in next_agents.items()
+        if isinstance(cfg, dict) and cfg.get("enable", True)
+    }
+
+    registered = set(_bus.registered_agents())
+    to_start = sorted(agent_id for agent_id in next_enabled if agent_id not in registered)
+
+    started = 0
+    for agent_id in to_start:
+        from openforexai.agents.agent import Agent
+
+        agent = Agent(
+            agent_id=agent_id,
+            bus=_bus,
+            data_container=_data_container,
+            repository=_repository,
+            monitoring_bus=_monitoring_bus,
+        )
+        task = asyncio.create_task(_run_runtime_agent(agent), name=f"runtime:{agent_id}")
+        _runtime_agents[agent_id] = agent
+        _runtime_agent_tasks[agent_id] = task
+        started += 1
+
+    to_stop = sorted(
+        agent_id
+        for agent_id in prev_enabled
+        if agent_id not in next_enabled and agent_id in _runtime_agents
+    )
+
+    stopped = 0
+    for agent_id in to_stop:
+        agent = _runtime_agents.pop(agent_id, None)
+        if agent is not None:
+            await agent.stop()
+        task = _runtime_agent_tasks.pop(agent_id, None)
+        if task is not None:
+            task.cancel()
+        if _bus is not None:
+            _bus.unregister_agent(agent_id)
+        stopped += 1
+
+    refresh = await _trigger_agent_config_refresh()
+    return {"started": started, "stopped": stopped, "refresh": refresh}
+
+
 @router.put("/config/system")
 async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
     """Persist raw system.json5, refresh memory, and trigger runtime apply."""
     cfg_path = _project_root() / "config" / "system.json5"
     _write_json_file(cfg_path, content)
     global _system_config
+    previous_system_config = copy.deepcopy(_system_config)
     _system_config = (json5.loads(content) if isinstance(content, str) else content)
 
     if _config_service is not None and hasattr(_config_service, "update_config"):
         _config_service.update_config(_system_config)
 
-    refresh = await _trigger_agent_config_refresh()
+    runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
     return {
         "status": "saved",
         "file": "config/system.json5",
-        "runtime_refresh": refresh,
+        "runtime_apply": runtime_apply,
     }
-
 
 def _resolve_information_doc_path() -> Path:
     """Resolve information document under config/."""
@@ -1674,6 +1747,7 @@ def build_app(
     global _bus, _routing_table, _tool_registry, _indicator_registry
     global _monitoring_bus, _system_config, _start_time
     global _data_container, _repository, _connected_brokers, _config_service
+    global _runtime_agents, _runtime_agent_tasks
 
     _bus = bus
     _routing_table = routing_table
@@ -1685,6 +1759,8 @@ def build_app(
     _repository = repository
     _connected_brokers = connected_brokers or {}
     _config_service = config_service
+    _runtime_agents = {}
+    _runtime_agent_tasks = {}
     _start_time = time.monotonic()
 
     app = FastAPI(

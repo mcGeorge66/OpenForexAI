@@ -100,12 +100,14 @@ class BrokerBase(AbstractBroker):
         # Injected after construction via start_background_tasks() to avoid
         # circular imports at module level.
         self._monitoring = monitoring_bus
-        self._tasks: list[asyncio.Task] = []
+        self._pair_tasks: dict[str, list[asyncio.Task]] = {}
+        self._pairs: set[str] = set()
+        self._account_poll_task: asyncio.Task | None = None
+        self._sync_task: asyncio.Task | None = None
+        self._request_agent_reasoning = False
         self._running = False
-        # One adapter = one pair; set by start_background_tasks()
-        self._pair: str = ""
-        # last successfully emitted M5 candle timestamp
-        self._last_m5_time: datetime | None = None
+        # Last successfully emitted M5 candle timestamp per pair.
+        self._last_m5_time_by_pair: dict[str, datetime | None] = {}
 
     # ── Background task lifecycle ─────────────────────────────────────────────
 
@@ -116,37 +118,59 @@ class BrokerBase(AbstractBroker):
         repository,                         # AbstractRepository
         account_poll_interval: int = 60,    # seconds
         sync_interval: int = 60,            # seconds
-        request_agent_reasoning: bool = False,  # Option B if True
+        request_agent_reasoning: bool = False,
         monitoring_bus=None,
     ) -> None:
-        """Create and schedule the three background asyncio Tasks.
+        """Create and schedule broker background asyncio tasks.
 
-        Each adapter instance handles exactly ONE pair.
+        Account and sync tasks are broker-wide and run once per adapter instance.
+        M5 streaming runs per pair.
         """
         if monitoring_bus is not None:
             self._monitoring = monitoring_bus
-        self._pair = pair
-        self._running = True
-        self._tasks = [
+        if not self._running:
+            self._running = True
+
+        self._pairs.add(pair)
+        self._last_m5_time_by_pair.setdefault(pair, None)
+        self._request_agent_reasoning = self._request_agent_reasoning or request_agent_reasoning
+
+        if self._account_poll_task is None or self._account_poll_task.done():
+            self._account_poll_task = asyncio.create_task(
+                self._account_poll_loop(repository, account_poll_interval),
+                name=f"{self.short_name}_account_poll",
+            )
+
+        if self._sync_task is None or self._sync_task.done():
+            self._sync_task = asyncio.create_task(
+                self._sync_loop(repository, event_bus, sync_interval),
+                name=f"{self.short_name}_sync_loop",
+            )
+
+        existing = self._pair_tasks.get(pair)
+        if existing and any(not task.done() for task in existing):
+            return
+
+        self._pair_tasks[pair] = [
             asyncio.create_task(
                 self._m5_loop(pair, event_bus),
                 name=f"{self.short_name}_{pair}_m5_loop",
-            ),
-            asyncio.create_task(
-                self._account_poll_loop(repository, account_poll_interval),
-                name=f"{self.short_name}_{pair}_account_poll",
-            ),
-            asyncio.create_task(
-                self._sync_loop(pair, repository, event_bus, sync_interval, request_agent_reasoning),
-                name=f"{self.short_name}_{pair}_sync_loop",
             ),
         ]
 
     def stop_background_tasks(self) -> None:
         self._running = False
-        for task in self._tasks:
-            task.cancel()
-        self._tasks.clear()
+        if self._account_poll_task is not None:
+            self._account_poll_task.cancel()
+            self._account_poll_task = None
+        if self._sync_task is not None:
+            self._sync_task.cancel()
+            self._sync_task = None
+        for tasks in self._pair_tasks.values():
+            for task in tasks:
+                task.cancel()
+        self._pair_tasks.clear()
+        self._pairs.clear()
 
     # ── M5 streaming loop ─────────────────────────────────────────────────────
 
@@ -163,14 +187,15 @@ class BrokerBase(AbstractBroker):
                 try:
                     expected_open = self._expected_latest_m5_open()
                     candle = await self.fetch_latest_m5_candle(pair)
+                    last_m5 = self._last_m5_time_by_pair.get(pair)
                     if (
                         candle is None
                         or candle.timestamp < expected_open
-                        or (self._last_m5_time is not None and candle.timestamp <= self._last_m5_time)
+                        or (last_m5 is not None and candle.timestamp <= last_m5)
                     ):
                         synth_ts = expected_open
-                        if self._last_m5_time is not None and synth_ts <= self._last_m5_time:
-                            synth_ts = self._last_m5_time + timedelta(minutes=5)
+                        if last_m5 is not None and synth_ts <= last_m5:
+                            synth_ts = last_m5 + timedelta(minutes=5)
                         candle = self._build_null_m5_candle(synth_ts)
 
                     self._emit(
@@ -187,7 +212,7 @@ class BrokerBase(AbstractBroker):
                     )
 
                     # ── Gap detection ─────────────────────────────────────────
-                    last_ts = self._last_m5_time
+                    last_ts = self._last_m5_time_by_pair.get(pair)
                     if last_ts is not None:
                         expected = last_ts + timedelta(minutes=5)
                         if candle.timestamp > expected + timedelta(seconds=30):
@@ -217,7 +242,7 @@ class BrokerBase(AbstractBroker):
                                 },
                             ))
 
-                    self._last_m5_time = candle.timestamp
+                    self._last_m5_time_by_pair[pair] = candle.timestamp
 
                     # ── Publish candle to event bus ───────────────────────────
                     await event_bus.publish(AgentMessage(
@@ -299,88 +324,89 @@ class BrokerBase(AbstractBroker):
 
     async def _sync_loop(
         self,
-        pair: str,
         repository,
         event_bus,
         interval_seconds: int,
-        request_agent_reasoning: bool,
     ) -> None:
         """Detect broker-side closes (SL/TP hits) and update the order book.
 
-        Operates only on the entries for this adapter's pair.
+        Broker positions are fetched once per cycle, then checked against each
+        configured pair to avoid duplicate broker reads.
         """
         source = f"broker.{self.short_name}"
-        source_agent_id = _adapter_agent_id(self.short_name, pair)
         while self._running:
             await asyncio.sleep(interval_seconds)
             try:
-                self._emit(source, MonitoringEventType.SYNC_CHECK_STARTED,
-                           broker_name=self.short_name, pair=pair)
-
                 broker_positions = await self.get_open_positions()
                 broker_ids = {p.broker_position_id for p in broker_positions}
 
-                local_open = await repository.get_open_order_book_entries(
-                    self.short_name, pair
-                )
-                now = datetime.now(UTC)
-                discrepancies = 0
+                for pair in sorted(self._pairs):
+                    source_agent_id = _adapter_agent_id(self.short_name, pair)
+                    self._emit(
+                        source, MonitoringEventType.SYNC_CHECK_STARTED,
+                        broker_name=self.short_name, pair=pair,
+                    )
 
-                for entry in local_open:
-                    if entry.broker_order_id and entry.broker_order_id not in broker_ids:
-                        discrepancies += 1
-                        close_reason = CloseReason.SYNC_DETECTED
+                    local_open = await repository.get_open_order_book_entries(
+                        self.short_name, pair
+                    )
+                    now = datetime.now(UTC)
+                    discrepancies = 0
 
-                        await repository.update_order_book_entry(
-                            str(entry.id),
-                            {
-                                "status": OrderStatus.CLOSED,
-                                "close_reason": close_reason,
-                                "closed_at": now,
-                                "last_broker_sync": now,
-                                "sync_confirmed": True,
-                            },
-                        )
+                    for entry in local_open:
+                        if entry.broker_order_id and entry.broker_order_id not in broker_ids:
+                            discrepancies += 1
+                            close_reason = CloseReason.SYNC_DETECTED
 
-                        self._emit(
-                            source, MonitoringEventType.SYNC_DISCREPANCY_FOUND,
-                            broker_name=self.short_name, pair=pair,
-                            entry_id=str(entry.id),
-                            broker_order_id=entry.broker_order_id,
-                        )
+                            await repository.update_order_book_entry(
+                                str(entry.id),
+                                {
+                                    "status": OrderStatus.CLOSED,
+                                    "close_reason": close_reason,
+                                    "closed_at": now,
+                                    "last_broker_sync": now,
+                                    "sync_confirmed": True,
+                                },
+                            )
 
-                        await event_bus.publish(AgentMessage(
-                            event_type=EventType.ORDER_BOOK_SYNC_DISCREPANCY,
-                            source_agent_id=source_agent_id,
-                            payload={
-                                "broker_name": self.short_name,
-                                "entry_id": str(entry.id),
-                                "pair": pair,
-                                "direction": entry.direction.value,
-                                "close_reason": close_reason.value,
-                                "request_agent_reasoning": request_agent_reasoning,
-                            },
-                        ))
-                        self._emit(
-                            source, MonitoringEventType.SYNC_AGENT_NOTIFIED,
-                            broker_name=self.short_name, pair=pair,
-                            entry_id=str(entry.id),
-                            request_reasoning=request_agent_reasoning,
-                        )
+                            self._emit(
+                                source, MonitoringEventType.SYNC_DISCREPANCY_FOUND,
+                                broker_name=self.short_name, pair=pair,
+                                entry_id=str(entry.id),
+                                broker_order_id=entry.broker_order_id,
+                            )
 
-                self._emit(
-                    source, MonitoringEventType.SYNC_CHECK_COMPLETED,
-                    broker_name=self.short_name, pair=pair,
-                    positions_at_broker=len(broker_ids),
-                    local_open=len(local_open),
-                    discrepancies=discrepancies,
-                )
+                            await event_bus.publish(AgentMessage(
+                                event_type=EventType.ORDER_BOOK_SYNC_DISCREPANCY,
+                                source_agent_id=source_agent_id,
+                                payload={
+                                    "broker_name": self.short_name,
+                                    "entry_id": str(entry.id),
+                                    "pair": pair,
+                                    "direction": entry.direction.value,
+                                    "close_reason": close_reason.value,
+                                    "request_agent_reasoning": self._request_agent_reasoning,
+                                },
+                            ))
+                            self._emit(
+                                source, MonitoringEventType.SYNC_AGENT_NOTIFIED,
+                                broker_name=self.short_name, pair=pair,
+                                entry_id=str(entry.id),
+                                request_reasoning=self._request_agent_reasoning,
+                            )
+
+                    self._emit(
+                        source, MonitoringEventType.SYNC_CHECK_COMPLETED,
+                        broker_name=self.short_name, pair=pair,
+                        positions_at_broker=len(broker_ids),
+                        local_open=len(local_open),
+                        discrepancies=discrepancies,
+                    )
 
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.exception("Sync loop error broker=%s pair=%s: %s",
-                               self.short_name, pair, exc)
+                _log.exception("Sync loop error broker=%s: %s", self.short_name, exc)
 
     # ── Trigger a manual sync (callable by agents as a tool) ─────────────────
 
@@ -513,6 +539,8 @@ class BrokerBase(AbstractBroker):
             ))
         except Exception:
             pass  # monitoring must never crash the system
+
+
 
 
 
