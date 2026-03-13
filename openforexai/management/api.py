@@ -59,6 +59,13 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from openforexai.config.json_loader import load_json_config
+from openforexai.management.package_io import (
+    apply_import_package,
+    build_export_package,
+    dump_json5_text,
+    parse_json5_text,
+    validate_package,
+)
 
 # ── Agent-query response registry ────────────────────────────────────────────
 # Maps correlation_id → asyncio.Future.  Populated by ask_agent(); resolved by
@@ -445,6 +452,35 @@ class LLMCheckerResponse(BaseModel):
     total_tokens: int
     stop_reason: str
     trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PackageMappingRequest(BaseModel):
+    broker_map: dict[str, str] = Field(default_factory=dict)
+    llm_map: dict[str, str] = Field(default_factory=dict)
+    agent_id_map: dict[str, str] = Field(default_factory=dict)
+    agent_id_prefix: str = ""
+
+
+class PackageExportRequest(BaseModel):
+    agent_ids: list[str] = Field(default_factory=list)
+    include_routing: bool = True
+    include_agent_tools: bool = True
+    include_modules_snapshot: bool = True
+    strict_dependencies: bool = False
+
+
+class PackageValidateRequest(BaseModel):
+    content: str
+    mapping: PackageMappingRequest = Field(default_factory=PackageMappingRequest)
+    replace_existing_agents: bool = False
+
+
+class PackageImportRequest(BaseModel):
+    content: str
+    mapping: PackageMappingRequest = Field(default_factory=PackageMappingRequest)
+    replace_existing_agents: bool = False
+    import_routing: bool = True
+    import_agent_tools: bool = True
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -1488,6 +1524,104 @@ async def get_system_config_text() -> dict[str, str]:
     cfg_path = _project_root() / "config" / "system.json5"
     return {"text": _read_text_file(cfg_path)}
 
+
+@router.post("/config/packages/export")
+async def export_agent_package(req: PackageExportRequest) -> dict[str, Any]:
+    """Export a portable multi-agent package as JSON5 text."""
+    project_root = _project_root()
+    package = build_export_package(
+        _system_config,
+        selected_agent_ids=req.agent_ids,
+        include_routing=req.include_routing,
+        include_agent_tools=req.include_agent_tools,
+        include_modules_snapshot=req.include_modules_snapshot,
+        event_routing_path=project_root / "config" / "RunTime" / "event_routing.json5",
+        agent_tools_path=project_root / "config" / "RunTime" / "agent_tools.json5",
+        strict_dependencies=req.strict_dependencies,
+    )
+    return {
+        "package": package,
+        "text": dump_json5_text(package),
+    }
+
+
+@router.post("/config/packages/validate")
+async def validate_agent_package(req: PackageValidateRequest) -> dict[str, Any]:
+    """Validate a package against local modules/tools and mapping rules."""
+    package = parse_json5_text(req.content)
+    known_tools = set()
+    if _tool_registry is not None:
+        known_tools = {tool.name for tool in _tool_registry.all_tools()}
+    result = validate_package(
+        package,
+        current_system_config=_system_config,
+        known_tools=known_tools,
+        mapping=req.mapping.model_dump(),
+        replace_existing_agents=req.replace_existing_agents,
+    )
+    return result
+
+
+@router.post("/config/packages/import")
+async def import_agent_package(req: PackageImportRequest) -> dict[str, Any]:
+    """Import a validated package and apply runtime refresh/reload."""
+    global _system_config
+    package = parse_json5_text(req.content)
+    known_tools = set()
+    if _tool_registry is not None:
+        known_tools = {tool.name for tool in _tool_registry.all_tools()}
+
+    validation = validate_package(
+        package,
+        current_system_config=_system_config,
+        known_tools=known_tools,
+        mapping=req.mapping.model_dump(),
+        replace_existing_agents=req.replace_existing_agents,
+    )
+    if not validation.get("ok"):
+        return {
+            "status": "invalid",
+            **validation,
+        }
+
+    project_root = _project_root()
+    next_system, next_routing, next_agent_tools = apply_import_package(
+        package,
+        current_system_config=_system_config,
+        mapping=req.mapping.model_dump(),
+        replace_existing_agents=req.replace_existing_agents,
+        import_routing=req.import_routing,
+        import_agent_tools=req.import_agent_tools,
+        event_routing_path=project_root / "config" / "RunTime" / "event_routing.json5",
+        agent_tools_path=project_root / "config" / "RunTime" / "agent_tools.json5",
+    )
+
+    _write_json_file(project_root / "config" / "system.json5", next_system)
+    if req.import_routing:
+        _write_json_file(project_root / "config" / "RunTime" / "event_routing.json5", next_routing)
+    if req.import_agent_tools:
+        _write_json_file(project_root / "config" / "RunTime" / "agent_tools.json5", next_agent_tools)
+
+    previous_system_config = copy.deepcopy(_system_config)
+    _system_config = next_system
+
+    if _config_service is not None and hasattr(_config_service, "update_config"):
+        _config_service.update_config(_system_config)
+
+    runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
+
+    if _routing_table is not None and req.import_routing:
+        try:
+            _routing_table.load_rules_from_file(project_root / "config" / "RunTime" / "event_routing.json5")
+        except Exception:
+            pass
+
+    return {
+        "status": "imported",
+        "runtime_apply": runtime_apply,
+        "validation": validation,
+    }
+
 async def _trigger_agent_config_refresh() -> dict[str, int]:
     """Ask ConfigService to resend config for all running enabled agents."""
     if _bus is None:
@@ -1844,3 +1978,5 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
+
+

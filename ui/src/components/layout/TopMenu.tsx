@@ -1,5 +1,5 @@
 /**
- * TopMenu — horizontal tab bar: Action | Monitor | Config | Test
+ * TopMenu — horizontal tab bar: Action | Test | Config | Monitor
  */
 
 export type TopSection = 'action' | 'monitor' | 'config' | 'test'
@@ -11,9 +11,9 @@ interface TopMenuProps {
 
 const ITEMS: Array<{ id: TopSection; label: string }> = [
   { id: 'action',  label: 'Action'  },
-  { id: 'monitor', label: 'Monitor' },
-  { id: 'config',  label: 'Config'  },
   { id: 'test',    label: 'Test'    },
+  { id: 'config',  label: 'Config'  },
+  { id: 'monitor', label: 'Monitor' },
 ]
 
 export function TopMenu({ active, onSelect }: TopMenuProps) {
@@ -37,3 +37,5 @@ export function TopMenu({ active, onSelect }: TopMenuProps) {
     </nav>
   )
 }
+
+

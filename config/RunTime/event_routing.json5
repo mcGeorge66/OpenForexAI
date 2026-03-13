@@ -1,206 +1,164 @@
 {
-  // OpenForexAI — Event Routing Rules v2
-  // 
-  // Rules are evaluated in ascending priority order (lower number = higher priority).",
-  // Multiple rules may match a single message — all matching targets receive it.",
-  // 
-  // Agent ID format: [BROKER(5)]-[PAIR(6)]-[TYPE(2)]-[NAME(1-5)]",
-  //   AA (Analysis Agent) | BA (Broker Agent) | GA (Global Agent)",
-  // 
-  // Communication topology:",
-  //   AA ↔ BA  same broker (bidirectional)",
-  //   BA ↔ GA  any broker ↔ any global agent",
-  //   GA  →  all agents (broadcast capable)",
-  // 
-  // Special 'to' values:",
-  //   '@handlers'  — legacy handler-subscribers (DataContainer, BrokerBase)",
-  //   '*'          — broadcast to ALL registered agents",
-  //   '{sender.broker}-...' — template substitution from sender ID parts"
-
-
   "rules": [
-
     {
       "id": "config_request_to_service",
       "description": "Any agent startup → ConfigService",
       "event": "agent_config_requested",
-      "from":  "*",
-      "to":    "SYSTM-ALL___-GA-CFGSV",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-CFGSV",
       "priority": 1
     },
-
     {
       "id": "m5_candle_to_handlers",
       "description": "New M5 candle → DataContainer (legacy handler)",
       "event": "m5_candle_available",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 10
     },
     {
       "id": "m5_candle_to_matching_aa",
       "description": "New M5 candle from broker adapter → matching AA (same broker+pair)",
       "event": "m5_candle_available",
-      "from":  "*-*-AD-ADPT",
-      "to":    "{sender.broker}-{sender.pair}-AA-*",
+      "from": "*-*-AD-ADPT",
+      "to": "{sender.broker}-{sender.pair}-AA-*",
       "priority": 11
     },
-
     {
       "id": "candle_gap_to_handlers",
       "event": "candle_gap_detected",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 10
     },
-
     {
       "id": "candle_repair_requested_to_handlers",
       "event": "candle_repair_requested",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 10
     },
-
     {
       "id": "candle_repair_completed_to_handlers",
       "event": "candle_repair_completed",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 10
     },
-
     {
       "id": "account_status_to_handlers",
       "description": "Account status update → handlers",
       "event": "account_status_updated",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 10
     },
-
     {
       "id": "routing_reload_to_handlers",
       "event": "routing_reload_requested",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 5
     },
-
     {
       "id": "aa_signal_to_ba",
       "description": "AA signal → BA of the same broker",
       "event": "signal_generated",
-      "from":  "*-*-AA-*",
-      "to":    "{sender.broker}-ALL___-BA-*",
+      "from": "*-*-AA-*",
+      "to": "{sender.broker}-ALL___-BA-*",
       "priority": 20
     },
-
     {
       "id": "aa_analysis_to_ba",
       "description": "AA analysis result → BA of the same broker",
       "event": "analysis_result",
-      "from":  "*-*-AA-*",
-      "to":    "{sender.broker}-ALL___-BA-*",
+      "from": "*-*-AA-*",
+      "to": "{sender.broker}-ALL___-BA-*",
       "priority": 20
     },
-
     {
       "id": "ba_approved_to_aa",
       "description": "BA approval → all AAs of the same broker",
       "event": "signal_approved",
-      "from":  "*-ALL___-BA-*",
-      "to":    "{sender.broker}-*-AA-*",
+      "from": "*-ALL___-BA-*",
+      "to": "{sender.broker}-*-AA-*",
       "priority": 20
     },
-
     {
       "id": "ba_rejected_to_aa",
       "description": "BA rejection → all AAs of the same broker",
       "event": "signal_rejected",
-      "from":  "*-ALL___-BA-*",
-      "to":    "{sender.broker}-*-AA-*",
+      "from": "*-ALL___-BA-*",
+      "to": "{sender.broker}-*-AA-*",
       "priority": 20
     },
-
     {
       "id": "ba_prompt_update_to_aa",
       "description": "BA prompt update → all AAs of the same broker",
       "event": "prompt_updated",
-      "from":  "*-ALL___-BA-*",
-      "to":    "{sender.broker}-*-AA-*",
+      "from": "*-ALL___-BA-*",
+      "to": "{sender.broker}-*-AA-*",
       "priority": 20
     },
-
     {
       "id": "analysis_requested_to_ga",
       "description": "Analysis request → all Global Agents",
       "event": "analysis_requested",
-      "from":  "*",
-      "to":    "GLOBL-ALL___-GA-*",
+      "from": "*",
+      "to": "GLOBL-ALL___-GA-*",
       "priority": 20
     },
-
     {
       "id": "ga_prompt_broadcast",
       "description": "GA prompt update → all agents",
       "event": "prompt_updated",
-      "from":  "GLOBL-*-GA-*",
-      "to":    "*-*-*-*",
+      "from": "GLOBL-*-GA-*",
+      "to": "*-*-*-*",
       "priority": 25
     },
-
     {
       "id": "risk_breach_to_ba",
       "description": "Risk breach → BA of the same broker",
       "event": "risk_breach",
-      "from":  "*",
-      "to":    "{sender.broker}-ALL___-BA-*",
+      "from": "*",
+      "to": "{sender.broker}-ALL___-BA-*",
       "priority": 25
     },
-
     {
       "id": "ob_sync_to_ba",
       "description": "Order-book sync discrepancy → BA of the same broker",
       "event": "order_book_sync_discrepancy",
-      "from":  "*",
-      "to":    "{sender.broker}-ALL___-BA-*",
+      "from": "*",
+      "to": "{sender.broker}-ALL___-BA-*",
       "priority": 30
     },
-
     {
       "id": "position_closed_to_handlers",
       "event": "position_closed",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 30
     },
-
     {
       "id": "order_placed_to_handlers",
       "event": "order_placed",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 30
     },
-
     {
       "id": "ob_close_reasoning_to_handlers",
       "event": "order_book_close_reasoning",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 30
     },
-
     {
       "id": "optimization_complete_to_handlers",
       "event": "optimization_complete",
-      "from":  "*",
-      "to":    "@handlers",
+      "from": "*",
+      "to": "@handlers",
       "priority": 40
     }
-
   ]
 }
-
-

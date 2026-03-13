@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { MonitoringEvent } from '@/api/client'
-import { ArrowUp, Trash2, X } from 'lucide-react'
+import { ArrowUp, Trash2, X, Copy } from 'lucide-react'
 
 // ── Event-type colour mapping (mirrors tools/monitor.py _TYPE_COLOUR) ─────────
 
@@ -151,6 +151,14 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
     .replace(/\\n/g, '\n')
     .replace(/\\"/g, '"')
 
+  const copyPayload = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonText)
+    } catch {
+      // Ignore clipboard errors silently.
+    }
+  }
+
   return (
     <div
       ref={containerRef}
@@ -186,14 +194,24 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
             </>
           )}
         </div>
-        <button
-          onMouseDown={e => e.stopPropagation()}
-          onClick={onClose}
-          className="flex-shrink-0 ml-2 text-gray-500 hover:text-white transition-colors"
-          title="Close (Esc)"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1 ml-2">
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={() => void copyPayload()}
+            className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
+            title="Copy payload"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={onClose}
+            className="flex-shrink-0 text-gray-500 hover:text-white transition-colors"
+            title="Close (Esc)"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Payload content */}
@@ -332,3 +350,4 @@ export function EventStream({ events, connected, filter, onClear }: EventStreamP
     </div>
   )
 }
+
