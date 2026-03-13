@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type CandleBar } from '@/api/client'
 import { useAgents } from '@/hooks/useAgents'
 import { useMonitoringStream } from '@/hooks/useMonitoringStream'
-import { Send, Bot, User } from 'lucide-react'
+import { Send, Bot, User, Copy } from 'lucide-react'
 import {
   CandlestickSeries,
   HistogramSeries,
@@ -283,6 +283,7 @@ export function AgentChat() {
   const [candlesLoading, setCandlesLoading] = useState(false)
   const [candlesError, setCandlesError] = useState<string | null>(null)
   const [chartTimeframe, setChartTimeframe] = useState<'M5' | 'M15' | 'M30' | 'H1'>('M5')
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { events: candleEvents } = useMonitoringStream({
     filter: ['m5_candle_queued'],
     enabled: Boolean(selectedAgent && selectedAgent.includes('-AA-')),
@@ -421,6 +422,16 @@ export function AgentChat() {
     }
   }
 
+  const copyMessage = async (id: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessageId(id)
+      window.setTimeout(() => setCopiedMessageId(current => (current === id ? null : current)), 1200)
+    } catch {
+      // Ignore clipboard errors silently.
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2">
@@ -517,6 +528,14 @@ export function AgentChat() {
                       <span className="text-blue-400">{msg.agentId}</span>
                     )}
                     <span>{msg.timestamp}</span>
+                    <button
+                      onClick={() => void copyMessage(msg.id, msg.content)}
+                      title="Copy message text"
+                      className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-200"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedMessageId === msg.id ? 'Copied' : 'Copy'}</span>
+                    </button>
                   </div>
                   <div className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words ${
                     msg.role === 'user'
@@ -581,8 +600,7 @@ export function AgentChat() {
               </p>
             )}
             {selectedAgent && selectedAgent.includes('-AA-') && (
-              <div className="h-full min-h-[280px] flex flex-col gap-3">
-                <div className="flex items-center gap-3">
+              <div className="h-full min-h-[280px] flex flex-col gap-3">`r`n                <div className="flex items-center gap-3">
                   <p className="text-xs text-gray-400">
                     Last 100 {chartTimeframe} candles for {selectedAgent}
                   </p>
@@ -597,12 +615,16 @@ export function AgentChat() {
                     <option value="M30">M30</option>
                     <option value="H1">H1</option>
                   </select>
-                </div>
-                {candlesLoading && (
-                  <p className="text-sm text-gray-500 animate-pulse">
+                  <span
+                    className={[
+                      'text-xs min-w-[130px] text-right',
+                      candlesLoading ? 'text-gray-500 animate-pulse' : 'text-transparent',
+                    ].join(' ')}
+                    aria-live="polite"
+                  >
                     Refreshing candles...
-                  </p>
-                )}
+                  </span>
+                </div>
                 {candlesError && <p className="text-sm text-red-400">Error: {candlesError}</p>}
                 <>
                   <div className="h-1/2 min-h-[260px]">
@@ -626,3 +648,9 @@ export function AgentChat() {
     </div>
   )
 }
+
+
+
+
+
+

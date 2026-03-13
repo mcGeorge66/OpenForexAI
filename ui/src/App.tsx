@@ -23,6 +23,7 @@ import { ModuleConfigViewer } from '@/components/views/config/ModuleConfigViewer
 import { EventRoutingEditor } from '@/components/views/config/EventRoutingEditor'
 import { BridgeToolsEditor } from '@/components/views/config/BridgeToolsEditor'
 import { AgentConfigWizard } from '@/components/views/config/AgentConfigWizard'
+import { PackageManager } from '@/components/views/config/PackageManager'
 import { InformationView } from '@/components/views/config/InformationView'
 import { ToolExecutor } from '@/components/views/test/ToolExecutor'
 import { LlmChecker } from '@/components/views/test/LlmChecker'
@@ -112,6 +113,7 @@ export default function App() {
 
       case 'config': {
         if (activeSub === 'information') return <InformationView key="information" />
+        if (activeSub === 'package_manager') return <PackageManager key="package-manager" />
         if (activeSub === 'agent_wizard') return <AgentConfigWizard key="agent-wizard" />
         if (activeSub === 'llm') return <ModuleConfigViewer moduleType="llm" key="llm" />
         if (activeSub === 'broker') return <ModuleConfigViewer moduleType="broker" key="broker" />

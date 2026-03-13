@@ -132,6 +132,9 @@ export const api = {
                      getText(`/config/modules/${moduleType}/${name}/raw_text`),
   saveModuleConfigRaw: (moduleType: string, name: string, content: Record<string, unknown> | string) =>
                      put<{ status: string; file: string }>(`/config/modules/${moduleType}/${name}/raw`, content),
+  exportAgentPackage: (body: PackageExportRequest) => post<PackageExportResponse>('/config/packages/export', body),
+  validateAgentPackage: (body: PackageValidateRequest) => post<PackageValidationResponse>('/config/packages/validate', body),
+  importAgentPackage: (body: PackageImportRequest) => post<PackageImportResponse>('/config/packages/import', body),
   injectEvent:     (body: EventInjectRequest) => post<{ message_id: string }>('/events', body),
 }
 
@@ -232,5 +235,62 @@ export interface CandleBar {
 
 
 
+
+
+
+export interface PackageMapping {
+  broker_map?: Record<string, string>
+  llm_map?: Record<string, string>
+  agent_id_map?: Record<string, string>
+  agent_id_prefix?: string
+}
+
+export interface PackageExportRequest {
+  agent_ids?: string[]
+  include_routing?: boolean
+  include_agent_tools?: boolean
+  include_modules_snapshot?: boolean
+  strict_dependencies?: boolean
+}
+
+export interface PackageValidateRequest {
+  content: string
+  mapping?: PackageMapping
+  replace_existing_agents?: boolean
+}
+
+export interface PackageImportRequest {
+  content: string
+  mapping?: PackageMapping
+  replace_existing_agents?: boolean
+  import_routing?: boolean
+  import_agent_tools?: boolean
+}
+
+export interface PackageProblem {
+  level: 'error' | 'warning' | string
+  path: string
+  message: string
+}
+
+export interface PackageValidationResponse {
+  ok: boolean
+  problems: PackageProblem[]
+  preview?: Record<string, unknown>
+  status?: string
+}
+
+export interface PackageExportResponse {
+  package: Record<string, unknown>
+  text: string
+}
+
+export interface PackageImportResponse {
+  status: string
+  runtime_apply?: Record<string, unknown>
+  validation?: PackageValidationResponse
+  ok?: boolean
+  problems?: PackageProblem[]
+}
 
 

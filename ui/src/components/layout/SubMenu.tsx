@@ -23,6 +23,7 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
   ],
   config: [
     { id: 'information',  label: 'Information'   },
+    { id: 'package_manager', label: 'Package Manager' },
     { id: 'agent_wizard', label: 'Agent Wizard'  },
     { id: 'system',       label: 'System Config'  },
     { id: 'agent_tools',  label: 'Agent Tools'    },
@@ -70,5 +71,6 @@ export function SubMenu({ section, active, onSelect }: SubMenuProps) {
 }
 
 export { SUB_ITEMS }
+
 
 

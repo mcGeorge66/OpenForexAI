@@ -1,7 +1,26 @@
-# System Configuration
+[Back to Documentation Index](./README.md)
 
+# config — System Configuration
 
-## Here is room for your info.
+Central configuration files for OpenForexAI. The directory **[config]** is the **single source of truth** for all system settings.
+
+## Structure
+
+```
+config/
+├── system.json5              # Central config — agents, modules, database, system
+├── RunTime/
+│   ├── agent_tools.json5     # Tool permissions, tiers, bridge tools
+│   └── event_routing.json5   # EventBus routing rules (hot-reloadable)
+└── modules/
+    ├── llm/                  # Config files for the different language models
+    │   ├── azure_openai.json5
+    │   ├── openai.json5
+    │   └── anthropic_claude.json5
+    └── broker/               # Config files for different broker
+        ├── oanda.json5
+        └── mt5.json5
+```
 
 ---
 
