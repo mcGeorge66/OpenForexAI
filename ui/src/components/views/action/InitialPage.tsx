@@ -21,6 +21,7 @@ const EMPTY: InitialConsoleResponse = {
 const EMPTY_UPDATE: SystemUpdateStatusResponse = {
   state: 'idle',
   output: [],
+  restart_supported: false,
 }
 
 function badge(status: string): string {
@@ -179,7 +180,7 @@ export function InitialPage() {
                 >
                   {updateStatus.runtime_paused ? 'Continue' : 'Suspend'}
                 </button>
-                {(
+                {updateStatus.restart_supported && (
                   <button
                     onClick={() => void restartNow()}
                     disabled={updateBusy}
