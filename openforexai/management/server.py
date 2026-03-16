@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from typing import Any
 
-_log = logging.getLogger(__name__)
+from openforexai.utils.logging import get_logger
+
+_log = get_logger(__name__)
 
 
 class ManagementServer:
@@ -116,9 +117,7 @@ class ManagementServer:
 
         self._server = _EmbeddedServer(config)
 
-        _log.info(
-            "Management API starting on http://%s:%d", self._host, self._port
-        )
+        _log.info("Management API starting", host=self._host, port=self._port)
         try:
             await self._server.serve()
         except asyncio.CancelledError:

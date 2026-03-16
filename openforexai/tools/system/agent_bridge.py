@@ -59,15 +59,15 @@ Each target entry becomes its own registered AgentBridgeTool.
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import uuid
 from typing import Any
 
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.tools.base import BaseTool, ToolContext
+from openforexai.utils.logging import get_logger
 
-_log = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 _DEFAULT_QUESTION_DESC = (
     "Your specific question or request. "
@@ -329,7 +329,7 @@ def register_bridge_tools_from_config(
             try:
                 tool = AgentBridgeTool.from_config(one_cfg)
                 registry.register(tool)
-                _log.info("Bridge tool registered: %r -> %s", tool.name, tool._target_agent_id)
+                _log.info("Bridge tool registered", tool_name=tool.name, target_agent_id=tool._target_agent_id)
                 count += 1
             except KeyError as exc:
                 _log.error(

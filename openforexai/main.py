@@ -44,27 +44,32 @@ def _module_names(cfg: dict[str, Any], section: str) -> list[str]:
     return sorted(str(name) for name in section_cfg.keys())
 
 
-def _print_preflight(cfg: dict[str, Any]) -> None:
+def _log_preflight(cfg: dict[str, Any]) -> None:
     llm_names = _module_names(cfg, "llm")
     broker_names = _module_names(cfg, "broker")
-    print(f"Config loaded : {_CONFIG_PATH}")
-    print(f"LLM modules   : {len(llm_names)} -> {', '.join(llm_names)}")
-    print(f"Broker modules: {len(broker_names)} -> {', '.join(broker_names)}")
-    print()
-    print("---------------------------------------------------------------")
-    print()
+    _log.info(
+        "Preflight configuration",
+        config=str(_CONFIG_PATH),
+        llm_modules=len(llm_names),
+        llm_names=llm_names,
+        broker_modules=len(broker_names),
+        broker_names=broker_names,
+    )
 
 
-def _print_runtime_ready(agents: list[Agent], connected_brokers: dict[str, Any]) -> None:
+def _log_runtime_ready(agents: list[Agent], connected_brokers: dict[str, Any]) -> None:
     broker_labels: list[str] = []
     for name, broker in connected_brokers.items():
         short_name = str(getattr(broker, "short_name", "")).strip() or "(no short_name)"
         broker_labels.append(f"{name}:{short_name}")
     broker_labels.sort()
 
-    print("Preflight OK. Entering runtime mode...")
-    print(f"Connected brokers: {len(connected_brokers)} -> {', '.join(broker_labels)}")
-    print(f"Agents enabled   : {len(agents)}")
+    _log.info(
+        "Preflight OK. Entering runtime mode",
+        connected_brokers=len(connected_brokers),
+        brokers=broker_labels,
+        agents_enabled=len(agents),
+    )
 
 
 def _ensure_required_modules(cfg: dict) -> None:
@@ -125,20 +130,18 @@ async def _run_agent_safe(agent: Agent, monitoring_bus: MonitoringBus) -> None:
 async def main() -> None:
     cfg = load_json_config(_CONFIG_PATH)
     _ensure_required_modules(cfg)
-    _print_preflight(cfg)
-
     sys_cfg = cfg.get("system", {})
     configure_logging(sys_cfg.get("log_level", "INFO"))
 
-    logger = get_logger("main")
-    logger.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
+    _log.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
+    _log_preflight(cfg)
 
     monitoring_bus = MonitoringBus()
 
     agents, config_service, bus, data_container, repository, connected_brokers = await bootstrap(
         cfg, monitoring_bus=monitoring_bus
     )
-    _print_runtime_ready(agents, connected_brokers)
+    _log_runtime_ready(agents, connected_brokers)
 
     api_cfg = sys_cfg.get("management_api", {})
     mgmt_server = ManagementServer(

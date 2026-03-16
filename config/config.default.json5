@@ -6,7 +6,7 @@
     ]
   },
   "system": {
-    "version": "0.5",
+    "version": "0.5.1",
     "log_level": "INFO",
     "management_api": {
       "host": "127.0.0.1",

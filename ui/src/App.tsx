@@ -16,6 +16,7 @@ import { useMonitoringStream } from '@/hooks/useMonitoringStream'
 import { api } from '@/api/client'
 
 // Views
+import { InitialPage } from '@/components/views/action/InitialPage'
 import { AgentChat } from '@/components/views/action/AgentChat'
 import { EventStream } from '@/components/views/monitor/EventStream'
 import { ConfigViewer } from '@/components/views/config/ConfigViewer'
@@ -71,7 +72,7 @@ const CONFIG_VIEWS: Record<string, { pathLabel: string; title: string; load: () 
 }
 
 const DEFAULT_SUB: Record<TopSection, string> = {
-  action:  'chat',
+  action:  'initial',
   monitor: 'all',
   config:  'information',
   test:    'llm_checker',
@@ -96,6 +97,7 @@ export default function App() {
   function renderMain() {
     switch (section) {
       case 'action':
+        if (activeSub === 'initial') return <InitialPage />
         if (activeSub === 'chat') return <AgentChat />
         return null
 

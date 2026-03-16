@@ -47,15 +47,15 @@ and the union of their resolved targets receives the message.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import json5
 
 from openforexai.messaging.agent_id import AgentId, substitute_template
+from openforexai.utils.logging import get_logger
 
-_log = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 
 @dataclass
@@ -155,16 +155,14 @@ class RoutingTable:
         """Load routing rules from *path* (JSON5).  Replaces any existing rules."""
         self._path = path
         self._rules = _parse_rules(path)
-        _log.info("Routing table loaded: %d rules from %s", len(self._rules), path)
+        _log.info("Routing table loaded", rules=len(self._rules), path=str(path))
 
     def reload(self) -> None:
         """Hot-reload from the file path used in the last ``load()`` call."""
         if self._path is None:
             raise RuntimeError("No routing file loaded yet; call load() first.")
         self._rules = _parse_rules(self._path)
-        _log.info(
-            "Routing table reloaded: %d rules from %s", len(self._rules), self._path
-        )
+        _log.info("Routing table reloaded", rules=len(self._rules), path=str(self._path))
 
     def load_dict(self, data: dict) -> None:
         """Load routing rules from an already-parsed dict (useful for testing)."""
