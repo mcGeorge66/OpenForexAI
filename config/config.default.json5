@@ -1,0 +1,30 @@
+{
+  // Controls merge semantics for selected paths when loading default + custom.
+  "ImportRules": {
+    "Replace": [
+      "agents"
+    ]
+  },
+  "system": {
+    "version": "0.5",
+    "log_level": "INFO",
+    "management_api": {
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  },
+  "data": {
+    "rolling_weeks": 4,
+    "timeframes": [
+      "M5"
+    ],
+    "indicator_cache_ttl_seconds": 30,
+    "resample_bucket_offset_hours": 0
+  },
+  "database": {},
+  "modules": {
+    "llm": {},
+    "broker": {}
+  },
+  "agents": {}
+}
