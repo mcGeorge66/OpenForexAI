@@ -19,6 +19,10 @@ from openforexai.utils.logging import configure_logging, get_logger
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "system.json5"
 _log = get_logger("main")
 
+class StartupConfigurationError(RuntimeError):
+    """Raised when mandatory runtime configuration is missing."""
+
+
 _BANNER = r"""
 +-------------------------------------------------------------+
 |   ___                   _____                    _    ___   |
@@ -83,16 +87,14 @@ def _ensure_required_modules(cfg: dict) -> None:
     if has_llm and has_broker:
         return
 
-    missing: list[str] = []
-    if not has_llm:
-        missing.append("LLM")
-    if not has_broker:
-        missing.append("Broker")
-    missing_text = " and ".join(missing)
-    raise RuntimeError(
-        "Startup aborted: missing required module configuration for "
-        f"{missing_text}. Configure at least one module in "
-        "'modules.llm' and 'modules.broker' before starting OpenForexAI."
+    raise StartupConfigurationError(
+        "Startup blocked: Please configure at least one LLM and one Broker module before starting OpenForexAI.\n"
+        "Required config paths:\n"
+        "- modules.llm\n"
+        "- modules.broker\n\n"
+        "Then test them with:\n"
+        "- python tools/test_broker.py <broker_module_name> <PAIR>\n"
+        "- python tools/test_llm.py <llm_module_name>"
     )
 
 
@@ -175,6 +177,9 @@ def run() -> None:
     _print_start_banner()
     try:
         asyncio.run(main())
+    except StartupConfigurationError as exc:
+        print(str(exc))
+        raise SystemExit(1) from None
     except KeyboardInterrupt:
         print("\nOpenForexAI stopped.")
         os._exit(0)
