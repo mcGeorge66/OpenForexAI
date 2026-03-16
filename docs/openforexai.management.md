@@ -32,6 +32,19 @@ The control plane for the running system. A FastAPI application served by a non-
 | `GET` | `/agents/{agent_id}` | Single agent info |
 | `POST` | `/agents/{agent_id}/ask` | Query any agent — blocks until agent responds |
 
+#### System Operations
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/version` | Local application version from `system.version` |
+| `GET` | `/console/initial` | Initial page snapshot: logo, version, broker/LLM/agent status |
+| `GET` | `/system/update/status` | Updater job status and output log |
+| `POST` | `/system/update/start` | Start GitHub release update job (`tools/github-updater.py`) |
+| `POST` | `/system/runtime/pause` | Suspend runtime loops (brokers + agents) without shutdown |
+| `POST` | `/system/runtime/resume` | Resume runtime after suspend |
+| `POST` | `/system/restart-now` | Immediate restart (wrapper-signaled or fallback path) |
+
+
 #### Routing
 
 | Method | Path | Description |
@@ -202,3 +215,29 @@ curl "http://127.0.0.1:8765/monitoring/events?limit=50"
 See also: [`tools/ask.py`](./openforexai.tools.md) for a CLI wrapper around the agent query endpoint.
 
 
+
+---
+
+## Runtime Suspend / Resume
+
+`POST /system/runtime/pause` and `POST /system/runtime/resume` control the runtime without stopping the process.
+
+Paused runtime state:
+
+- broker background loops (M5/account/order polling) are paused
+- agent timer/event execution loops are paused
+- management API stays available
+
+This is useful for maintenance windows and safe configuration operations.
+
+---
+
+## Restart Flow (`/system/restart-now`)
+
+Preferred mode is wrapper-controlled restart:
+
+- `tools/openforexai-wrapper.py` starts `python -m openforexai.main`
+- API writes restart signal file
+- wrapper terminates and relaunches child process
+
+If wrapper env is not present, API uses a fallback restart path.

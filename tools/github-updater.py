@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -44,9 +45,7 @@ def _parse_version(value: str) -> tuple[int, int, int, int, int] | None:
             break
 
     parts = raw.split(".")
-    if len(parts) < 2:
-        return None
-    if len(parts) > 3:
+    if len(parts) < 2 or len(parts) > 3:
         return None
     if not all(p.isdigit() for p in parts):
         return None
@@ -66,14 +65,6 @@ def _parse_version(value: str) -> tuple[int, int, int, int, int] | None:
     if stage not in order:
         return None
     return (major, minor, patch, order[stage], stage_num)
-
-
-def _is_version_newer(candidate: str, base: str) -> bool:
-    c = _parse_version(candidate)
-    b = _parse_version(base)
-    if c is None or b is None:
-        return False
-    return c > b
 
 
 def _download_text(url: str) -> str | None:
@@ -213,7 +204,7 @@ def _update_from_release_archive(version: str) -> tuple[int, int, bool]:
 
 def install_update(version: str) -> None:
     before = _read_default_version_safe()
-    copied, skipped, replaced_default = _update_from_release_archive(version)
+    _copied, _skipped, replaced_default = _update_from_release_archive(version)
     after = _read_default_version_safe()
 
     print(f"Default config version before: {before}")
@@ -247,32 +238,40 @@ def install_update(version: str) -> None:
     print("\nUpdate complete. Please restart the application.")
 
 
-def main() -> None:
+def main() -> int:
+    parser = argparse.ArgumentParser(description="OpenForexAI GitHub updater")
+    parser.add_argument("--yes", action="store_true", help="Run non-interactive; auto-confirm update")
+    parser.add_argument("--version", help="Install this exact release version/tag (e.g. 0.6.0)")
+    args = parser.parse_args()
+
     print("OpenForexAI GitHub Updater")
     print("==========================")
 
     local = get_local_version()
     print(f"Local version:  {local}")
 
-    remote = get_remote_version()
+    remote = args.version.strip() if isinstance(args.version, str) and args.version.strip() else get_remote_version()
     if remote is None:
         print("Error: GitHub unreachable or no valid releases found.")
-        sys.exit(1)
+        return 1
 
     print(f"Latest version: {remote} (includes prereleases)")
 
-    if _is_version_newer(remote, local):
+    if remote != local:
         print(f"\nUpdate available: {local} -> {remote}")
-        answer = input("Update now? (y/n): ")
-        if answer.lower() == "y":
+        do_update = True
+        if not args.yes:
+            answer = input("Update now? (y/n): ")
+            do_update = answer.lower() == "y"
+        if do_update:
             install_update(remote)
-        else:
-            print("Update cancelled.")
-    else:
-        print("\nAlready up to date.")
+            return 0
+        print("Update cancelled.")
+        return 0
+
+    print("\nAlready up to date.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
-
-
+    raise SystemExit(main())

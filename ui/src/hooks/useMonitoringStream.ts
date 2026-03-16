@@ -55,6 +55,7 @@ export function useMonitoringStream(
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
+  const connectRef = useRef<() => void>(() => {})
 
   const clear = useCallback(() => setEvents([]), [])
 
@@ -92,7 +93,9 @@ export function useMonitoringStream(
       if (mountedRef.current) {
         setConnected(false)
         // Reconnect after delay
-        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS)
+        reconnectTimer.current = setTimeout(() => {
+          connectRef.current()
+        }, RECONNECT_DELAY_MS)
       }
     }
 
@@ -102,6 +105,10 @@ export function useMonitoringStream(
   }, [enabled, filter])
 
   useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
+
+  useEffect(() => {
     mountedRef.current = true
     if (enabled) connect()
 
@@ -109,7 +116,7 @@ export function useMonitoringStream(
       mountedRef.current = false
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
       if (wsRef.current) {
-        wsRef.current.onclose = null  // prevent reconnect on unmount
+        wsRef.current.onclose = null // prevent reconnect on unmount
         wsRef.current.close()
       }
     }

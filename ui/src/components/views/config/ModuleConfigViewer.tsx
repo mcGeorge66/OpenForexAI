@@ -87,7 +87,7 @@ export function ModuleConfigViewer({ moduleType }: ModuleConfigViewerProps) {
         setText(raw)
         const relPath = (systemCfg as Record<string, unknown>)?.modules &&
           typeof (systemCfg as Record<string, unknown>).modules === 'object'
-          ? ((systemCfg as Record<string, any>).modules?.[moduleType]?.[selectedName] as unknown)
+          ? ((systemCfg as { modules?: Record<string, Record<string, unknown>> }).modules?.[moduleType]?.[selectedName] as unknown)
           : undefined
         setPathLabel(toDisplayPath(relPath))
         setCursor({ line: 1, column: 1 })

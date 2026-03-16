@@ -53,3 +53,7 @@ AGENTS.md
 *.cmd
 CLAUDE.md
 config/system.json5
+
+# Runtime audit exports
+tools/*.jsonl
+

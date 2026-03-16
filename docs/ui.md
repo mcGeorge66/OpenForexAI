@@ -1,76 +1,61 @@
 [Back to Documentation Index](./README.md)
 
-# React + TypeScript + Vite
+# UI (Web Console)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The web console is the operational frontend for OpenForexAI. It connects to the Management API (`http://127.0.0.1:8765`) and is used to operate agents, monitor runtime behavior, test tools/LLMs, and manage configuration.
 
-Currently, two official plugins are available:
+## Main Navigation
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- `Action` — agent interaction and system startup overview
+- `Test` — `Tool Executor` and `LLM Checker`
+- `Config` — system/config/module editors and wizards
+- `Monitor` — event streams (`All`, `LLM`, `Tool`, `Bus`, `Data`, `Broker`)
 
-## React Compiler
+## Initial Page (Action)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The **Initial** page shows:
 
-## Expanding the ESLint configuration
+- startup logo
+- local and internet version
+- broker/LLM connectivity status
+- configured/enabled agents overview
+- updater/runtime status log
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Runtime Controls
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Buttons in the Version box:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- `Update` — starts release update (`POST /system/update/start`)
+- `Suspend` / `Continue` — pauses/resumes runtime loops (`POST /system/runtime/pause`, `POST /system/runtime/resume`)
+- `Restart now` — immediate application restart (`POST /system/restart-now`)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Update progress is shown via `GET /system/update/status` and the update log panel.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Restart Behavior
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+There are two restart paths:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. Wrapper mode (recommended): `tools/openforexai-wrapper.py`
+   - API writes a restart signal file.
+   - Wrapper terminates and relaunches the child process.
 
+2. Fallback mode (no wrapper):
+   - API performs a best-effort self-spawn restart path.
+
+For controlled restarts, start OpenForexAI via the wrapper.
+
+## Related API Endpoints
+
+- `GET /console/initial`
+- `GET /system/update/status`
+- `POST /system/update/start`
+- `POST /system/runtime/pause`
+- `POST /system/runtime/resume`
+- `POST /system/restart-now`
+
+## Operational Notes
+
+- `Suspend` pauses broker polling/M5 loops and agent timer/event processing without exiting the app.
+- `Continue` resumes normal runtime processing.
+- `Restart now` interrupts active processing and performs a fresh startup cycle.
+- For verification, use `Monitor > All Events` and the Initial page status cards/log panel.

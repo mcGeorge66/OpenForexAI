@@ -227,7 +227,7 @@ function ForexChart({ candles }: { candles: CandleBar[] }) {
     series.setData(data)
     volume.setData(vol)
     chart.timeScale().fitContent()
-    setHovered(visibleCandles[visibleCandles.length - 1] ?? null)
+
   }, [visibleCandles])
 
   return (
@@ -297,7 +297,7 @@ export function AgentChat() {
     return typeof a?.chat_instruction === 'string' ? a.chat_instruction : ''
   }
 
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     try {
       const cfg = await api.getSystemConfig()
       setSystemConfig(cfg)
@@ -306,9 +306,11 @@ export function AgentChat() {
     } catch {
       // Keep chat functional even if config loading fails.
     }
-  }
+  }, [selectedAgent])
 
-  useEffect(() => { void loadConfig() }, [])
+  useEffect(() => {
+    void loadConfig()
+  }, [loadConfig])
 
   const refreshCandles = useCallback(async () => {
     if (!selectedAgent || !selectedAgent.includes('-AA-')) {
@@ -600,7 +602,8 @@ export function AgentChat() {
               </p>
             )}
             {selectedAgent && selectedAgent.includes('-AA-') && (
-              <div className="h-full min-h-[280px] flex flex-col gap-3">`r`n                <div className="flex items-center gap-3">
+              <div className="h-full min-h-[280px] flex flex-col gap-3">
+                <div className="flex items-center gap-3">
                   <p className="text-xs text-gray-400">
                     Last 100 {chartTimeframe} candles for {selectedAgent}
                   </p>
@@ -648,6 +651,8 @@ export function AgentChat() {
     </div>
   )
 }
+
+
 
 
 

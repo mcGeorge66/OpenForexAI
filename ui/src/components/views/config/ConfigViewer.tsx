@@ -15,13 +15,13 @@ interface ConfigViewerProps {
 }
 
 /** Very small JSON syntax highlighter — no library, no dependencies */
-export function highlight(json: string): string {
+function highlight(json: string): string {
   return json
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(
-      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
       match => {
         if (/^"/.test(match)) {
           if (/:$/.test(match)) {

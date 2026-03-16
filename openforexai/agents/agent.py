@@ -41,6 +41,7 @@ from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.ports.database import AbstractRepository
 from openforexai.registry.runtime_registry import RuntimeRegistry
+from openforexai.runtime import control as runtime_control
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.base import ToolContext
 from openforexai.tools.dispatcher import ToolDispatcher
@@ -283,8 +284,10 @@ class Agent:
         """
         first_run = True
         while self._running:
+            await runtime_control.wait_until_resumed()
             if not first_run:
                 await asyncio.sleep(interval)
+                await runtime_control.wait_until_resumed()
             first_run = False
             try:
                 await self._run_cycle(trigger="timer", payload={})
@@ -338,6 +341,9 @@ class Agent:
                             f"Config refresh failed: {type(exc).__name__}: {exc}"
                         )
                 elif event_val in self._event_triggers:
+                    if runtime_control.is_paused():
+                        self._logger.debug("Runtime paused — skipping trigger", trigger=event_val)
+                        continue
                     if not self._should_run_for_trigger(event_val):
                         continue
                     await self._run_cycle(
@@ -364,6 +370,19 @@ class Agent:
         correlation_id: str | None = None,
     ) -> None:
         """One agent decision cycle (tool-use loop with LLM)."""
+        if runtime_control.is_paused():
+            if trigger == EventType.AGENT_QUERY.value and correlation_id:
+                await self._bus.publish(AgentMessage(
+                    event_type=EventType.AGENT_QUERY_RESPONSE,
+                    source_agent_id=self.agent_id,
+                    payload={
+                        "response": "Runtime is currently suspended. Try again after continue.",
+                        "agent_id": self.agent_id,
+                    },
+                    correlation_id=correlation_id,
+                ))
+            return
+
         if self._llm is None or self._tool_dispatcher is None:
             if trigger == EventType.AGENT_QUERY.value and correlation_id:
                 await self._bus.publish(AgentMessage(
