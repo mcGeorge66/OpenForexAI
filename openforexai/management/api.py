@@ -38,7 +38,6 @@ import asyncio
 import copy
 import json
 import os
-import subprocess
 import sys
 import time
 import urllib.error
@@ -227,8 +226,13 @@ def _wrapper_restart_signal_path() -> Path | None:
 
 
 def _restart_supported() -> bool:
-    # Always true: wrapper mode preferred, self-spawn fallback available.
-    return True
+    """Return True only when wrapper-managed restart is available.
+
+    For externally supervised deployments (e.g. systemd/services), restart
+    should be controlled by the supervisor, not by the UI/API restart action.
+    """
+    wrapped = os.environ.get("OPENFOREXAI_WRAPPED", "").strip().lower() in {"1", "true", "yes", "on"}
+    return wrapped and _wrapper_restart_signal_path() is not None
 
 
 def _append_update_output(line: str) -> None:
@@ -824,33 +828,25 @@ async def system_runtime_resume() -> dict[str, Any]:
 
 @router.post("/system/restart-now")
 async def system_restart_now() -> dict[str, Any]:
+    if not _restart_supported():
+        raise HTTPException(
+            status_code=409,
+            detail="Restart is not supported in this run mode. Use your external service manager.",
+        )
+
     signal_path = _wrapper_restart_signal_path()
+    assert signal_path is not None
     mode = "wrapper"
 
-    if signal_path is not None:
-        signal_path.parent.mkdir(parents=True, exist_ok=True)
-        signal_path.write_text(datetime.now(UTC).isoformat() + "\n", encoding="utf-8")
-    else:
-        mode = "self-spawn"
-        root = _project_root()
-        env = dict(os.environ)
-        flags = 0
-        if os.name == "nt":
-            flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) | int(getattr(subprocess, "DETACHED_PROCESS", 0))
-        subprocess.Popen(
-            [sys.executable, "-m", "openforexai.main"],
-            cwd=str(root),
-            env=env,
-            creationflags=flags,
-            close_fds=(os.name != "nt"),
-        )
+    signal_path.parent.mkdir(parents=True, exist_ok=True)
+    signal_path.write_text(datetime.now(UTC).isoformat() + "\n", encoding="utf-8")
 
     async def _exit_soon() -> None:
         await asyncio.sleep(0.4)
         os._exit(0)
 
     asyncio.create_task(_exit_soon())
-    return {"status": "restarting", "mode": mode, "signal": str(signal_path) if signal_path else None}
+    return {"status": "restarting", "mode": mode, "signal": str(signal_path)}
 
 
 @router.get("/runtime/status")

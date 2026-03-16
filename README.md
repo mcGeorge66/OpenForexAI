@@ -38,6 +38,8 @@ OpenForexAI uses configurable AI agents for market analysis, risk-aware trade ex
 
 ## Quick Start
 
+Release packages and tags are available here: [https://github.com/mcGeorge66/OpenForexAI/releases](https://github.com/mcGeorge66/OpenForexAI/releases)
+
 ```bash
 # You have to be in the install folder
 
@@ -52,12 +54,19 @@ npm run build
 cd ..
 
 pip install -e ".[all]"
-python -m openforexai.main
+
+# Recommended start mode (enables controlled restart from UI)
+python tools/openforexai-wrapper.py
+
+# Alternative direct start (without wrapper supervision)
+# python -m openforexai.main
 ```
 
 Notes:
 - SQLite is created automatically on startup (default setup).
 - If you use broker/LLM modules, ensure required credentials are set in your environment or `.env`.
+- For the UI button `Restart now`, start via `tools/openforexai-wrapper.py`.
+- If you run under an external supervisor (e.g. `systemd`/service manager), start directly without wrapper; in that mode the UI `Restart now` option is hidden and restart is managed by the supervisor.
 
 ## Why This Project Exists
 
