@@ -85,6 +85,7 @@ export const api = {
   getVersion:     () => get<{ version: string }>('/version'),
   getHealth:      () => get<{ status: string; uptime_seconds: number; registered_agents: number }>('/health'),
   getRuntimeStatus: () => get<{ agents: string[]; routing_rules: number; uptime_seconds: number }>('/runtime/status'),
+  getInitialConsole: () => get<InitialConsoleResponse>('/console/initial'),
   getAgents:      () => get<AgentInfo[]>('/agents'),
   askAgent:       (agentId: string, question: string, timeout = 120) =>
                     post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout }),
@@ -294,3 +295,48 @@ export interface PackageImportResponse {
 }
 
 
+
+
+export interface InitialConsoleModuleItem {
+  name: string
+  status: 'connected' | 'missing' | string
+  short_name?: string | null
+}
+
+export interface InitialConsoleAgentItem {
+  agent_id: string
+  enabled: boolean
+  type?: string | null
+  pair?: string | null
+  broker?: string | null
+  llm?: string | null
+  task: string
+}
+
+export interface InitialConsoleResponse {
+  logo: string[]
+  llm: {
+    configured_count: number
+    connected_count: number
+    items: InitialConsoleModuleItem[]
+  }
+  broker: {
+    configured_count: number
+    connected_count: number
+    items: InitialConsoleModuleItem[]
+  }
+  agents: {
+    configured_count: number
+    enabled_count: number
+    items: InitialConsoleAgentItem[]
+  }
+  version: {
+    local: string
+    remote: string | null
+    remote_prerelease: boolean | null
+    remote_published_at: string | null
+    remote_url: string | null
+    remote_error: string | null
+  }
+  timestamp: string
+}

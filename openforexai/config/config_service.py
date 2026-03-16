@@ -17,15 +17,15 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 from typing import Any
 
 from openforexai.config.json_loader import load_json_config
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
+from openforexai.utils.logging import get_logger
 
-_log = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 CONFIG_SERVICE_ID = "SYSTM-ALL___-GA-CFGSV"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -46,7 +46,7 @@ class ConfigService:
 
     async def run(self) -> None:
         """Run until cancelled."""
-        _log.info("ConfigService started as %s", CONFIG_SERVICE_ID)
+        _log.info("ConfigService started", agent_id=CONFIG_SERVICE_ID)
         while True:
             try:
                 msg = await asyncio.wait_for(self._inbox.get(), timeout=1.0)

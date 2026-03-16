@@ -39,6 +39,8 @@ import copy
 import json
 import os
 import time
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -118,6 +120,88 @@ _LLM_CHECKER_TOOL_TIMEOUT_SECONDS = 20.0
 
 _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 _EXPECTED_KEY: str | None = os.environ.get("MANAGEMENT_API_KEY")
+
+
+_GITHUB_RELEASES_URL = "https://api.github.com/repos/mcGeorge66/OpenForexAI/releases"
+
+
+def _agent_task_summary(agent_cfg: dict[str, Any]) -> str:
+    comment = agent_cfg.get("comment")
+    if isinstance(comment, str) and comment.strip():
+        return comment.strip()
+    prompt = agent_cfg.get("system_prompt")
+    if isinstance(prompt, str):
+        for line in prompt.splitlines():
+            text = line.strip()
+            if text:
+                return text[:160]
+    return "(no task description)"
+
+
+def _fetch_remote_release_info() -> dict[str, Any]:
+    req = urllib.request.Request(
+        _GITHUB_RELEASES_URL,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "OpenForexAI-Management"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=6) as response:
+            if response.status != 200:
+                return {
+                    "version": None,
+                    "prerelease": None,
+                    "published_at": None,
+                    "url": None,
+                    "error": f"HTTP {response.status}",
+                }
+            body = response.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, PermissionError, OSError) as exc:
+        return {
+            "version": None,
+            "prerelease": None,
+            "published_at": None,
+            "url": None,
+            "error": str(exc),
+        }
+
+    try:
+        releases = json.loads(body)
+    except json.JSONDecodeError:
+        return {
+            "version": None,
+            "prerelease": None,
+            "published_at": None,
+            "url": None,
+            "error": "Invalid JSON from GitHub API",
+        }
+
+    if not isinstance(releases, list) or not releases:
+        return {
+            "version": None,
+            "prerelease": None,
+            "published_at": None,
+            "url": None,
+            "error": "No releases found",
+        }
+
+    first = next((r for r in releases if isinstance(r, dict) and not r.get("draft")), None)
+    if not isinstance(first, dict):
+        return {
+            "version": None,
+            "prerelease": None,
+            "published_at": None,
+            "url": None,
+            "error": "No non-draft releases found",
+        }
+
+    tag = str(first.get("tag_name") or "").strip()
+    normalized = tag[1:] if tag.lower().startswith("v") else tag
+    return {
+        "version": normalized or None,
+        "prerelease": bool(first.get("prerelease", False)),
+        "published_at": first.get("published_at"),
+        "url": first.get("html_url"),
+        "error": None,
+    }
 
 
 def _normalize_broker_selector(value: str | None) -> str | None:
@@ -509,6 +593,96 @@ async def get_version() -> dict:
     """Return the application version from system.json5."""
     version = _system_config.get("system", {}).get("version", "unknown")
     return {"version": version}
+
+
+@router.get("/console/initial")
+async def get_console_initial() -> dict[str, Any]:
+    """Return startup overview for the web console initial page."""
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+
+    modules = _system_config.get("modules", {}) if isinstance(_system_config, dict) else {}
+    llm_cfg = modules.get("llm", {}) if isinstance(modules, dict) else {}
+    broker_cfg = modules.get("broker", {}) if isinstance(modules, dict) else {}
+
+    configured_llm = sorted(llm_cfg.keys()) if isinstance(llm_cfg, dict) else []
+    configured_broker = sorted(broker_cfg.keys()) if isinstance(broker_cfg, dict) else []
+
+    connected_llm = set(RuntimeRegistry.list_llm())
+    connected_broker = set(_connected_brokers.keys())
+
+    llm_items = [
+        {
+            "name": name,
+            "status": "connected" if name in connected_llm else "missing",
+        }
+        for name in configured_llm
+    ]
+    broker_items = []
+    for name in configured_broker:
+        broker = _connected_brokers.get(name)
+        short_name = str(getattr(broker, "short_name", "")).strip() if broker is not None else ""
+        broker_items.append({
+            "name": name,
+            "short_name": short_name or None,
+            "status": "connected" if name in connected_broker else "missing",
+        })
+
+    agents_cfg = _system_config.get("agents", {}) if isinstance(_system_config, dict) else {}
+    agents: list[dict[str, Any]] = []
+    if isinstance(agents_cfg, dict):
+        for agent_id in sorted(agents_cfg.keys()):
+            cfg = agents_cfg.get(agent_id)
+            if not isinstance(cfg, dict):
+                continue
+            agents.append({
+                "agent_id": agent_id,
+                "enabled": bool(cfg.get("enable", True)),
+                "type": cfg.get("type"),
+                "pair": cfg.get("pair"),
+                "broker": cfg.get("broker"),
+                "llm": cfg.get("llm"),
+                "task": _agent_task_summary(cfg),
+            })
+
+    local_version = _system_config.get("system", {}).get("version", "unknown")
+    remote = _fetch_remote_release_info()
+
+    return {
+        "logo": [
+            "+-------------------------------------------------------------+",
+            "|   ___                   _____                    _    ___   |",
+            "|  / _ \\ _ __   ___ _ __ |  ___|__  _ __ _____  _ / \\  |_ _|  |",
+            "| | | | | '_ \\ / _ \\ '_ \\| |_ / _ \\| '__/ _ \\ \\/ / _ \\  | |   |",
+            "| | |_| | |_) |  __/ | | |  _| (_) | | |  __/>  < ___ \\ | |   |",
+            "|  \\___/| .__/ \\___|_| |_|_|  \\___/|_|  \\___/_/\\_\\_/ \\_\\___|  |",
+            "|       |_|                                                   |",
+            "+-------------------------------------------------------------+",
+        ],
+        "llm": {
+            "configured_count": len(configured_llm),
+            "connected_count": sum(1 for i in llm_items if i["status"] == "connected"),
+            "items": llm_items,
+        },
+        "broker": {
+            "configured_count": len(configured_broker),
+            "connected_count": sum(1 for i in broker_items if i["status"] == "connected"),
+            "items": broker_items,
+        },
+        "agents": {
+            "configured_count": len(agents),
+            "enabled_count": sum(1 for a in agents if a["enabled"]),
+            "items": agents,
+        },
+        "version": {
+            "local": local_version,
+            "remote": remote.get("version"),
+            "remote_prerelease": remote.get("prerelease"),
+            "remote_published_at": remote.get("published_at"),
+            "remote_url": remote.get("url"),
+            "remote_error": remote.get("error"),
+        },
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
 
 
 @router.get("/runtime/status")

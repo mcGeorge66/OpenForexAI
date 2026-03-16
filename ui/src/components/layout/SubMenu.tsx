@@ -11,6 +11,7 @@ export type SubItem = {
 
 const SUB_ITEMS: Record<TopSection, SubItem[]> = {
   action: [
+    { id: 'initial',      label: 'Initial'    },
     { id: 'chat',         label: 'Agent Chat' },
   ],
   monitor: [

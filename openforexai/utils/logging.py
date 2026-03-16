@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 
 import structlog
 
@@ -25,8 +26,16 @@ def configure_logging(log_level: str = "INFO") -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Also configure stdlib logging at the same level so third-party libs work
-    logging.basicConfig(stream=sys.stderr, level=level, format="%(message)s")
+    # Also configure stdlib logging at the same level so third-party libs work.
+    # force=True ensures third-party pre-configured handlers don't keep old formatting.
+    logging.Formatter.converter = time.gmtime
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=level,
+        format="%(asctime)s.%(msecs)03dZ [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        force=True,
+    )
 
 
 def get_logger(name: str) -> structlog.BoundLogger:
