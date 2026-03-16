@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from openforexai.agents.agent import Agent
 from openforexai.bootstrap import bootstrap
@@ -18,24 +19,88 @@ from openforexai.utils.logging import configure_logging, get_logger
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "system.json5"
 _log = get_logger("main")
 
+_BANNER = r"""
++-------------------------------------------------------------+
+|   ___                   _____                    _    ___   |
+|  / _ \ _ __   ___ _ __ |  ___|__  _ __ _____  _ / \  |_ _|  |
+| | | | | '_ \ / _ \ '_ \| |_ / _ \| '__/ _ \ \/ / _ \  | |   |
+| | |_| | |_) |  __/ | | |  _| (_) | | |  __/>  < ___ \ | |   |
+|  \___/| .__/ \___|_| |_|_|  \___/|_|  \___/_/\_\_/ \_\___|  |
+|       |_|                                                   |
++-------------------------------------------------------------+
+"""
+
+
+def _print_start_banner() -> None:
+    print(_BANNER)
+    print("Starting OpenForexAI...")
+
+
+def _module_names(cfg: dict[str, Any], section: str) -> list[str]:
+    modules = cfg.get("modules", {})
+    section_cfg = modules.get(section, {}) if isinstance(modules, dict) else {}
+    if not isinstance(section_cfg, dict):
+        return []
+    return sorted(str(name) for name in section_cfg.keys())
+
+
+def _print_preflight(cfg: dict[str, Any]) -> None:
+    llm_names = _module_names(cfg, "llm")
+    broker_names = _module_names(cfg, "broker")
+    print(f"Config loaded : {_CONFIG_PATH}")
+    print(f"LLM modules   : {len(llm_names)} -> {', '.join(llm_names)}")
+    print(f"Broker modules: {len(broker_names)} -> {', '.join(broker_names)}")
+    print()
+    print("---------------------------------------------------------------")
+    print()
+
+
+def _print_runtime_ready(agents: list[Agent], connected_brokers: dict[str, Any]) -> None:
+    broker_labels: list[str] = []
+    for name, broker in connected_brokers.items():
+        short_name = str(getattr(broker, "short_name", "")).strip() or "(no short_name)"
+        broker_labels.append(f"{name}:{short_name}")
+    broker_labels.sort()
+
+    print("Preflight OK. Entering runtime mode...")
+    print(f"Connected brokers: {len(connected_brokers)} -> {', '.join(broker_labels)}")
+    print(f"Agents enabled   : {len(agents)}")
+
+
+def _ensure_required_modules(cfg: dict) -> None:
+    """Fail fast if mandatory module groups are not configured."""
+    modules = cfg.get("modules", {})
+    llm_modules = modules.get("llm", {}) if isinstance(modules, dict) else {}
+    broker_modules = modules.get("broker", {}) if isinstance(modules, dict) else {}
+
+    has_llm = isinstance(llm_modules, dict) and len(llm_modules) > 0
+    has_broker = isinstance(broker_modules, dict) and len(broker_modules) > 0
+    if has_llm and has_broker:
+        return
+
+    missing: list[str] = []
+    if not has_llm:
+        missing.append("LLM")
+    if not has_broker:
+        missing.append("Broker")
+    missing_text = " and ".join(missing)
+    raise RuntimeError(
+        "Startup aborted: missing required module configuration for "
+        f"{missing_text}. Configure at least one module in "
+        "'modules.llm' and 'modules.broker' before starting OpenForexAI."
+    )
+
 
 def _install_windows_asyncio_workarounds() -> None:
     """Avoid noisy Proactor transport resets on Windows (WinError 10054)."""
     if sys.platform != "win32":
         return
 
-    # Proactor can emit spurious "Exception in callback ... _call_connection_lost"
-    # when remote peers close sockets. Selector loop avoids that class of noise.
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 async def _run_agent_safe(agent: Agent, monitoring_bus: MonitoringBus) -> None:
-    """Run agent.start(), catching all exceptions.
-
-    A single agent crash must never bring down the whole system.
-    The exception is emitted as a SYSTEM_ERROR monitoring event so it appears
-    in the console monitor even though the management server stays alive.
-    """
+    """Run agent.start(), catching all exceptions."""
     try:
         await agent.start()
     except asyncio.CancelledError:
@@ -58,22 +123,23 @@ async def _run_agent_safe(agent: Agent, monitoring_bus: MonitoringBus) -> None:
 
 
 async def main() -> None:
-    # ── Load config ───────────────────────────────────────────────────────────
     cfg = load_json_config(_CONFIG_PATH)
+    _ensure_required_modules(cfg)
+    _print_preflight(cfg)
+
     sys_cfg = cfg.get("system", {})
     configure_logging(sys_cfg.get("log_level", "INFO"))
 
-    from openforexai.utils.logging import get_logger
     logger = get_logger("main")
     logger.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
 
-    # ── Monitoring bus (created first so bootstrap can wire it through) ───────
     monitoring_bus = MonitoringBus()
 
-    # ── Bootstrap ─────────────────────────────────────────────────────────────
     agents, config_service, bus, data_container, repository, connected_brokers = await bootstrap(
         cfg, monitoring_bus=monitoring_bus
     )
+    _print_runtime_ready(agents, connected_brokers)
+
     api_cfg = sys_cfg.get("management_api", {})
     mgmt_server = ManagementServer(
         bus=bus,
@@ -89,7 +155,6 @@ async def main() -> None:
         port=api_cfg.get("port", 8765),
     )
 
-    # ── Run everything concurrently ───────────────────────────────────────────
     async with asyncio.TaskGroup() as tg:
         tg.create_task(bus.start_dispatch_loop(), name="event-bus")
         tg.create_task(config_service.run(), name="config-service")
@@ -104,19 +169,13 @@ async def main() -> None:
 def run() -> None:
     """Entry point for the ``openforexai`` console script."""
     _install_windows_asyncio_workarounds()
-    # ── Run (default Ctrl+C behavior) ─────────────────────────────────────────
+    _print_start_banner()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nOpenForexAI stopped.")
-        # Ensure process termination even if background non-daemon threads remain.
         os._exit(0)
 
 
 if __name__ == "__main__":
     run()
-
-
-
-
-
