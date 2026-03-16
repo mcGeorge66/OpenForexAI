@@ -36,30 +36,51 @@ OpenForexAI uses configurable AI agents for market analysis, risk-aware trade ex
 **Contributing**
 - Contribution baseline and process template: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
-## Quick Start
+## Quick Start (Part 1)
 
 Release packages and tags are available here: [https://github.com/mcGeorge66/OpenForexAI/releases](https://github.com/mcGeorge66/OpenForexAI/releases)
 
 ```bash
-# You have to be in the install folder
+# You have to be in the install folder for preperation.
 
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # Linux/macOS: source .venv/bin/activate
+
+pip install -e ".[all]"
 
 # Prepare the frontend
 cd ui
 npm install
 npm run build
 cd ..
+```
 
-pip install -e ".[all]"
+### First-Time Configuration and Validation
 
-# Recommended start mode (enables controlled restart from UI)
+1. Configure at least one broker module in `config/modules/broker/*.json5` and reference it in `config/system.json5` under `modules.broker`.
+2. Configure at least one LLM module in `config/modules/llm/*.json5` and reference it in `config/system.json5` under `modules.llm`.
+3. Set required credentials via environment variables or `.env`.
+4. Validate broker connectivity:
+
+```bash
+python tools/test_broker.py <broker_module_name> <PAIR>
+# example
+python tools/test_broker.py oanda EURUSD
+```
+
+5. Validate LLM connectivity:
+
+```bash
+python tools/test_llm.py <llm_module_name>
+# example
+python tools/test_llm.py azure_openai
+```
+
+6. Start the app:
+
+```bash
 python tools/openforexai-wrapper.py
-
-# Alternative direct start (without wrapper supervision)
-# python -m openforexai.main
 ```
 
 Notes:
@@ -67,6 +88,18 @@ Notes:
 - If you use broker/LLM modules, ensure required credentials are set in your environment or `.env`.
 - For the UI button `Restart now`, start via `tools/openforexai-wrapper.py`.
 - If you run under an external supervisor (e.g. `systemd`/service manager), start directly without wrapper; in that mode the UI `Restart now` option is hidden and restart is managed by the supervisor.
+
+## Quick Start (Part 2)
+
+```bash
+# You have to be in the install folder for starting the system
+
+# Recommended start mode (enables controlled restart from UI)
+python tools/openforexai-wrapper.py
+
+# Alternative direct start (without wrapper supervision)
+# python -m openforexai.main
+```
 
 ## Why This Project Exists
 
