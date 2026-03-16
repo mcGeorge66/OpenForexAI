@@ -20,6 +20,7 @@ Exit codes:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import sys
 import sysconfig
@@ -409,12 +410,16 @@ async def _run_tests(name: str) -> tuple[list[CheckResult], dict[str, Any]]:
 def main() -> None:
     _force_stdlib_logging_module()
     import asyncio
-    if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} <llm_module_name>")
-        print(f"  e.g. python {sys.argv[0]} azure_openai")
-        sys.exit(1)
 
-    name = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        description="Deep diagnostics for one configured LLM module.",
+    )
+    parser.add_argument(
+        "llm_module_name",
+        help="Module name from config/modules/llm/<name>.json5 (e.g. azure_openai)",
+    )
+    args = parser.parse_args()
+    name = args.llm_module_name
 
     _print_header("LLM Diagnostics")
     _print_kv("module", name)

@@ -86,6 +86,11 @@ export const api = {
   getHealth:      () => get<{ status: string; uptime_seconds: number; registered_agents: number }>('/health'),
   getRuntimeStatus: () => get<{ agents: string[]; routing_rules: number; uptime_seconds: number }>('/runtime/status'),
   getInitialConsole: () => get<InitialConsoleResponse>('/console/initial'),
+  getSystemUpdateStatus: () => get<SystemUpdateStatusResponse>('/system/update/status'),
+  startSystemUpdate: (body: SystemUpdateStartRequest) => post<{ status: string; requested_version?: string | null }>('/system/update/start', body),
+  restartSystemNow: () => post<{ status: string; signal?: string; mode?: string }>('/system/restart-now', {}),
+  pauseRuntime: () => post<{ status: string; runtime_paused: boolean }>('/system/runtime/pause', {}),
+  resumeRuntime: () => post<{ status: string; runtime_paused: boolean }>('/system/runtime/resume', {}),
   getAgents:      () => get<AgentInfo[]>('/agents'),
   askAgent:       (agentId: string, question: string, timeout = 120) =>
                     post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout }),
@@ -339,4 +344,22 @@ export interface InitialConsoleResponse {
     remote_error: string | null
   }
   timestamp: string
+}
+
+
+export interface SystemUpdateStartRequest {
+  version?: string | null
+}
+
+export interface SystemUpdateStatusResponse {
+  state: 'idle' | 'running' | 'completed' | 'failed' | string
+  started_at?: string | null
+  ended_at?: string | null
+  exit_code?: number | null
+  message?: string
+  requested_version?: string | null
+  restart_supported?: boolean
+  restart_available?: boolean
+  runtime_paused?: boolean
+  output: string[]
 }

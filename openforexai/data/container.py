@@ -277,6 +277,9 @@ class DataContainer:
 
             key = (broker_name, pair)
             lock = self._write_locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._write_locks[key] = lock
             new_candles: list[Candle] = []
 
             async with lock:

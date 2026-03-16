@@ -11,6 +11,7 @@ from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEventType
 from openforexai.models.trade import CloseReason, OrderStatus
 from openforexai.ports.broker import AbstractBroker
+from openforexai.runtime import control as runtime_control
 
 _log = logging.getLogger(__name__)
 
@@ -183,7 +184,9 @@ class BrokerBase(AbstractBroker):
         source_agent_id = _adapter_agent_id(self.short_name, pair)
         while self._running:
             try:
+                await runtime_control.wait_until_resumed()
                 await self._sleep_until_next_m5()
+                await runtime_control.wait_until_resumed()
                 try:
                     expected_open = self._expected_latest_m5_open()
                     candle = await self.fetch_latest_m5_candle(pair)
@@ -300,6 +303,7 @@ class BrokerBase(AbstractBroker):
         source = f"broker.{self.short_name}"
         while self._running:
             try:
+                await runtime_control.wait_until_resumed()
                 status = await self.get_account_status()
                 await repository.save_account_status(status)
                 self._emit(
@@ -336,6 +340,7 @@ class BrokerBase(AbstractBroker):
         source = f"broker.{self.short_name}"
         while self._running:
             await asyncio.sleep(interval_seconds)
+            await runtime_control.wait_until_resumed()
             try:
                 broker_positions = await self.get_open_positions()
                 broker_ids = {p.broker_position_id for p in broker_positions}

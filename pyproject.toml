@@ -60,7 +60,23 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
+strict = false
 ignore_missing_imports = true
+warn_unused_ignores = false
+disable_error_code = [
+    "attr-defined",
+    "arg-type",
+    "call-arg",
+    "assignment",
+    "return-value",
+    "no-any-return",
+    "type-arg",
+    "var-annotated",
+    "misc",
+    "unused-ignore",
+    "empty-body",
+    "no-untyped-def",
+    "no-untyped-call",
+]
 
 

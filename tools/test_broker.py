@@ -20,6 +20,7 @@ Exit code: 0 = all tests passed, 1 = at least one test failed.
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import sys
 import sysconfig
@@ -274,13 +275,24 @@ async def _run_tests(name: str, pair_override: str | None = None) -> bool:
 
 def main() -> None:
     import asyncio
-    if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} <broker_module_name> [PAIR]")
-        print(f"  e.g. python {sys.argv[0]} oanda EURUSD")
-        sys.exit(1)
 
-    name = sys.argv[1]
-    pair_override = sys.argv[2] if len(sys.argv) >= 3 else None
+    parser = argparse.ArgumentParser(
+        description="Connectivity and data-path tests for one configured broker module.",
+    )
+    parser.add_argument(
+        "broker_module_name",
+        help="Module name from config/modules/broker/<name>.json5 (e.g. oanda)",
+    )
+    parser.add_argument(
+        "pair",
+        nargs="?",
+        default=None,
+        help="Optional pair override for candle checks (e.g. EURUSD)",
+    )
+    args = parser.parse_args()
+
+    name = args.broker_module_name
+    pair_override = args.pair
     ok = asyncio.run(_run_tests(name, pair_override=pair_override))
 
     print()

@@ -38,6 +38,8 @@ import asyncio
 import copy
 import json
 import os
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -68,6 +70,7 @@ from openforexai.management.package_io import (
     parse_json5_text,
     validate_package,
 )
+from openforexai.runtime import control as runtime_control
 
 # ── Agent-query response registry ────────────────────────────────────────────
 # Maps correlation_id → asyncio.Future.  Populated by ask_agent(); resolved by
@@ -114,6 +117,18 @@ _config_service = None
 _runtime_agents: dict[str, Any] = {}
 _runtime_agent_tasks: dict[str, asyncio.Task] = {}
 _start_time: float = time.monotonic()
+
+_update_task: asyncio.Task | None = None
+_update_output: list[str] = []
+_UPDATE_OUTPUT_LIMIT = 600
+_update_status: dict[str, Any] = {
+    "state": "idle",  # idle | running | completed | failed
+    "started_at": None,
+    "ended_at": None,
+    "exit_code": None,
+    "message": "",
+    "requested_version": None,
+}
 
 _LLM_CHECKER_LLM_TIMEOUT_SECONDS = 45.0
 _LLM_CHECKER_TOOL_TIMEOUT_SECONDS = 20.0
@@ -202,6 +217,93 @@ def _fetch_remote_release_info() -> dict[str, Any]:
         "url": first.get("html_url"),
         "error": None,
     }
+
+
+def _wrapper_restart_signal_path() -> Path | None:
+    raw = os.environ.get("OPENFOREXAI_RESTART_SIGNAL_PATH", "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
+def _restart_supported() -> bool:
+    # Always true: wrapper mode preferred, self-spawn fallback available.
+    return True
+
+
+def _append_update_output(line: str) -> None:
+    _update_output.append(line.rstrip("\n"))
+    if len(_update_output) > _UPDATE_OUTPUT_LIMIT:
+        del _update_output[: len(_update_output) - _UPDATE_OUTPUT_LIMIT]
+
+
+def _update_status_payload() -> dict[str, Any]:
+    payload = dict(_update_status)
+    payload["output"] = list(_update_output)
+    payload["runtime_paused"] = runtime_control.is_paused()
+    payload["restart_supported"] = _restart_supported()
+    payload["restart_available"] = bool(
+        payload.get("state") == "completed" and payload.get("exit_code") == 0
+    )
+    return payload
+
+
+async def _run_update_job(requested_version: str | None) -> None:
+    global _update_task, _update_status
+
+    root = _project_root()
+    updater = root / "tools" / "github-updater.py"
+    cmd = [sys.executable, str(updater), "--yes"]
+    if requested_version:
+        cmd.extend(["--version", requested_version])
+
+    _update_output.clear()
+    _update_status = {
+        "state": "running",
+        "started_at": datetime.now(UTC).isoformat(),
+        "ended_at": None,
+        "exit_code": None,
+        "message": "Update started",
+        "requested_version": requested_version,
+    }
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        assert proc.stdout is not None
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            _append_update_output(line)
+
+        exit_code = await proc.wait()
+        _update_status = {
+            "state": "completed" if exit_code == 0 else "failed",
+            "started_at": _update_status.get("started_at"),
+            "ended_at": datetime.now(UTC).isoformat(),
+            "exit_code": exit_code,
+            "message": "Update finished" if exit_code == 0 else "Update failed",
+            "requested_version": requested_version,
+        }
+    except Exception as exc:
+        _append_update_output(f"[update-error] {exc}")
+        _update_status = {
+            "state": "failed",
+            "started_at": _update_status.get("started_at"),
+            "ended_at": datetime.now(UTC).isoformat(),
+            "exit_code": -1,
+            "message": str(exc),
+            "requested_version": requested_version,
+        }
+    finally:
+        _update_task = None
 
 
 def _normalize_broker_selector(value: str | None) -> str | None:
@@ -538,6 +640,10 @@ class LLMCheckerResponse(BaseModel):
     trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class UpdateStartRequest(BaseModel):
+    version: str | None = None
+
+
 class PackageMappingRequest(BaseModel):
     broker_map: dict[str, str] = Field(default_factory=dict)
     llm_map: dict[str, str] = Field(default_factory=dict)
@@ -683,6 +789,68 @@ async def get_console_initial() -> dict[str, Any]:
         },
         "timestamp": datetime.now(UTC).isoformat(),
     }
+
+
+@router.get("/system/update/status")
+async def system_update_status() -> dict[str, Any]:
+    return _update_status_payload()
+
+
+@router.post("/system/update/start")
+async def system_update_start(req: UpdateStartRequest) -> dict[str, Any]:
+    global _update_task
+    if _update_task is not None and not _update_task.done():
+        raise HTTPException(status_code=409, detail="Update already running")
+
+    requested_version = req.version.strip() if isinstance(req.version, str) and req.version.strip() else None
+    _update_task = asyncio.create_task(_run_update_job(requested_version))
+    return {
+        "status": "started",
+        "requested_version": requested_version,
+    }
+
+
+@router.post("/system/runtime/pause")
+async def system_runtime_pause() -> dict[str, Any]:
+    runtime_control.pause()
+    return {"status": "paused", "runtime_paused": True}
+
+
+@router.post("/system/runtime/resume")
+async def system_runtime_resume() -> dict[str, Any]:
+    runtime_control.resume()
+    return {"status": "running", "runtime_paused": False}
+
+
+@router.post("/system/restart-now")
+async def system_restart_now() -> dict[str, Any]:
+    signal_path = _wrapper_restart_signal_path()
+    mode = "wrapper"
+
+    if signal_path is not None:
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+        signal_path.write_text(datetime.now(UTC).isoformat() + "\n", encoding="utf-8")
+    else:
+        mode = "self-spawn"
+        root = _project_root()
+        env = dict(os.environ)
+        flags = 0
+        if os.name == "nt":
+            flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) | int(getattr(subprocess, "DETACHED_PROCESS", 0))
+        subprocess.Popen(
+            [sys.executable, "-m", "openforexai.main"],
+            cwd=str(root),
+            env=env,
+            creationflags=flags,
+            close_fds=(os.name != "nt"),
+        )
+
+    async def _exit_soon() -> None:
+        await asyncio.sleep(0.4)
+        os._exit(0)
+
+    asyncio.create_task(_exit_soon())
+    return {"status": "restarting", "mode": mode, "signal": str(signal_path) if signal_path else None}
 
 
 @router.get("/runtime/status")
@@ -2152,5 +2320,6 @@ def build_app(
             return _FileResponse(str(_ui_dist / "index.html"))
 
     return app
+
 
 
