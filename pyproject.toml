@@ -20,6 +20,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "numpy>=1.26",
     "json5>=0.9",
+    "rich>=13.7",
+    "questionary>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -78,5 +80,3 @@ disable_error_code = [
     "no-untyped-def",
     "no-untyped-call",
 ]
-
-

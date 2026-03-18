@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import sys
 import sysconfig
 import time
@@ -39,6 +40,21 @@ while _this_dir_str in sys.path:
     sys.path.remove(_this_dir_str)
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        os.environ[key.strip()] = val.strip().strip("\"").strip("'")
+
+
+_load_env_file(_ROOT / ".env")
+
 
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -9,6 +10,7 @@ import httpx
 from openforexai.adapters.brokers.base import BrokerBase, normalize_candle, retry_async
 from openforexai.models.account import AccountStatus
 from openforexai.models.market import Candle
+from openforexai.models.monitoring import MonitoringEventType
 from openforexai.models.trade import (
     OrderType,
     Position,
@@ -133,11 +135,42 @@ class OANDABroker(BrokerBase):
     @property
     def short_name(self) -> str:
         return self._short_name
+# ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    async def _on_http_request(self, request: httpx.Request) -> None:
+        request.extensions["ofai_started_at"] = time.perf_counter()
+        self._emit(
+            source=f"broker.{self.short_name}",
+            event_type=MonitoringEventType.BROKER_HTTP_REQUEST,
+            broker_name=self.short_name,
+            method=request.method,
+            url=str(request.url),
+            path=request.url.path,
+        )
+
+    async def _on_http_response(self, response: httpx.Response) -> None:
+        started = response.request.extensions.get("ofai_started_at")
+        duration_ms = None
+        if isinstance(started, (int, float)):
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+
+        self._emit(
+            source=f"broker.{self.short_name}",
+            event_type=MonitoringEventType.BROKER_HTTP_RESPONSE,
+            broker_name=self.short_name,
+            method=response.request.method,
+            url=str(response.request.url),
+            path=response.request.url.path,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
 
     async def connect(self) -> None:
         self._client = httpx.AsyncClient(
+            event_hooks={
+                "request": [self._on_http_request],
+                "response": [self._on_http_response],
+            },
             base_url=self._base_url,
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -414,3 +447,8 @@ class OANDABroker(BrokerBase):
             pnl=Decimal(data.get("pl", "0")),
             closed_at=datetime.now(UTC),
         )
+
+
+
+
+

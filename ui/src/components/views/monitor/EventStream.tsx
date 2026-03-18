@@ -28,6 +28,8 @@ const EVENT_COLOURS: Record<string, string> = {
   broker_disconnected:  'text-orange-400',
   broker_reconnecting:  'text-orange-300',
   broker_error:         'text-red-400',
+  broker_http_request:  'text-emerald-400',
+  broker_http_response: 'text-emerald-500',
   // Candle / data
   m5_candle_fetched:    'text-cyan-400',
   m5_candle_queued:     'text-cyan-300',
@@ -350,4 +352,5 @@ export function EventStream({ events, connected, filter, onClear }: EventStreamP
     </div>
   )
 }
+
 

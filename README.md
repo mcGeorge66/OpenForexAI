@@ -36,70 +36,56 @@ OpenForexAI uses configurable AI agents for market analysis, risk-aware trade ex
 **Contributing**
 - Contribution baseline and process template: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
-## Quick Start (Part 1)
+
+## Installation
 
 Release packages and tags are available here: [https://github.com/mcGeorge66/OpenForexAI/releases](https://github.com/mcGeorge66/OpenForexAI/releases)
 
-```bash
-# You have to be in the install folder for preperation.
+Setup Instruction: [`SETUP`](./setup.md)
 
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
+## Quick Start
 
-pip install -e ".[all]"
+Release packages and tags are available here: [https://github.com/mcGeorge66/OpenForexAI/releases](https://github.com/mcGeorge66/OpenForexAI/releases)
 
-# Prepare the frontend
-cd ui
-npm install
-npm run build
-cd ..
+Recommended first-time setup:
+
+Windows:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
 ```
 
-### First-Time Configuration and Validation
-
-1. Configure at least one broker module in `config/modules/broker/*.json5` and reference it in `config/system.json5` under `modules.broker`.
-2. Configure at least one LLM module in `config/modules/llm/*.json5` and reference it in `config/system.json5` under `modules.llm`.
-3. Set required credentials via environment variables or `.env`.
-4. Validate broker connectivity:
-
+Linux:
 ```bash
-python tools/test_broker.py <broker_module_name> <PAIR>
-# example
-python tools/test_broker.py oanda EURUSD
+bash scripts/setup_linux.sh
 ```
 
-5. Validate LLM connectivity:
+The setup script will:
+- install backend and UI dependencies
+- discover broker/LLM adapters dynamically and create module files as `<adapter>.<name>.json5`
+- create `config/system.json5` with selected broker/LLM module references
+- scan selected module config files for `${...}` placeholders
+- collect required environment values into `.env`
+- create startup scripts
+- optionally run broker/LLM smoke tests
 
-```bash
-python tools/test_llm.py <llm_module_name>
-# example
-python tools/test_llm.py azure_openai
+Detailed guide (automated + manual): [`setup.md`](./setup.md)
+
+Regular start after setup:
+
+Windows:
+```powershell
+./start_openforexai.ps1
 ```
 
-6. Start the app:
-
+Linux:
 ```bash
-python tools/openforexai-wrapper.py
+./start_openforexai.sh
 ```
 
 Notes:
 - SQLite is created automatically on startup (default setup).
-- If you use broker/LLM modules, ensure required credentials are set in your environment or `.env`.
-- For the UI button `Restart now`, start via `tools/openforexai-wrapper.py`.
+- For the UI button `Restart now`, start via wrapper-based scripts above.
 - If you run under an external supervisor (e.g. `systemd`/service manager), start directly without wrapper; in that mode the UI `Restart now` option is hidden and restart is managed by the supervisor.
-
-## Quick Start (Part 2)
-
-```bash
-# You have to be in the install folder for starting the system
-
-# Recommended start mode (enables controlled restart from UI)
-python tools/openforexai-wrapper.py
-
-# Alternative direct start (without wrapper supervision)
-# python -m openforexai.main
-```
 
 ## Why This Project Exists
 
@@ -123,3 +109,6 @@ To move the project from beta to a robust production-grade platform, contributio
 > Forex trading involves substantial risk of loss. Always test with a practice
 > account before connecting real funds. The authors are not responsible for any
 > financial losses incurred through the use of this software.
+
+
+

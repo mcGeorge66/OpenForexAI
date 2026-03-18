@@ -1,0 +1,5 @@
+{
+  display_name: "LM Studio (Local)",
+  description: "Local OpenAI-compatible endpoint, typically LM Studio.",
+  notes: "Usually no external key required for local-only usage."
+}

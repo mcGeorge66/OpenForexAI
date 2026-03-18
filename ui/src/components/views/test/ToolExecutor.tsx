@@ -147,7 +147,7 @@ export function ToolExecutor() {
           try {
             const cfg = await api.getModuleConfig('broker', moduleName)
             const configured = typeof cfg.short_name === 'string' ? cfg.short_name.trim() : ''
-            const shortName = configured || moduleName
+            const shortName = configured && !configured.includes("${") ? configured : moduleName
             return {
               value: shortName,
               label: `${shortName} (${moduleName})`,

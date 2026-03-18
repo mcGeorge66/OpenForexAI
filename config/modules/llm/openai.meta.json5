@@ -1,0 +1,5 @@
+{
+  display_name: "OpenAI API",
+  description: "OpenAI cloud API endpoint.",
+  notes: "Requires OPENAI_API_KEY and model name."
+}

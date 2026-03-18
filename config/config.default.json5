@@ -13,6 +13,11 @@
       "port": 8765
     }
   },
+  "database": {
+    "backend": "sqlite",
+    "sqlite_path": "./data/openforexai.db",
+    "pool_size": 5
+  },
   "data": {
     "rolling_weeks": 4,
     "timeframes": [
@@ -21,7 +26,6 @@
     "indicator_cache_ttl_seconds": 30,
     "resample_bucket_offset_hours": 0
   },
-  "database": {},
   "modules": {
     "llm": {},
     "broker": {}
