@@ -38,6 +38,7 @@ import asyncio
 import copy
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -252,11 +253,42 @@ def _update_status_payload() -> dict[str, Any]:
     return payload
 
 
+def _run_update_process_sync(cmd: list[str], cwd: str) -> int:
+    """Run updater process in sync mode (fallback for Windows selector loop)."""
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        _append_update_output(line.rstrip("\n"))
+    return proc.wait()
+
+
 async def _run_update_job(requested_version: str | None) -> None:
     global _update_task, _update_status
 
     root = _project_root()
     updater = root / "tools" / "github-updater.py"
+    if not updater.exists():
+        _append_update_output(f"[update-error] updater not found: {updater}")
+        _update_status = {
+            "state": "failed",
+            "started_at": datetime.now(UTC).isoformat(),
+            "ended_at": datetime.now(UTC).isoformat(),
+            "exit_code": -1,
+            "message": f"Updater not found: {updater}",
+            "requested_version": requested_version,
+        }
+        _update_task = None
+        return
+
     cmd = [sys.executable, str(updater), "--yes"]
     if requested_version:
         cmd.extend(["--version", requested_version])
@@ -272,22 +304,29 @@ async def _run_update_job(requested_version: str | None) -> None:
     }
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
 
-        assert proc.stdout is not None
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            _append_update_output(line)
+            assert proc.stdout is not None
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                _append_update_output(line)
 
-        exit_code = await proc.wait()
+            exit_code = await proc.wait()
+        except NotImplementedError:
+            _append_update_output(
+                "[update-info] Async subprocess unavailable on this runtime; using sync fallback."
+            )
+            exit_code = await asyncio.to_thread(_run_update_process_sync, cmd, str(root))
+
         _update_status = {
             "state": "completed" if exit_code == 0 else "failed",
             "started_at": _update_status.get("started_at"),
@@ -297,13 +336,14 @@ async def _run_update_job(requested_version: str | None) -> None:
             "requested_version": requested_version,
         }
     except Exception as exc:
-        _append_update_output(f"[update-error] {exc}")
+        detail = str(exc).strip() or repr(exc)
+        _append_update_output(f"[update-error] {type(exc).__name__}: {detail}")
         _update_status = {
             "state": "failed",
             "started_at": _update_status.get("started_at"),
             "ended_at": datetime.now(UTC).isoformat(),
             "exit_code": -1,
-            "message": str(exc),
+            "message": f"{type(exc).__name__}: {detail}",
             "requested_version": requested_version,
         }
     finally:

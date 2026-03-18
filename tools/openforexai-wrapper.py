@@ -34,18 +34,19 @@ def main() -> int:
         restart_requested = False
         try:
             while True:
-                code = proc.poll()
-                if code is not None:
-                    break
                 if RESTART_FLAG.exists():
                     restart_requested = True
                     print("[wrapper] restart requested — stopping child")
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=5)
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                    break
+                code = proc.poll()
+                if code is not None:
                     break
                 time.sleep(0.6)
         except KeyboardInterrupt:
@@ -57,7 +58,7 @@ def main() -> int:
                 proc.kill()
             return 0
 
-        if restart_requested:
+        if restart_requested or RESTART_FLAG.exists():
             RESTART_FLAG.unlink(missing_ok=True)
             print("[wrapper] restarting OpenForexAI...")
             continue
@@ -69,3 +70,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
