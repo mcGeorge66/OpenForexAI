@@ -2203,8 +2203,8 @@ async def get_module_config(module_type: str, name: str) -> dict:
     """
     cfg_path = _resolve_module_config_path(module_type, name)
     try:
-        raw = json5.loads(cfg_path.read_text(encoding="utf-8"))
-        return _deep_mask(raw)
+        resolved = load_json_config(cfg_path)
+        return _deep_mask(resolved)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,

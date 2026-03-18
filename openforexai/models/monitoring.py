@@ -13,6 +13,8 @@ class MonitoringEventType(StrEnum):
     BROKER_DISCONNECTED = "broker_disconnected"
     BROKER_RECONNECTING = "broker_reconnecting"
     BROKER_ERROR = "broker_error"
+    BROKER_HTTP_REQUEST = "broker_http_request"
+    BROKER_HTTP_RESPONSE = "broker_http_response"
 
     # ── M5 candle pipeline ────────────────────────────────────────────────────
     M5_CANDLE_FETCHED = "m5_candle_fetched"       # adapter fetched from broker
@@ -87,4 +89,8 @@ class MonitoringEvent(BaseModel):
     broker_name: str | None = None         # set when event relates to a specific broker
     pair: str | None = None                # set when event relates to a specific pair
     payload: dict = Field(default_factory=dict)
+
+
+
+
 

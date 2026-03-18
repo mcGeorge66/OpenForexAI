@@ -39,6 +39,7 @@ const MONITOR_FILTERS: Record<string, string[] | undefined> = {
   ],
   broker: [
     'broker_connected', 'broker_disconnected', 'broker_reconnecting', 'broker_error',
+    'broker_http_request', 'broker_http_response',
     'account_status_updated', 'account_poll_error',
     'm5_candle_fetched', 'm5_candle_queued',
   ],
@@ -162,6 +163,7 @@ export default function App() {
     </div>
   )
 }
+
 
 
 

@@ -28,7 +28,7 @@ def _to_openai_tool(spec: ToolSpec) -> dict:
 
 
 class OpenAILLMProvider(AbstractLLMProvider):
-    """OpenAI GPT adapter (also compatible with LM Studio's OpenAI-compatible endpoint)."""
+    """OpenAI GPT adapter."""
 
     def __init__(
         self,
@@ -232,27 +232,4 @@ class OpenAILLMProvider(AbstractLLMProvider):
             }
             for r in tool_results
         ]
-
-
-class LMStudioLLMProvider(OpenAILLMProvider):
-    """LM Studio adapter (uses the OpenAI-compatible local endpoint)."""
-
-    def __init__(
-        self,
-        base_url: str = "http://localhost:1234/v1",
-        model: str = "local-model",
-        retry_attempts: int = 3,
-        retry_base_delay: float = 1.0,
-    ) -> None:
-        super().__init__(api_key="lm-studio", model=model, base_url=base_url,
-                         retry_attempts=retry_attempts, retry_base_delay=retry_base_delay)
-
-    @classmethod
-    def from_config(cls, cfg: dict) -> LMStudioLLMProvider:
-        return cls(
-            base_url=cfg.get("base_url", "http://localhost:1234/v1"),
-            model=cfg.get("model", "local-model"),
-            retry_attempts=cfg.get("retry_attempts", 3),
-            retry_base_delay=cfg.get("retry_base_delay", 1.0),
-        )
 

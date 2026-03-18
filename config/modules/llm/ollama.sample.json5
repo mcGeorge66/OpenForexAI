@@ -1,0 +1,11 @@
+{
+  // Ollama local LLM module configuration
+  "adapter": "ollama",
+  "base_url": "${OLLAMA_BASE_URL:-http://127.0.0.1:11434/v1}",
+  "api_key": "${OLLAMA_API_KEY:-ollama}",
+  "model": "${OLLAMA_MODEL:-llama3.1}",
+  "retry_attempts": 3,
+  "retry_base_delay": 1.0,
+  "temperature": 0.1,
+  "max_tokens": 4096
+}

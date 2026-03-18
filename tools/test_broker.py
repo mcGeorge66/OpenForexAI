@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import sys
 import sysconfig
 from datetime import UTC
@@ -36,6 +37,21 @@ while _this_dir_str in sys.path:
     sys.path.remove(_this_dir_str)
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        os.environ[key.strip()] = val.strip().strip("\"").strip("'")
+
+
+_load_env_file(_ROOT / ".env")
+
 
 
 
@@ -84,7 +100,7 @@ def _create_broker(cfg: dict):
     return BrokerClass.from_config(cfg)
 
 
-async def _run_tests(name: str, pair_override: str | None = None) -> bool:
+async def _run_tests(name: str, pair_override: str | None = None, skip_live_test: bool = False) -> bool:
     _force_stdlib_logging_module()
     import asyncio
     cfg = _load_module_config(name)
@@ -210,7 +226,14 @@ async def _run_tests(name: str, pair_override: str | None = None) -> bool:
         print(f"  [FAIL] {e}")
         passed = False
 
-    # ── Test 6: live M5 streaming (real timing, Ctrl+C to exit) ─────────────
+    if skip_live_test:
+        print("\nTest 6: skipped (--skip-live-test)")
+        try:
+            await broker.disconnect()
+        except Exception:
+            pass
+        return passed
+
     from datetime import datetime
     _now = datetime.now(UTC)
     _secs_to_next = int(
@@ -289,11 +312,17 @@ def main() -> None:
         default=None,
         help="Optional pair override for candle checks (e.g. EURUSD)",
     )
+    parser.add_argument(
+        "--skip-live-test",
+        action="store_true",
+        help="Skip interactive Test 6 live streaming (used by setup wizard).",
+    )
+
     args = parser.parse_args()
 
     name = args.broker_module_name
     pair_override = args.pair
-    ok = asyncio.run(_run_tests(name, pair_override=pair_override))
+    ok = asyncio.run(_run_tests(name, pair_override=pair_override, skip_live_test=args.skip_live_test))
 
     print()
     if ok:
@@ -306,6 +335,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

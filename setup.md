@@ -1,143 +1,195 @@
 [Back to README](./README.md)
 
-# Setup
+# SETUP
 
-This document contains environment configuration, installation, startup, and module-level smoke tests.
+This guide is for first-time users and production-like installs.
 
-## Configuration
+It has two parts:
+- **Part A (recommended):** run setup scripts (`setup_windows` / `setup_linux`).
+- **Part B (manual):** do the same steps by hand (and understand what the scripts do internally).
 
-### `config/system.json5` — central config
+## Before You Start
 
-One file contains everything: all agents, their tools, prompts, timers, and module
-references. The system reads only this file at startup.
+Collect this information first:
+- Which broker adapter(s) you need (for example `oanda`, `mt5`).
+- Which LLM adapter(s) you need (for example `anthropic`, `azure`, `openai`, `lmstudio`, `ollama`).
+- Credentials and account information for selected providers.
+- One test pair (for example `EURUSD`) for connectivity checks.
 
-```json
+Minimum startup requirement:
+- At least one entry in `modules.llm` and one entry in `modules.broker` in `config/system.json5`.
+
+---
+
+## Part A: Automated Setup (Recommended)
+
+### 1. Prerequisites
+
+Windows:
+- Python 3.11+
+- Node.js + npm
+- Git
+- PowerShell
+
+Linux:
+- Python 3.11+
+- Node.js + npm
+- Git
+- bash
+
+### 2. Run the setup script
+
+Windows:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
+```
+
+Linux:
+```bash
+bash scripts/setup_linux.sh
+```
+
+### 3. What the setup script does
+
+The script performs these steps (interactive terminal wizard via rich + questionary):
+1. Checks required tools (`python`, `git`, `npm`).
+2. Creates/updates virtual environment and installs Python dependencies.
+3. Builds the UI (`npm install`, `npm run build`).
+4. Discovers supported adapters dynamically from code:
+   - `openforexai/adapters/brokers/`
+   - `openforexai/adapters/llm/`
+5. Reads adapter metadata from:
+   - `config/modules/broker/<adapter>.meta.json5`
+   - `config/modules/llm/<adapter>.meta.json5`
+6. For each selected adapter, asks for a config name and creates module config from sample:
+   - source: `config/modules/<kind>/<adapter>.sample.json5`
+   - target: `config/modules/<kind>/<adapter>.<config_name>.json5`
+7. Writes selected module references into `config/system.json5` under:
+   - `modules.llm`
+   - `modules.broker`
+8. Scans selected module config files for `${...}` placeholders.
+9. Prompts missing values and writes them to local `.env`.
+10. Creates start scripts:
+   - Windows: `start_openforexai.ps1` and `start_openforexai.cmd`
+   - Linux: `start_openforexai.sh`
+11. Optionally runs smoke tests:
+   - `python tools/test_broker.py <broker_module_name> <PAIR>`
+   - `python tools/test_llm.py <llm_module_name>`
+12. Optionally starts OpenForexAI.
+
+### 4. After automated setup
+
+Start command:
+- Windows: `./start_openforexai.ps1`
+- Linux: `./start_openforexai.sh`
+
+If startup is blocked, verify:
+- `config/system.json5` contains at least one broker and one LLM module reference.
+- `.env` contains all required credentials for selected modules.
+
+---
+
+## Part B: Manual Setup (Same Steps by Hand)
+
+Use this if you want full control or to debug setup issues.
+
+### 1. Create environment and install dependencies
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+
+pip install -e ".[all]"
+```
+
+### 2. Build UI
+
+```bash
+cd ui
+npm install
+npm run build
+cd ..
+```
+
+### 3. Choose adapters and create module config files
+
+For each selected adapter:
+1. Start from `<adapter>.sample.json5`.
+2. Copy to `<adapter>.<config_name>.json5`.
+
+Examples:
+- `config/modules/broker/mt5.sample.json5` -> `config/modules/broker/mt5.oxs_t.json5`
+- `config/modules/llm/azure.sample.json5` -> `config/modules/llm/azure.main.json5`
+
+### 4. Create custom config `config/system.json5`
+
+Do **not** modify `config/config.default.json5`.
+
+Create `config/system.json5` and reference your created module files:
+
+```json5
 {
-  "system": {
-    "log_level": "INFO",
-    "management_api": {"host": "127.0.0.1", "port": 8765}
-  },
-  "database": {
-    "backend": "sqlite",
-    "sqlite_path": "${OPENFOREXAI_DB_PATH:-./data/openforexai.db}"
-  },
-  "modules": {
-    "llm":    {"anthropic_claude": "config/modules/llm/anthropic_claude.json5"},
-    "broker": {"oanda": "config/modules/broker/oanda.json5"}
-  },
-  "agents": {
-    "OANDA_EURUSD_AA_ANLYS": {
-      "type": "AA",
-      "llm": "anthropic_claude",
-      "broker": "oanda",
-      "pair": "EURUSD",
-      "timer": {"enabled": true, "interval_seconds": 300},
-      "event_triggers": ["m5_candle_available", "prompt_updated"],
-      "system_prompt": "You are a professional Forex analysis agent for EURUSD...",
-      "tool_config": { ... }
+  modules: {
+    llm: {
+      azure_main: "config/modules/llm/azure.main.json5"
+    },
+    broker: {
+      mt5_oxs_t: "config/modules/broker/mt5.oxs_t.json5"
     }
   }
 }
 ```
 
-All string values support `${VAR_NAME}` and `${VAR_NAME:-default}` env-var substitution.
+### 5. Configure secrets in `.env`
 
-### Module configs
+Read each selected module file and set all required `${...}` values in `.env`.
 
-```
-config/
-├── system.json5                      ← main config
-├── modules/
-│   ├── llm/
-│   │   └── anthropic_claude.json5    ← LLM credentials + settings
-│   └── broker/
-│       ├── oanda.json5               ← OANDA credentials
-│       └── mt5.json5                 ← MT5 credentials
-└── event_routing.json5               ← routing rules (hot-reloadable)
-```
-
-### Environment variables
-
-Set credentials in a `.env` file or export directly:
-(These are examples, the environment variables depends on your broker and LLM provider.)
+### 6. Validate selected modules
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-OANDA_API_KEY=...
-OANDA_ACCOUNT_ID=101-001-...
-OPENFOREXAI_LOG_LEVEL=INFO         # optional
-OPENFOREXAI_DB_PATH=./data/db.sqlite  # optional
-MANAGEMENT_API_KEY=secret          # optional, enables API auth
+python tools/test_broker.py <broker_module_name> <PAIR>
+python tools/test_llm.py <llm_module_name>
 ```
+
+Example:
+
+```bash
+python tools/test_broker.py mt5_oxs_t EURUSD
+python tools/test_llm.py azure_main
+```
+
+### 7. Start the app
+
+```bash
+python tools/openforexai-start.py
+```
+
+or platform script:
+- Windows: `./start_openforexai.ps1`
+- Linux: `./start_openforexai.sh`
 
 ---
 
-## Installation
+## Troubleshooting
 
-**Requirements:** Python 3.11+
+### Startup says broker/LLM missing
+- Check `config/system.json5` -> `modules.llm` and `modules.broker` are both non-empty.
 
-```bash
-git clone https://github.com/GeorgGebert/OpenForexAI.git
-cd OpenForexAI
+### Adapter not shown in setup
+- Verify adapter is registered in:
+  - `openforexai/adapters/brokers/__init__.py` or
+  - `openforexai/adapters/llm/__init__.py`
+- Verify sample file exists as `<adapter>.sample.json5` in matching config module folder.
 
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+### LLM test fails
+- Verify endpoint/model/deployment values in selected LLM module config.
+- Check all required API key env vars in `.env`.
 
-pip install -e ".[api]"     # core + FastAPI management server
+### Broker test fails
+- Verify broker credentials and account parameters.
+- For MT5, confirm terminal installation and account connectivity.
 
-# Optional extras:
-pip install -e ".[mt5]"     # MetaTrader 5 (Windows only)
-pip install -e ".[dev]"     # pytest, ruff, mypy
-pip install -e ".[all]"     # everything
-```
 
----
 
-## Quick start
 
-```bash
-# 1. Set credentials
-export ANTHROPIC_API_KEY=sk-ant-...
-export OANDA_API_KEY=...
-export OANDA_ACCOUNT_ID=101-001-...
-
-# 2. Run database migrations
-python scripts/db_migrate.py
-
-# 3. Start the system
-openforexai
-# or: python -m openforexai.main
-```
-
-The system will:
-- Load `config/system.json5`
-- Start all configured agents (they each request their own config via the EventBus)
-- Start broker background tasks (M5 streaming, account poll, sync)
-- Start the Management API on `localhost:8765`
-- Start the ConfigService
-
-In a second terminal, open the live monitor:
-
-```bash
-python tools/monitor.py
-```
-
----
-
-## Module tests
-
-Test an LLM or broker module independently — no full system startup needed:
-
-```bash
--> in the tools folder
-
-# Test LLM connectivity and tool-use
-python test_llm.py anthropic_claude
-
-# Test broker connectivity, account status, and candle fetching
-python test_broker.py oanda
-```
-
-Both scripts exit with code `0` on success, `1` on failure.
-
----

@@ -57,3 +57,5 @@ config/system.json5
 # Runtime audit exports
 tools/*.jsonl
 
+config/modules/llm/lmstudio.oss20b.json5
+config/modules/llm/lmstudio.quen25.json5
