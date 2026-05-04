@@ -1,0 +1,10 @@
+{
+  // OpenAI cloud LLM module configuration
+  "adapter": "openai",
+  "api_key": "${OPENAI_API_KEY}",
+  "model": "${OPENAI_MODEL:-gpt-4.1}",
+  "retry_attempts": 3,
+  "retry_base_delay": 1.0,
+  "temperature": 1.0,
+  "max_tokens": 4096
+}

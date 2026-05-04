@@ -1,0 +1,151 @@
+{
+  "bridge_tools": [
+    {
+      "name": "ask_ga_market_outlook",
+      "description": "Ask a global analysis agent for an additional market outlook and return its answer.",
+      "timeout_seconds": 90,
+      "question_description": "Specific question for the target agent, e.g. macro drivers for the next hours."
+    }
+  ],
+  "agents": [
+    {
+      "pattern": "*-*-AA-TRD*",
+      "_comment": "Trading Agents (Adapter Agent, per pair)",
+      "allowed_tools": [
+        "get_candles",
+        "calculate_indicator",
+        "get_account_status",
+        "get_open_positions",
+        "get_order_book",
+        "place_order",
+        "close_position",
+        "raise_alarm",
+        "trigger_sync"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all",
+        "70": "decision",
+        "90": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_candles",
+          "calculate_indicator",
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "place_order",
+          "close_position",
+          "raise_alarm",
+          "trigger_sync"
+        ],
+        "decision": [
+          "place_order",
+          "close_position",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm",
+          "close_position"
+        ]
+      },
+      "max_tool_turns": 10,
+      "max_tokens": 4096
+    },
+    {
+      "pattern": "*-ALL___-BA-SUP*",
+      "_comment": "Supervisor Agents (Broker Agent, per broker)",
+      "allowed_tools": [
+        "get_account_status",
+        "get_open_positions",
+        "get_order_book",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all",
+        "80": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_account_status",
+          "get_open_positions",
+          "get_order_book",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 5,
+      "max_tokens": 2048
+    },
+    {
+      "pattern": "GLOBL-*-GA-TA*",
+      "_comment": "TechnicalAnalysisAgent (Global Agent, singleton)",
+      "allowed_tools": [
+        "get_candles",
+        "calculate_indicator",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all",
+        "85": "safety"
+      },
+      "tier_tools": {
+        "all": [
+          "get_candles",
+          "calculate_indicator",
+          "raise_alarm"
+        ],
+        "safety": [
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 8,
+      "max_tokens": 4096
+    },
+    {
+      "pattern": "GLOBL-ALL___-GA-OPT*",
+      "_comment": "OptimizationAgent (Global Agent, singleton)",
+      "allowed_tools": [
+        "get_order_book",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all"
+      },
+      "tier_tools": {
+        "all": [
+          "get_order_book",
+          "raise_alarm"
+        ]
+      },
+      "max_tool_turns": 3,
+      "max_tokens": 8192
+    },
+    {
+      "pattern": "*",
+      "_comment": "Fallback — all other agents get read-only + alarm tools",
+      "allowed_tools": [
+        "get_candles",
+        "get_account_status",
+        "raise_alarm"
+      ],
+      "approval_modes": {},
+      "context_tiers": {
+        "0": "all"
+      },
+      "tier_tools": {
+        "all": [
+          "*"
+        ]
+      },
+      "max_tool_turns": 5,
+      "max_tokens": 2048
+    }
+  ]
+}

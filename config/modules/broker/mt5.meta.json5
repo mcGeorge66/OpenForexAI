@@ -1,0 +1,5 @@
+{
+  display_name: "MetaTrader 5 Broker",
+  description: "Connects to a local MetaTrader 5 terminal instance.",
+  notes: "Recommended on Windows. Requires account id, password, server, optional installation path."
+}

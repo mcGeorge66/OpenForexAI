@@ -1,0 +1,18 @@
+{
+  // Broker module configuration
+  // This file is managed by the module owner. The system only loads it by name.
+  "adapter":    "oanda|mt5",
+  // short_name must be exact 5 character long
+  "short_name": "TMPL1",
+  "api_key":    "${BR_KEY}",
+  "account_id": "${BR_ACCOUNT}",
+  "api_url":    "${BR_URL}",
+  "practice":   true,
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
+}
+
+

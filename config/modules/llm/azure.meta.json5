@@ -1,0 +1,5 @@
+{
+  display_name: "Azure OpenAI",
+  description: "Azure-hosted OpenAI deployment endpoint.",
+  notes: "Requires endpoint, deployment, model, and API version placeholders."
+}
