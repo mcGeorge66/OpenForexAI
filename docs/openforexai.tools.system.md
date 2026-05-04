@@ -80,7 +80,7 @@ Triggers an immediate order book synchronisation between the local database and 
 
 ## Context Tier Placement
 
-System tools are always available regardless of context budget:
+If you choose to enable optional context tiers, system tools are the ones that should remain available last:
 
 | Tier | Tools included |
 |---|---|
@@ -91,5 +91,10 @@ This ensures that even when the agent is running out of context window, it can s
 - Raise a critical alarm
 - Close a dangerous position
 
+Other trading tools such as `place_order`, `auto_place_order`, and `modify_order`
+should normally remain outside the final safety tier.
+
 This design prevents scenarios where a nearly-full context causes the agent to be unable to respond to emergencies.
+
+In the current default project configuration, context-tier gating is not enabled, so tool visibility is controlled by `allowed_tools`.
 

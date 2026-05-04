@@ -2,11 +2,11 @@
   // Azure OpenAI LLM module configuration
   // This file is managed by the module owner. The system only loads it by name.
   "adapter": "azure",
-  "api_key": "${OAI_AZURE_KEY}",
-  "endpoint": "${OAI_AZURE_ENDPOINT}",
-  "deployment": "${OAI_DEPLOYMENT}",
-  "model": "${OAI_MODEL}",
-  "api_version": "${OAI_API_VERSION}",
+  "api_key": "${OAI-AZURE-KEY}",
+  "endpoint": "${OAI-AZURE-ENDPOINT}",
+  "deployment": "${OAI-DEPLOYMENT}",
+  "model": "${OAI-MODEL}",
+  "api_version": "${OAI-API-VERSION}",
   "retry_attempts": 3,
   "retry_base_delay": 1.0,
   "temperature": 1.0,

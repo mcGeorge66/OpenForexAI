@@ -313,6 +313,11 @@ class OANDABroker(BrokerBase):
             "instrument": instrument,
             "units": str(units),
         }
+        if order.sync_key:
+            order_body["clientExtensions"] = {
+                "comment": order.sync_key,
+                "tag": "OpenForexAI",
+            }
 
         # ── Common SL/TP ─────────────────────────────────────────────────────
         if signal.stop_loss:
@@ -405,14 +410,76 @@ class OANDABroker(BrokerBase):
                 take_profit=Decimal(tp) if tp else None,
                 unrealized_pnl=Decimal(t.get("unrealizedPL", "0")),
                 opened_at=datetime.fromisoformat(t["openTime"].replace("Z", "+00:00")),
+                sync_key=(
+                    t.get("clientExtensions", {}).get("comment")
+                    or t.get("tradeClientExtensions", {}).get("comment")
+                ),
             ))
         return positions
 
-    async def close_position(self, position_id: str) -> TradeResult:
+    async def modify_position(
+        self,
+        position_id: str,
+        stop_loss: Decimal | None = None,
+        take_profit: Decimal | None = None,
+    ) -> TradeResult:
+        if stop_loss is None and take_profit is None:
+            raise ValueError("At least one of stop_loss or take_profit must be provided")
+
         client = self._c()
+        body: dict[str, dict[str, str]] = {}
+        if stop_loss is not None:
+            body["stopLoss"] = {"price": str(stop_loss)}
+        if take_profit is not None:
+            body["takeProfit"] = {"price": str(take_profit)}
         resp = await retry_async(
             lambda: client.put(
-                f"/v3/accounts/{self._account_id}/trades/{position_id}/close"
+                f"/v3/accounts/{self._account_id}/trades/{position_id}/orders",
+                content=json.dumps(body),
+            ),
+            attempts=3,
+        )
+        resp.raise_for_status()
+
+        from openforexai.models.trade import TradeSignal
+
+        dummy_signal = TradeSignal(
+            pair="",
+            direction=TradeDirection.BUY,
+            entry_price=Decimal("0"),
+            stop_loss=stop_loss or Decimal("0"),
+            take_profit=take_profit or Decimal("0"),
+            confidence=0.0,
+            reasoning="position modify",
+            generated_at=datetime.now(UTC),
+            agent_id="supervisor",
+        )
+        dummy_order = TradeOrder(
+            signal=dummy_signal,
+            units=0,
+            risk_pct=0.0,
+            approved_by="supervisor",
+        )
+        return TradeResult(
+            order=dummy_order,
+            broker_order_id=position_id,
+            broker_name=self._short_name,
+            status=TradeStatus.OPEN,
+            opened_at=datetime.now(UTC),
+        )
+
+    async def close_position(self, position_id: str, units: int | None = None) -> TradeResult:
+        client = self._c()
+        positions = await self.get_open_positions()
+        target = next((p for p in positions if p.broker_position_id == position_id), None)
+        if target is None:
+            raise ValueError(f"OANDA: position {position_id!r} not found")
+
+        body = {"units": str(units)} if units is not None else None
+        resp = await retry_async(
+            lambda: client.put(
+                f"/v3/accounts/{self._account_id}/trades/{position_id}/close",
+                content=json.dumps(body) if body is not None else None,
             ),
             attempts=3,
         )
@@ -434,19 +501,71 @@ class OANDABroker(BrokerBase):
         )
         dummy_order = TradeOrder(
             signal=dummy_signal,
-            units=0,
+            units=units if units is not None else target.units,
             risk_pct=0.0,
             approved_by="supervisor",
         )
+        close_units = units if units is not None else target.units
+        status = TradeStatus.CLOSED if close_units >= target.units else TradeStatus.OPEN
         return TradeResult(
             order=dummy_order,
             broker_order_id=position_id,
             broker_name=self._short_name,
-            status=TradeStatus.CLOSED,
+            status=status,
             fill_price=Decimal(data["price"]) if data.get("price") else None,
             pnl=Decimal(data.get("pl", "0")),
-            closed_at=datetime.now(UTC),
+            closed_at=datetime.now(UTC) if status == TradeStatus.CLOSED else None,
         )
+
+    async def get_closed_trade_result(
+        self,
+        position_id: str,
+        *,
+        pair: str | None = None,
+        sync_key: str | None = None,
+    ) -> dict[str, object] | None:
+        client = self._c()
+        if not position_id:
+            return None
+
+        resp = await retry_async(
+            lambda: client.get(f"/v3/accounts/{self._account_id}/trades/{position_id}"),
+            attempts=2,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+
+        trade = resp.json().get("trade", {})
+        if not isinstance(trade, dict):
+            return None
+
+        realized_pl = trade.get("realizedPL")
+        average_close_price = trade.get("averageClosePrice")
+        close_time = trade.get("closeTime")
+        state = str(trade.get("state", "")).upper()
+        current_units = str(trade.get("currentUnits", ""))
+        if state not in {"CLOSED", "CLOSE"} and current_units not in {"0", "0.0"} and not close_time:
+            return None
+
+        closed_at = None
+        if isinstance(close_time, str) and close_time.strip():
+            closed_at = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+
+        close_reason_parts: list[str] = []
+        if state:
+            close_reason_parts.append(f"state={state}")
+        for key in ("financing", "dividendAdjustment", "guaranteedExecutionFee"):
+            value = trade.get(key)
+            if value not in (None, "", "0", "0.0"):
+                close_reason_parts.append(f"{key}={value}")
+
+        return {
+            "pnl_account_currency": Decimal(str(realized_pl)) if realized_pl is not None else None,
+            "close_price": Decimal(str(average_close_price)) if average_close_price is not None else None,
+            "closed_at": closed_at,
+            "close_reason": "; ".join(close_reason_parts) if close_reason_parts else None,
+        }
 
 
 

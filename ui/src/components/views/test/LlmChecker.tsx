@@ -367,7 +367,7 @@ export function LlmChecker() {
   }
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void send()
     }
@@ -393,7 +393,7 @@ export function LlmChecker() {
               <div className="text-center text-gray-600 mt-16 text-sm">
                 Select an LLM, enable tools, and start a test dialog.
                 <br />
-                <span className="text-xs text-gray-700">Ctrl+Enter to send</span>
+                <span className="text-xs text-gray-700">Enter to send, Shift+Enter for newline</span>
               </div>
             )}
             {messages.map(msg => (
@@ -453,7 +453,7 @@ export function LlmChecker() {
                 Send
               </button>
             </div>
-            <p className="text-xs text-gray-600 mt-1">Ctrl+Enter to send</p>
+            <p className="text-xs text-gray-600 mt-1">Enter to send, Shift+Enter for newline</p>
           </div>
         </section>
 

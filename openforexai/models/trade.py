@@ -81,6 +81,7 @@ class TradeOrder(BaseModel):
     limit_price: Decimal | None = None          # LIMIT, STOP_LIMIT
     stop_price: Decimal | None = None           # STOP, STOP_LIMIT
     trailing_stop_distance: Decimal | None = None  # TRAILING_STOP, in pips
+    sync_key: str | None = None                 # short broker comment/client tag
 
 
 class TradeResult(BaseModel):
@@ -112,6 +113,7 @@ class Position(BaseModel):
     take_profit: Decimal | None = None
     unrealized_pnl: Decimal
     opened_at: datetime
+    sync_key: str | None = None
 
 
 class OrderBookEntry(BaseModel):
@@ -128,6 +130,7 @@ class OrderBookEntry(BaseModel):
     # ── Broker context ────────────────────────────────────────────────────────
     broker_name: str                            # which broker holds this trade
     broker_order_id: str | None = None          # set once broker confirms
+    sync_key: str | None = None                 # short broker comment/client tag
 
     # ── Trade definition ──────────────────────────────────────────────────────
     pair: str

@@ -5,18 +5,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type CandleBar } from '@/api/client'
+import { api, type AnalysisRecord, type CandleBar } from '@/api/client'
+import { ForexChart, type ForexChartMarker } from '@/components/charts/ForexChart'
 import { useAgents } from '@/hooks/useAgents'
 import { useMonitoringStream } from '@/hooks/useMonitoringStream'
 import { Send, Bot, User, Copy } from 'lucide-react'
-import {
-  CandlestickSeries,
-  HistogramSeries,
-  createChart,
-  type IChartApi,
-  type ISeriesApi,
-  type UTCTimestamp,
-} from 'lightweight-charts'
 
 interface ChatMessage {
   id: string
@@ -28,6 +21,18 @@ interface ChatMessage {
 
 function now(): string {
   return new Date().toISOString().replace('T', ' ').substring(11, 19) + ' UTC'
+}
+
+function findNearestCandleTimestamp(candles: CandleBar[], targetTimestamp: string): string | null {
+  if (!candles.length) return null
+  const targetMs = new Date(targetTimestamp).getTime()
+  if (!Number.isFinite(targetMs)) return candles[0]?.timestamp ?? null
+  const nearest = [...candles].sort(
+    (left, right) =>
+      Math.abs(new Date(left.timestamp).getTime() - targetMs) -
+      Math.abs(new Date(right.timestamp).getTime() - targetMs),
+  )[0]
+  return nearest?.timestamp ?? null
 }
 
 function formatAssistantContent(raw: string): string {
@@ -104,168 +109,6 @@ function formatAssistantContent(raw: string): string {
   return raw
 }
 
-function ForexChart({ candles }: { candles: CandleBar[] }) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const chartRef = useRef<IChartApi | null>(null)
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-  const visibleRef = useRef<CandleBar[]>([])
-  const [range, setRange] = useState(100)
-  const [hovered, setHovered] = useState<CandleBar | null>(null)
-  const visibleCandles = candles.slice(-Math.max(1, Math.min(range, candles.length)))
-
-  useEffect(() => {
-    visibleRef.current = visibleCandles
-  }, [visibleCandles])
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-
-    const chart = createChart(el, {
-      width: el.clientWidth,
-      height: el.clientHeight || 320,
-      layout: {
-        background: { color: '#111827' },
-        textColor: '#9ca3af',
-      },
-      grid: {
-        vertLines: { color: '#1f2937' },
-        horzLines: { color: '#1f2937' },
-      },
-      timeScale: {
-        borderColor: '#374151',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      rightPriceScale: {
-        borderColor: '#374151',
-      },
-      crosshair: {
-        vertLine: { color: '#4b5563' },
-        horzLine: { color: '#4b5563' },
-      },
-    })
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981',
-      downColor: '#ef4444',
-      borderVisible: false,
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
-      priceFormat: {
-        type: 'price',
-        precision: 5,
-        minMove: 0.00001,
-      },
-    })
-    const volume = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'volume',
-    })
-    chart.priceScale('right').applyOptions({
-      scaleMargins: { top: 0.08, bottom: 0.32 },
-    })
-    chart.priceScale('volume').applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0 },
-    })
-
-    chartRef.current = chart
-    seriesRef.current = series
-    volumeRef.current = volume
-
-    const onCrosshairMove = (param: { time?: unknown }) => {
-      if (typeof param.time !== 'number') {
-        setHovered(null)
-        return
-      }
-      const c = visibleRef.current.find(
-        item => Math.floor(new Date(item.timestamp).getTime() / 1000) === param.time,
-      )
-      setHovered(c ?? null)
-    }
-    chart.subscribeCrosshairMove(onCrosshairMove)
-
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect
-        chart.applyOptions({ width, height: Math.max(240, height) })
-      }
-    })
-    ro.observe(el)
-
-    return () => {
-      chart.unsubscribeCrosshairMove(onCrosshairMove)
-      ro.disconnect()
-      chart.remove()
-      chartRef.current = null
-      seriesRef.current = null
-      volumeRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    const series = seriesRef.current
-    const volume = volumeRef.current
-    const chart = chartRef.current
-    if (!series || !volume || !chart) return
-    const data = visibleCandles
-      .map(c => ({
-        time: Math.floor(new Date(c.timestamp).getTime() / 1000) as UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }))
-      .sort((a, b) => (a.time - b.time))
-    const vol = visibleCandles
-      .map(c => ({
-        time: Math.floor(new Date(c.timestamp).getTime() / 1000) as UTCTimestamp,
-        value: c.tick_volume,
-        color: c.close >= c.open ? 'rgba(16,185,129,0.45)' : 'rgba(239,68,68,0.45)',
-      }))
-      .sort((a, b) => (a.time - b.time))
-    series.setData(data)
-    volume.setData(vol)
-    chart.timeScale().fitContent()
-
-  }, [visibleCandles])
-
-  return (
-    <div className="w-full h-full min-h-[260px] flex flex-col gap-2">
-      <div className="flex items-center justify-between text-xs text-gray-400">
-        <div>
-          {hovered ? (
-            <span>
-              {hovered.timestamp} | O {hovered.open.toFixed(5)} H {hovered.high.toFixed(5)} L {hovered.low.toFixed(5)} C {hovered.close.toFixed(5)}
-            </span>
-          ) : (
-            <span>Move mouse over a candle for OHLC.</span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {[20, 50, 100].map(n => (
-            <button
-              key={n}
-              onClick={() => setRange(n)}
-              className={[
-                'px-2 py-0.5 rounded border text-xs',
-                range === n
-                  ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
-                  : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-gray-200',
-              ].join(' ')}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex-1 border border-gray-700 rounded overflow-hidden">
-        <div ref={containerRef} className="w-full h-full" />
-      </div>
-    </div>
-  )
-}
-
 export function AgentChat() {
   const { agents, loading: agentsLoading } = useAgents()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -283,6 +126,9 @@ export function AgentChat() {
   const [candlesLoading, setCandlesLoading] = useState(false)
   const [candlesError, setCandlesError] = useState<string | null>(null)
   const [chartTimeframe, setChartTimeframe] = useState<'M5' | 'M15' | 'M30' | 'H1'>('M5')
+  const [showAnalyses, setShowAnalyses] = useState(true)
+  const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>([])
+  const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { events: candleEvents } = useMonitoringStream({
     filter: ['m5_candle_queued'],
@@ -347,6 +193,45 @@ export function AgentChat() {
 
     void refreshCandles()
   }, [candleEvents, refreshCandles, selectedAgent])
+
+  useEffect(() => {
+    if (!selectedAgent || !selectedAgent.includes('-AA-') || !showAnalyses) {
+      setAnalysisRecords([])
+      return
+    }
+    let cancelled = false
+    async function loadAnalyses() {
+      try {
+        const data = await api.getAnalyses({ agent_id: selectedAgent, limit: 300 })
+        if (!cancelled) setAnalysisRecords(data)
+      } catch {
+        if (!cancelled) setAnalysisRecords([])
+      }
+    }
+    void loadAnalyses()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAgent, showAnalyses])
+
+  const analysisMarkers: ForexChartMarker[] = showAnalyses
+    ? ((analysisRecords
+        .map(record => {
+          const markerTimestamp = findNearestCandleTimestamp(candles, record.decided_at)
+          if (!markerTimestamp) return null
+          const decision = String(record.decision ?? '').toUpperCase()
+          const label = decision === 'BIAS_LONG' ? 'U' : decision === 'BIAS_SHORT' ? 'D' : 'N'
+          return {
+            timestamp: markerTimestamp,
+            position: 'inBar',
+            shape: 'square',
+            color: '#fb923c',
+            text: label,
+            payload: record,
+          } satisfies ForexChartMarker
+        })
+        .filter(Boolean)) as ForexChartMarker[])
+    : []
 
   const persistInstruction = async (showStatus = true) => {
     if (!selectedAgent || !systemConfig) return
@@ -418,7 +303,7 @@ export function AgentChat() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
     }
@@ -507,10 +392,10 @@ export function AgentChat() {
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 && (
-              <div className="text-center text-gray-600 mt-16 text-sm">
-                Select an agent and send a question.<br />
-                <span className="text-xs text-gray-700">Ctrl+Enter to send quickly</span>
-              </div>
+                <div className="text-center text-gray-600 mt-16 text-sm">
+                  Select an agent and send a question.<br />
+                  <span className="text-xs text-gray-700">Enter to send, Shift+Enter for newline</span>
+                </div>
             )}
             {messages.map(msg => (
               <div
@@ -583,7 +468,7 @@ export function AgentChat() {
                 Send
               </button>
             </div>
-            <p className="text-xs text-gray-600 mt-1">Ctrl+Enter to send</p>
+            <p className="text-xs text-gray-600 mt-1">Enter to send, Shift+Enter for newline</p>
           </div>
         </section>
 
@@ -607,17 +492,6 @@ export function AgentChat() {
                   <p className="text-xs text-gray-400">
                     Last 100 {chartTimeframe} candles for {selectedAgent}
                   </p>
-                  <label className="text-xs text-gray-500">Timeframe:</label>
-                  <select
-                    value={chartTimeframe}
-                    onChange={e => setChartTimeframe(e.target.value as 'M5' | 'M15' | 'M30' | 'H1')}
-                    className="bg-gray-800 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="M5">M5</option>
-                    <option value="M15">M15</option>
-                    <option value="M30">M30</option>
-                    <option value="H1">H1</option>
-                  </select>
                   <span
                     className={[
                       'text-xs min-w-[130px] text-right',
@@ -632,7 +506,40 @@ export function AgentChat() {
                 <>
                   <div className="h-1/2 min-h-[260px]">
                     {candles.length > 0 ? (
-                      <ForexChart candles={candles} />
+                      <ForexChart
+                        candles={candles}
+                        markers={analysisMarkers}
+                        controls={(
+                          <>
+                            <label className="inline-flex items-center gap-1 text-xs text-gray-400 mr-2">
+                              <input
+                                type="checkbox"
+                                checked={showAnalyses}
+                                onChange={e => setShowAnalyses(e.target.checked)}
+                                className="rounded border-gray-600 bg-gray-900 text-emerald-500"
+                              />
+                              Show the Analyses
+                            </label>
+                            {(['M5', 'M15', 'M30', 'H1'] as const).map(tf => (
+                              <button
+                                key={tf}
+                                onClick={() => setChartTimeframe(tf)}
+                                className={[
+                                  'px-2 py-0.5 rounded border text-xs',
+                                  chartTimeframe === tf
+                                    ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
+                                    : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+                                ].join(' ')}
+                              >
+                                {tf}
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        onMarkerSelect={marker => {
+                          if (marker.payload) setSelectedAnalysis(marker.payload as AnalysisRecord)
+                        }}
+                      />
                     ) : (
                       <div className="text-xs text-gray-500 border border-gray-700 rounded p-3 bg-gray-900">
                         No candle data available.
@@ -640,7 +547,7 @@ export function AgentChat() {
                     )}
                   </div>
                   <div className="flex-1 min-h-0 border border-gray-800 rounded p-3 text-xs text-gray-500 bg-gray-900/40">
-                    Additional AA context area.
+                    Analysis markers come from persisted `analysis_result` events and do not change the live AA workflow.
                   </div>
                 </>
               </div>
@@ -648,6 +555,51 @@ export function AgentChat() {
           </div>
         </aside>
       </div>
+      {selectedAnalysis && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl max-h-[85vh] bg-gray-950 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-100">AA Recommendation</h3>
+                <p className="text-sm text-gray-400">
+                  {selectedAnalysis.pair ?? '-'} · {selectedAnalysis.decision ?? '-'} · {selectedAnalysis.decided_at}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedAnalysis(null)}
+                className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-sm"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-5 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Decision</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.decision ?? '-'}</div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Confidence</div>
+                  <div className="text-gray-100 mt-1">
+                    {typeof selectedAnalysis.confidence === 'number' ? selectedAnalysis.confidence.toFixed(2) : '-'}
+                  </div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Order Start</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.order_start_signal ?? '-'}</div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Entry Quality</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.entry_quality ?? '-'}</div>
+                </div>
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
+                {selectedAnalysis.analysis_text || JSON.stringify(selectedAnalysis.analysis ?? selectedAnalysis.output, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

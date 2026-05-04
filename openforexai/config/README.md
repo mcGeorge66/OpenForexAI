@@ -8,7 +8,7 @@ Handles all configuration loading and the runtime distribution of agent configs 
 |---|---|
 | `config_service.py` | `ConfigService` — EventBus agent that answers config requests |
 | `json_loader.py` | JSON loader with `${ENV_VAR:-default}` substitution |
-| `../../config/RunTime/agent_tools.json5` | Per-agent tool approval modes and tier configuration |
+| `../../config/RunTime/agent_tools.json5` | Bridge-tool definitions only |
 | `../../config/RunTime/event_routing.json5` | EventBus routing rules |
 
 ---
@@ -95,30 +95,28 @@ Substitution is applied recursively to all string values at any nesting level.
 
 ---
 
-## `config/RunTime/agent_tools.json5` — Tool Approval Configuration
+## `config/RunTime/agent_tools.json5` — Bridge Tool Configuration
 
-Configures per-agent tool approval modes and context budget tiers. This file allows fine-grained control over when tools require human/supervisor approval.
+This file is no longer used for normal agent tool assignment.
+Tool visibility and limits must live explicitly in each agent's own `tool_config`
+inside the system config.
+
+`agent_tools.json5` is now reserved for top-level `bridge_tools` only.
 
 ### Structure
 
 ```json
 {
-  "defaults": {
-    "place_order":    {"approval_mode": "supervisor"},
-    "close_position": {"approval_mode": "supervisor"},
-    "raise_alarm":    {"approval_mode": "direct"}
-  },
-  "agents": {
-    "OAPR1_ALL..._BA_TRADE": {
-      "tool_overrides": {
-        "place_order": {"approval_mode": "direct"}
-      }
+  "bridge_tools": [
+    {
+      "name": "ask_ga_market_outlook",
+      "description": "Ask a global analysis agent for an additional market outlook and return its answer.",
+      "timeout_seconds": 90,
+      "question_description": "Specific question for the target agent, e.g. macro drivers for the next hours."
     }
-  }
+  ]
 }
 ```
-
-Agent-level overrides take precedence over defaults.
 
 ---
 

@@ -47,6 +47,7 @@ class MonitoringEventType(StrEnum):
     AGENT_TOOL_CALLED = "agent_tool_called"
     AGENT_TOOL_RESULT = "agent_tool_result"
     AGENT_ALARM = "agent_alarm"
+    AGENT_INPUT_BUILT = "agent_input_built"
 
     # ── Tool dispatcher ───────────────────────────────────────────────────────
     TOOL_CALL_STARTED = "tool_call_started"

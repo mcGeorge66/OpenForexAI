@@ -1,0 +1,654 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FileText, Printer, RefreshCcw } from 'lucide-react'
+
+import {
+  api,
+  type AnalysisRecord,
+  type CandleBar,
+  type OrderbookEntryDetail,
+  type OrderbookEntrySummary,
+} from '@/api/client'
+import {
+  ForexChart,
+  type ForexChartHandle,
+  type ForexChartMarker,
+  type ForexChartPriceLine,
+} from '@/components/charts/ForexChart'
+
+type StatusFilter = 'all' | 'open' | 'closed' | 'pending' | 'partially_filled' | 'rejected' | 'cancelled'
+type ChartTimeframe = 'M5' | 'M15' | 'M30' | 'H1'
+
+function formatTs(value?: string | null): string {
+  if (!value) return 'running'
+  return value.replace('T', ' ').replace('+00:00', ' UTC')
+}
+
+function formatMoney(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return value.toFixed(2)
+}
+
+function formatPrice(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return value.toFixed(5)
+}
+
+function getTradeStartAt(
+  entry: Pick<OrderbookEntrySummary, 'requested_at' | 'opened_at'> | null | undefined,
+): string | null {
+  return entry?.opened_at ?? entry?.requested_at ?? null
+}
+
+function getTradeEndAt(entry: Pick<OrderbookEntrySummary, 'closed_at'> | null | undefined): string | null {
+  return entry?.closed_at ?? null
+}
+
+function findMarkerTimestamp(
+  candles: CandleBar[],
+  targetTimestamp: string | null,
+  targetPrice?: number | null,
+): string | null {
+  if (!targetTimestamp || candles.length === 0) return candles[0]?.timestamp ?? null
+  const targetMs = new Date(targetTimestamp).getTime()
+  if (!Number.isFinite(targetMs)) return candles[0]?.timestamp ?? null
+
+  const byTime = [...candles].sort(
+    (left, right) =>
+      Math.abs(new Date(left.timestamp).getTime() - targetMs) -
+      Math.abs(new Date(right.timestamp).getTime() - targetMs),
+  )
+  const nearby = byTime.slice(0, Math.min(8, byTime.length))
+
+  if (typeof targetPrice === 'number' && Number.isFinite(targetPrice)) {
+    const containing = nearby.find(candle => candle.low <= targetPrice && candle.high >= targetPrice)
+    if (containing) return containing.timestamp
+  }
+
+  return byTime[0]?.timestamp ?? candles[0]?.timestamp ?? null
+}
+
+function buildPriceLines(entry: OrderbookEntryDetail | null): ForexChartPriceLine[] {
+  if (!entry) return []
+  const overlays = entry.analysis_overlays?.levels ?? {}
+  const lines: ForexChartPriceLine[] = []
+  if (typeof entry.fill_price === 'number') {
+    lines.push({ price: entry.fill_price, title: 'Entry', color: '#38bdf8' })
+  } else {
+    lines.push({ price: entry.requested_price, title: 'Requested', color: '#38bdf8' })
+  }
+  if (typeof entry.close_price === 'number') {
+    lines.push({ price: entry.close_price, title: 'Exit', color: '#f59e0b' })
+  }
+  if (typeof entry.stop_loss === 'number') {
+    lines.push({ price: entry.stop_loss, title: 'SL', color: '#ef4444' })
+  }
+  if (typeof entry.take_profit === 'number') {
+    lines.push({ price: entry.take_profit, title: 'TP', color: '#22c55e' })
+  }
+  for (const value of overlays.support ?? []) {
+    lines.push({ price: value, title: 'Support', color: '#14b8a6' })
+  }
+  for (const value of overlays.resistance ?? []) {
+    lines.push({ price: value, title: 'Resistance', color: '#a855f7' })
+  }
+  return lines
+}
+
+function buildMarkers(entry: OrderbookEntryDetail | null, candles: CandleBar[]): ForexChartMarker[] {
+  if (!entry || candles.length === 0) return []
+  const entryPrice = entry.fill_price ?? entry.requested_price
+  const requestedTime = findMarkerTimestamp(candles, getTradeStartAt(entry), entryPrice)
+  const closedTime = findMarkerTimestamp(candles, getTradeEndAt(entry), entry.close_price)
+  const markers: ForexChartMarker[] = []
+  if (requestedTime) {
+    markers.push({
+      timestamp: requestedTime,
+      position: entry.direction === 'BUY' ? 'belowBar' : 'aboveBar',
+      shape: entry.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
+      color: '#38bdf8',
+      text: 'Start',
+    })
+  }
+  if (closedTime) {
+    markers.push({
+      timestamp: closedTime,
+      position: entry.direction === 'BUY' ? 'aboveBar' : 'belowBar',
+      shape: 'circle',
+      color: '#f59e0b',
+      text: 'End',
+    })
+  }
+  return markers
+}
+
+function buildAnalysisMarkers(records: AnalysisRecord[], candles: CandleBar[]): ForexChartMarker[] {
+  const markers: Array<ForexChartMarker | null> = records
+    .map(record => {
+      const timestamp = findMarkerTimestamp(candles, record.decided_at, null)
+      if (!timestamp) return null
+      const decision = String(record.decision ?? '').toUpperCase()
+      const label = decision === 'BIAS_LONG' ? 'U' : decision === 'BIAS_SHORT' ? 'D' : 'N'
+      return {
+        timestamp,
+        position: 'inBar',
+        shape: 'square',
+        color: '#fb923c',
+        text: label,
+        payload: record,
+      } satisfies ForexChartMarker
+    })
+  return markers.filter((marker): marker is ForexChartMarker => marker !== null)
+}
+
+export function Orderbook() {
+  const [entries, setEntries] = useState<OrderbookEntrySummary[]>([])
+  const [selectedId, setSelectedId] = useState<string>('')
+  const [selectedEntry, setSelectedEntry] = useState<OrderbookEntryDetail | null>(null)
+  const [candles, setCandles] = useState<CandleBar[]>([])
+  const [loading, setLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M5')
+  const [analysisOpen, setAnalysisOpen] = useState(false)
+  const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>([])
+  const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null)
+  const [showAnalyses, setShowAnalyses] = useState(true)
+  const [tablePercent, setTablePercent] = useState(48)
+  const [draggingDivider, setDraggingDivider] = useState(false)
+  const splitRootRef = useRef<HTMLDivElement | null>(null)
+  const chartRef = useRef<ForexChartHandle | null>(null)
+
+  const refreshEntries = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await api.getOrderbookEntries({ status_filter: statusFilter, limit: 300 })
+      setEntries(data)
+      setSelectedId(prev => (prev && data.some(entry => entry.id === prev) ? prev : (data[0]?.id ?? '')))
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [statusFilter])
+
+  useEffect(() => {
+    void refreshEntries()
+  }, [refreshEntries])
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedEntry(null)
+      setCandles([])
+      return
+    }
+    let cancelled = false
+    async function loadDetail() {
+      setDetailLoading(true)
+      try {
+        const [detail, chartCandles] = await Promise.all([
+          api.getOrderbookEntry(selectedId),
+          api.getOrderbookCandles(selectedId, chartTimeframe, 2000),
+        ])
+        if (cancelled) return
+        setSelectedEntry(detail)
+        setCandles(chartCandles)
+      } catch (err) {
+        if (!cancelled) setError(String(err))
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    }
+    void loadDetail()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId, chartTimeframe])
+
+  const selectedSummary = useMemo(
+    () => entries.find(entry => entry.id === selectedId) ?? null,
+    [entries, selectedId],
+  )
+
+  useEffect(() => {
+    const selectedPair = selectedSummary?.pair ?? null
+    if (!showAnalyses || !selectedPair) {
+      setAnalysisRecords([])
+      return
+    }
+    let cancelled = false
+    async function loadAnalyses() {
+      try {
+        const data = await api.getAnalyses({ pair: selectedPair, limit: 300 })
+        if (!cancelled) setAnalysisRecords(data)
+      } catch (err) {
+        if (!cancelled) setError(String(err))
+      }
+    }
+    void loadAnalyses()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSummary?.pair, showAnalyses])
+  const priceLines = useMemo(() => buildPriceLines(selectedEntry), [selectedEntry])
+  const markers = useMemo(() => {
+    const tradeMarkers = buildMarkers(selectedEntry, candles)
+    const analysisMarkers = showAnalyses ? buildAnalysisMarkers(analysisRecords, candles) : []
+    return [...tradeMarkers, ...analysisMarkers]
+  }, [selectedEntry, candles, showAnalyses, analysisRecords])
+  const timeframeControls = useMemo(
+    () => (
+      <>
+        <label className="inline-flex items-center gap-1 text-xs text-gray-400 mr-2">
+          <input
+            type="checkbox"
+            checked={showAnalyses}
+            onChange={e => setShowAnalyses(e.target.checked)}
+            className="rounded border-gray-600 bg-gray-900 text-emerald-500"
+          />
+          Show the Analyses
+        </label>
+        {(['M5', 'M15', 'M30', 'H1'] as ChartTimeframe[]).map(tf => (
+          <button
+            key={tf}
+            onClick={() => setChartTimeframe(tf)}
+            className={[
+              'px-2 py-0.5 rounded border text-xs',
+              chartTimeframe === tf
+                ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
+                : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+            ].join(' ')}
+          >
+            {tf}
+          </button>
+        ))}
+      </>
+    ),
+    [chartTimeframe, showAnalyses],
+  )
+  const tableBasis = `${tablePercent}%`
+  const chartBasis = `${100 - tablePercent}%`
+
+  useEffect(() => {
+    if (!draggingDivider) return
+    const root = splitRootRef.current
+    if (!root) return
+
+    const onPointerMove = (event: PointerEvent) => {
+      const rect = root.getBoundingClientRect()
+      const relative = ((event.clientY - rect.top) / rect.height) * 100
+      const bounded = Math.max(28, Math.min(72, relative))
+      setTablePercent(bounded)
+    }
+    const onPointerUp = () => setDraggingDivider(false)
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'row-resize'
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+  }, [draggingDivider])
+
+  const handlePrint = useCallback(() => {
+    if (!selectedEntry) return
+    const chartImage = chartRef.current?.captureImage() ?? null
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900')
+    if (!printWindow) {
+      setError('Unable to open print preview window.')
+      return
+    }
+    const indicators = (selectedEntry.analysis_overlays?.indicators ?? [])
+      .map(indicator => `<span class="pill">${indicator.name} ${indicator.value}</span>`)
+      .join('')
+    const supports = (selectedEntry.analysis_overlays?.levels?.support ?? []).map(formatPrice).join(', ') || '-'
+    const resistances = (selectedEntry.analysis_overlays?.levels?.resistance ?? []).map(formatPrice).join(', ') || '-'
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Trade Report ${selectedEntry.pair}</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
+      h1, h2 { margin: 0 0 10px; }
+      .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; }
+      .row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; margin: 4px 0; }
+      .label { color: #6b7280; font-size: 12px; text-transform: uppercase; }
+      .value { color: #111827; font-size: 14px; }
+      .pill { display: inline-block; padding: 2px 8px; margin: 2px 6px 2px 0; border: 1px solid #cbd5e1; border-radius: 999px; font-size: 12px; }
+      .chart { margin: 18px 0; }
+      .chart img { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; font-size: 12px; line-height: 1.5; }
+      @media print { body { margin: 12px; } }
+    </style>
+  </head>
+  <body>
+    <h1>Trade Report</h1>
+    <div class="value">${selectedEntry.pair} · ${selectedEntry.direction} · ${selectedEntry.status}</div>
+    <div class="meta">
+      <div class="card">
+        <h2>Timing</h2>
+        <div class="row"><div class="label">From</div><div class="value">${formatTs(getTradeStartAt(selectedEntry))}</div></div>
+        <div class="row"><div class="label">To</div><div class="value">${formatTs(getTradeEndAt(selectedEntry))}</div></div>
+        <div class="row"><div class="label">Close</div><div class="value">${selectedEntry.close_reason ?? 'running'}</div></div>
+      </div>
+      <div class="card">
+        <h2>Execution</h2>
+        <div class="row"><div class="label">Entry</div><div class="value">${formatPrice(selectedEntry.fill_price ?? selectedEntry.requested_price)}</div></div>
+        <div class="row"><div class="label">Exit</div><div class="value">${formatPrice(selectedEntry.close_price)}</div></div>
+        <div class="row"><div class="label">SL / TP</div><div class="value">${formatPrice(selectedEntry.stop_loss)} / ${formatPrice(selectedEntry.take_profit)}</div></div>
+        <div class="row"><div class="label">Units</div><div class="value">${selectedEntry.units.toLocaleString()}</div></div>
+      </div>
+      <div class="card">
+        <h2>Result</h2>
+        <div class="row"><div class="label">Stake</div><div class="value">${formatMoney(selectedEntry.stake_estimate)}</div></div>
+        <div class="row"><div class="label">PnL</div><div class="value">${formatMoney(selectedEntry.pnl_account_currency)}</div></div>
+        <div class="row"><div class="label">Decision</div><div class="value">${selectedEntry.decision_context?.decision ?? '-'}</div></div>
+        <div class="row"><div class="label">Confidence</div><div class="value">${selectedEntry.signal_confidence.toFixed(2)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>AA Context</h2>
+      <div class="row"><div class="label">Indicators</div><div class="value">${indicators || 'None'}</div></div>
+      <div class="row"><div class="label">Support</div><div class="value">${supports}</div></div>
+      <div class="row"><div class="label">Resistance</div><div class="value">${resistances}</div></div>
+    </div>
+    ${chartImage ? `<div class="chart"><h2>Chart</h2><img src="${chartImage}" alt="Trade chart" /></div>` : ''}
+    <div class="card">
+      <h2>AA Analysis</h2>
+      <pre>${(selectedEntry.analysis_text || 'No stored analysis.').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+    </div>
+    <script>
+      window.onload = () => {
+        window.print();
+      };
+    </script>
+  </body>
+</html>`
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }, [selectedEntry])
+
+  return (
+    <div className="h-full flex flex-col bg-gray-950 text-gray-100">
+      <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Orderbook</h2>
+          <p className="text-sm text-gray-400">Top half table, bottom half chart with entry, exit, and analysis lines.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {(['all', 'open', 'closed', 'rejected'] as StatusFilter[]).map(filter => (
+            <button
+              key={filter}
+              onClick={() => setStatusFilter(filter)}
+              className={[
+                'px-3 py-1 rounded border text-sm',
+                statusFilter === filter
+                  ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
+                  : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+              ].join(' ')}
+            >
+              {filter}
+            </button>
+          ))}
+          <button
+            onClick={() => void refreshEntries()}
+            className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white flex items-center gap-2 text-sm"
+          >
+            <RefreshCcw className={loading ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} />
+            Refresh
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={!selectedEntry}
+            className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+          >
+            <Printer className="w-4 h-4" />
+            Print
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="px-6 py-2 text-sm text-red-400 border-b border-red-900/40">{error}</div>}
+
+      <div ref={splitRootRef} className="flex-1 min-h-0 flex flex-col">
+        <section className="min-h-0 overflow-hidden" style={{ flexBasis: tableBasis }}>
+          <div className="h-full overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-gray-950/95 backdrop-blur border-b border-gray-800 text-gray-400">
+                <tr>
+                  <th className="px-3 py-2 text-left">Pair</th>
+                  <th className="px-3 py-2 text-left">From</th>
+                  <th className="px-3 py-2 text-left">To</th>
+                  <th className="px-3 py-2 text-right">Units</th>
+                  <th className="px-3 py-2 text-right">Stake</th>
+                  <th className="px-3 py-2 text-right">Result</th>
+                  <th className="px-3 py-2 text-left">Close</th>
+                  <th className="px-3 py-2 text-left">Analysis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map(entry => (
+                  <tr
+                    key={entry.id}
+                    onClick={() => setSelectedId(entry.id)}
+                    className={[
+                      'border-b border-gray-900 cursor-pointer hover:bg-gray-900/60',
+                      selectedId === entry.id ? 'bg-emerald-900/20' : '',
+                    ].join(' ')}
+                  >
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-gray-100">{entry.pair}</div>
+                      <div className="text-xs text-gray-500">{entry.direction} · {entry.status}</div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-300">{formatTs(getTradeStartAt(entry))}</td>
+                    <td className="px-3 py-2 text-gray-300">{formatTs(getTradeEndAt(entry))}</td>
+                    <td className="px-3 py-2 text-right text-gray-200">{entry.units.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right text-gray-200">{formatMoney(entry.stake_estimate)}</td>
+                    <td className={[
+                      'px-3 py-2 text-right',
+                      (entry.pnl_account_currency ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300',
+                    ].join(' ')}>
+                      {formatMoney(entry.pnl_account_currency)}
+                    </td>
+                    <td className="px-3 py-2 text-gray-300">
+                      <div>{entry.close_reason ?? 'running'}</div>
+                      <div className="text-xs text-gray-500 truncate max-w-[260px]">
+                        {entry.close_reasoning || entry.status}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={event => {
+                          event.stopPropagation()
+                          setSelectedId(entry.id)
+                          setAnalysisOpen(true)
+                        }}
+                        className="inline-flex items-center gap-2 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && entries.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                      No orders in the orderbook.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div
+          onPointerDown={() => setDraggingDivider(true)}
+          className="h-3 shrink-0 bg-gray-950 border-y border-gray-800 cursor-row-resize flex items-center justify-center"
+          title="Drag to resize table and chart"
+        >
+          <div className="w-16 h-1 rounded-full bg-gray-700" />
+        </div>
+
+        <section className="min-h-0 px-6 py-4 flex flex-col gap-4 overflow-hidden" style={{ flexBasis: chartBasis }}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-gray-100">
+                {selectedSummary ? `${selectedSummary.pair} · ${selectedSummary.direction}` : 'Select an order'}
+              </h3>
+              <p className="text-sm text-gray-400">
+                {selectedEntry?.decision_context?.decision ?? '-'} · Confidence {selectedEntry?.signal_confidence?.toFixed(2) ?? '-'} · {selectedEntry?.decision_context?.setup_type ?? '-'}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-[11px]">
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-2">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                <span className="text-gray-500">Entry</span>
+                <span className="text-gray-200 text-right">{formatPrice(selectedEntry?.fill_price ?? selectedEntry?.requested_price)}</span>
+                <span className="text-gray-500">Exit</span>
+                <span className="text-gray-200 text-right">{formatPrice(selectedEntry?.close_price)}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-2">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                <span className="text-gray-500">SL</span>
+                <span className="text-gray-200 text-right">{formatPrice(selectedEntry?.stop_loss)}</span>
+                <span className="text-gray-500">TP</span>
+                <span className="text-gray-200 text-right">{formatPrice(selectedEntry?.take_profit)}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-2">
+              <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1">
+                <span className="text-gray-500">Support</span>
+                <span className="text-gray-200 truncate">{(selectedEntry?.analysis_overlays?.levels?.support ?? []).map(formatPrice).join(', ') || '-'}</span>
+                <span className="text-gray-500">Resistance</span>
+                <span className="text-gray-200 truncate">{(selectedEntry?.analysis_overlays?.levels?.resistance ?? []).map(formatPrice).join(', ') || '-'}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-2">
+              <div className="flex flex-wrap gap-1.5">
+                {(selectedEntry?.analysis_overlays?.indicators ?? []).map(indicator => (
+                  <span
+                    key={`${indicator.name}-${indicator.timeframe}`}
+                    className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-200"
+                  >
+                    {indicator.name} {indicator.value}
+                  </span>
+                ))}
+                {(selectedEntry?.analysis_overlays?.indicators ?? []).length === 0 && (
+                  <span className="text-gray-500">No extracted indicator values.</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 rounded-xl border border-gray-800 bg-gray-900/40 p-3">
+            {detailLoading ? (
+              <div className="h-full flex items-center justify-center text-gray-500">Loading chart...</div>
+            ) : selectedEntry && candles.length > 0 ? (
+              <ForexChart
+                ref={chartRef}
+                candles={candles}
+                priceLines={priceLines}
+                markers={markers}
+                ranges={[50, 100, 200, 400]}
+                initialRange={200}
+                controls={timeframeControls}
+                onMarkerSelect={marker => {
+                  if (marker.payload) {
+                    setSelectedAnalysis(marker.payload as AnalysisRecord)
+                  }
+                }}
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                No chart data for the selected order.
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {analysisOpen && selectedEntry && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl max-h-[85vh] bg-gray-950 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-100">AA Analysis</h3>
+                <p className="text-sm text-gray-400">{selectedEntry.pair} · {selectedEntry.decision_context?.decision ?? '-'}</p>
+              </div>
+              <button
+                onClick={() => setAnalysisOpen(false)}
+                className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-sm"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
+                {selectedEntry.analysis_text || 'No stored analysis.'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedAnalysis && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl max-h-[85vh] bg-gray-950 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-100">AA Recommendation</h3>
+                <p className="text-sm text-gray-400">
+                  {selectedAnalysis.pair ?? '-'} · {selectedAnalysis.decision ?? '-'} · {formatTs(selectedAnalysis.decided_at)}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedAnalysis(null)}
+                className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-sm"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-5 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Decision</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.decision ?? '-'}</div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Confidence</div>
+                  <div className="text-gray-100 mt-1">
+                    {typeof selectedAnalysis.confidence === 'number' ? selectedAnalysis.confidence.toFixed(2) : '-'}
+                  </div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Order Start</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.order_start_signal ?? '-'}</div>
+                </div>
+                <div className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                  <div className="text-gray-500">Entry Quality</div>
+                  <div className="text-gray-100 mt-1">{selectedAnalysis.entry_quality ?? '-'}</div>
+                </div>
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
+                {selectedAnalysis.analysis_text || JSON.stringify(selectedAnalysis.analysis ?? selectedAnalysis.output, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -24,7 +24,10 @@ def _load_env(path: Path) -> None:
 def main() -> int:
     os.chdir(ROOT)
     _load_env(ENV_FILE)
-    return subprocess.call([sys.executable, str(WRAPPER)], cwd=ROOT, env=os.environ.copy())
+    try:
+        return subprocess.call([sys.executable, str(WRAPPER)], cwd=ROOT, env=os.environ.copy())
+    except KeyboardInterrupt:
+        return 0
 
 
 if __name__ == '__main__':

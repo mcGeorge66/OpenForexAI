@@ -4,11 +4,31 @@ import asyncio
 import logging
 from collections import deque
 from datetime import UTC, datetime
+from typing import Any
 
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.ports.monitoring import AbstractMonitoringBus
 
 _log = logging.getLogger(__name__)
+
+_INFO_MAX_STR_LEN = 2_000
+_INFO_MAX_LIST_ITEMS = 20
+_INFO_SUPPRESSED_EVENT_TYPES = {
+    MonitoringEventType.ACCOUNT_STATUS_UPDATED,
+    MonitoringEventType.BROKER_HTTP_REQUEST,
+    MonitoringEventType.BROKER_HTTP_RESPONSE,
+    MonitoringEventType.DATA_CONTAINER_ACCESS,
+    MonitoringEventType.M5_CANDLE_FETCHED,
+    MonitoringEventType.M5_CANDLE_QUEUED,
+    MonitoringEventType.SYNC_CHECK_STARTED,
+    MonitoringEventType.SYNC_CHECK_COMPLETED,
+    MonitoringEventType.TIMEFRAME_CALCULATED,
+}
+
+
+def _normalize_detail_level(level: str | None) -> str:
+    normalized = str(level or "INFO").strip().upper()
+    return "DEBUG" if normalized == "DEBUG" else "INFO"
 
 
 class MonitoringBus(AbstractMonitoringBus):
@@ -42,9 +62,10 @@ class MonitoringBus(AbstractMonitoringBus):
     DEFAULT_QUEUE_SIZE = 10_000
     RING_BUFFER_SIZE   = 1_000
 
-    def __init__(self) -> None:
+    def __init__(self, detail_level: str = "INFO") -> None:
         self._subscribers: list[asyncio.Queue[MonitoringEvent]] = []
         self._ring: deque[MonitoringEvent] = deque(maxlen=self.RING_BUFFER_SIZE)
+        self._detail_level = _normalize_detail_level(detail_level)
 
     # ── Subscription management ───────────────────────────────────────────────
 
@@ -68,14 +89,28 @@ class MonitoringBus(AbstractMonitoringBus):
 
     def emit(self, event: MonitoringEvent) -> None:
         """Publish *event* to all subscribers and ring buffer.  Never raises, never blocks."""
-        self._ring.append(event)
+        prepared = self._prepare_event(event)
+        if prepared is None:
+            return
+        self._ring.append(prepared)
         for q in list(self._subscribers):
             try:
-                q.put_nowait(event)
+                q.put_nowait(prepared)
             except asyncio.QueueFull:
                 pass
             except Exception:
                 pass  # never let monitoring break the main system
+
+    def set_detail_level(self, level: str) -> None:
+        self._detail_level = _normalize_detail_level(level)
+
+    @property
+    def detail_level(self) -> str:
+        return self._detail_level
+
+    @property
+    def is_debug(self) -> bool:
+        return self._detail_level == "DEBUG"
 
     # ── Ring buffer access (for HTTP polling) ─────────────────────────────────
 
@@ -113,4 +148,30 @@ class MonitoringBus(AbstractMonitoringBus):
             pair=pair,
             payload=payload_kwargs,
         )
+
+    def _prepare_event(self, event: MonitoringEvent) -> MonitoringEvent | None:
+        if self.is_debug:
+            return event
+        if event.event_type in _INFO_SUPPRESSED_EVENT_TYPES:
+            return None
+        trimmed_payload = self._trim_value(event.payload)
+        if trimmed_payload == event.payload:
+            return event
+        return event.model_copy(update={"payload": trimmed_payload})
+
+    def _trim_value(self, value: Any) -> Any:
+        if isinstance(value, str):
+            if len(value) <= _INFO_MAX_STR_LEN:
+                return value
+            omitted = len(value) - _INFO_MAX_STR_LEN
+            return value[:_INFO_MAX_STR_LEN] + f" …[{omitted} chars omitted]"
+        if isinstance(value, list):
+            items = [self._trim_value(item) for item in value[:_INFO_MAX_LIST_ITEMS]]
+            if len(value) > _INFO_MAX_LIST_ITEMS:
+                omitted = len(value) - _INFO_MAX_LIST_ITEMS
+                items.append(f"…[{omitted} items omitted]")
+            return items
+        if isinstance(value, dict):
+            return {key: self._trim_value(item) for key, item in value.items()}
+        return value
 

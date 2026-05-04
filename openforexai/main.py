@@ -14,7 +14,7 @@ from openforexai.management.server import ManagementServer
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.monitoring.bus import MonitoringBus
 from openforexai.tools import DEFAULT_REGISTRY
-from openforexai.utils.logging import configure_logging, get_logger
+from openforexai.utils.logging import configure_logging, get_logger, normalize_log_level
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "system.json5"
 _log = get_logger("main")
@@ -133,12 +133,13 @@ async def main() -> None:
     cfg = load_json_config(_CONFIG_PATH)
     _ensure_required_modules(cfg)
     sys_cfg = cfg.get("system", {})
-    configure_logging(sys_cfg.get("log_level", "INFO"))
+    log_level = normalize_log_level(sys_cfg.get("log_level", "INFO"))
+    configure_logging(log_level)
 
     _log.info("Starting OpenForexAI", config=str(_CONFIG_PATH))
     _log_preflight(cfg)
 
-    monitoring_bus = MonitoringBus()
+    monitoring_bus = MonitoringBus(detail_level=log_level)
 
     agents, config_service, bus, data_container, repository, connected_brokers = await bootstrap(
         cfg, monitoring_bus=monitoring_bus

@@ -211,7 +211,7 @@ async def bootstrap(
     await data_container.initialize()
 
     # ── ConfigService ─────────────────────────────────────────────────────────
-    config_service = ConfigService(system_config, bus)
+    config_service = ConfigService(system_config, bus, repository)
 
     # ── Agents ────────────────────────────────────────────────────────────────
     agents: list[Agent] = []

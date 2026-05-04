@@ -17,8 +17,12 @@ from openforexai.tools.market.get_candles import GetCandlesTool
 from openforexai.tools.orderbook.get_order_book import GetOrderBookTool
 from openforexai.tools.registry import DEFAULT_REGISTRY, ToolRegistry
 from openforexai.tools.system.alarm import RaiseAlarmTool
+from openforexai.tools.system.assessment_memory import AssessmentMemoryTool
+from openforexai.tools.system.manage_sub_prompt import ManageSubPromptTool
 from openforexai.tools.system.trigger_sync import TriggerSyncTool
+from openforexai.tools.trading.auto_place_order import AutoPlaceOrderTool
 from openforexai.tools.trading.close_position import ClosePositionTool
+from openforexai.tools.trading.modify_order import ModifyOrderTool
 from openforexai.tools.trading.place_order import PlaceOrderTool
 
 DEFAULT_REGISTRY.register(GetCandlesTool())
@@ -27,9 +31,13 @@ DEFAULT_REGISTRY.register(GetAccountStatusTool())
 DEFAULT_REGISTRY.register(GetOpenPositionsTool())
 DEFAULT_REGISTRY.register(GetOrderBookTool())
 DEFAULT_REGISTRY.register(PlaceOrderTool())
+DEFAULT_REGISTRY.register(AutoPlaceOrderTool())
+DEFAULT_REGISTRY.register(ModifyOrderTool())
 DEFAULT_REGISTRY.register(ClosePositionTool())
 DEFAULT_REGISTRY.register(RaiseAlarmTool())
 DEFAULT_REGISTRY.register(TriggerSyncTool())
+DEFAULT_REGISTRY.register(AssessmentMemoryTool())
+DEFAULT_REGISTRY.register(ManageSubPromptTool())
 
 __all__ = [
     "DEFAULT_REGISTRY",

@@ -120,6 +120,24 @@ class SQLiteRepository(AbstractRepository):
                 ("003_agent_memory.sql",),
             )
 
+        cursor = await self._db().execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sub_prompts'"
+        )
+        if await cursor.fetchone():
+            await self._db().execute(
+                "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+                ("004_sub_prompts.sql",),
+            )
+
+        cursor = await self._db().execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='assessment_memory'"
+        )
+        if await cursor.fetchone():
+            await self._db().execute(
+                "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+                ("005_assessment_memory.sql",),
+            )
+
         await self._db().commit()
 
     # ── Trades ──────────────────────────────────────────────────────────────
@@ -202,12 +220,20 @@ class SQLiteRepository(AbstractRepository):
 
     async def save_agent_decision(self, decision: AgentDecision) -> str:
         decision_id = str(decision.id)
+        output_json = json.dumps(decision.output)
+        input_context_json = json.dumps(decision.input_context)
+        reasoning = ""
+        if isinstance(decision.output, dict):
+            analysis_text = decision.output.get("analysis_text")
+            if isinstance(analysis_text, str):
+                reasoning = analysis_text
         await self._db().execute(
             """
             INSERT OR REPLACE INTO agent_decisions (
                 id, agent_id, agent_role, pair, decision_type,
-                input_context, output, llm_model, tokens_used, latency_ms, decided_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                decision_type_new, input_context, output, llm_model, tokens_used, latency_ms, decided_at,
+                reasoning, market_snapshot
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 decision_id,
@@ -215,16 +241,98 @@ class SQLiteRepository(AbstractRepository):
                 decision.agent_role.value,
                 decision.pair,
                 decision.decision_type,
-                json.dumps(decision.input_context),
-                json.dumps(decision.output),
+                decision.decision_type,
+                input_context_json,
+                output_json,
                 decision.llm_model,
                 decision.tokens_used,
                 decision.latency_ms,
                 decision.decided_at.isoformat(),
+                reasoning,
+                input_context_json,
             ),
         )
         await self._db().commit()
         return decision_id
+
+    @staticmethod
+    def _deserialize_json_field(raw: str | None, default: Any) -> Any:
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
+    def _row_to_analysis_record(self, row: aiosqlite.Row) -> dict[str, Any]:
+        raw = dict(row)
+        input_context = self._deserialize_json_field(raw.get("input_context"), {})
+        output = self._deserialize_json_field(raw.get("output"), {})
+        market_snapshot = self._deserialize_json_field(raw.get("market_snapshot"), {})
+        bus_payload = {}
+        if isinstance(input_context, dict):
+            bus_payload = input_context.get("bus_payload") if isinstance(input_context.get("bus_payload"), dict) else {}
+        analysis = output.get("analysis") if isinstance(output, dict) and isinstance(output.get("analysis"), dict) else None
+        return {
+            "id": raw["id"],
+            "agent_id": raw["agent_id"],
+            "pair": raw.get("pair"),
+            "decision_type": raw.get("decision_type_new") or raw.get("decision_type"),
+            "llm_model": raw.get("llm_model") or "",
+            "tokens_used": raw.get("tokens_used") or 0,
+            "latency_ms": raw.get("latency_ms"),
+            "decided_at": raw["decided_at"],
+            "analysis_text": raw.get("reasoning") or (output.get("analysis_text") if isinstance(output, dict) else None),
+            "analysis": analysis,
+            "decision": output.get("decision") if isinstance(output, dict) else None,
+            "confidence": output.get("confidence") if isinstance(output, dict) else None,
+            "order_start_signal": output.get("order_start_signal") if isinstance(output, dict) else None,
+            "entry_quality": output.get("entry_quality") if isinstance(output, dict) else None,
+            "bus_payload": bus_payload,
+            "input_context": input_context,
+            "output": output,
+            "market_snapshot": market_snapshot,
+        }
+
+    async def get_analysis_records(
+        self,
+        agent_id: str | None = None,
+        pair: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        clauses = ["COALESCE(decision_type_new, decision_type) = ?"]
+        params: list[Any] = ["analysis_result"]
+        if agent_id:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
+        if pair:
+            clauses.append("pair = ?")
+            params.append(pair)
+        params.append(limit)
+        cursor = await self._db().execute(
+            f"""
+            SELECT *
+            FROM agent_decisions
+            WHERE {" AND ".join(clauses)}
+            ORDER BY decided_at DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_analysis_record(row) for row in rows]
+
+    async def get_analysis_record(self, record_id: str) -> dict[str, Any] | None:
+        cursor = await self._db().execute(
+            """
+            SELECT *
+            FROM agent_decisions
+            WHERE id = ? AND COALESCE(decision_type_new, decision_type) = ?
+            """,
+            (record_id, "analysis_result"),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_analysis_record(row) if row else None
 
     # ── Optimization ─────────────────────────────────────────────────────────
 
@@ -373,6 +481,62 @@ class SQLiteRepository(AbstractRepository):
         )
         await self._db().commit()
         return rid
+
+    async def get_sub_prompt(self, agent: str) -> str | None:
+        cursor = await self._db().execute(
+            "SELECT prompt FROM sub_prompts WHERE agent=?",
+            (agent,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return row["prompt"]
+
+    async def set_sub_prompt(self, agent: str, prompt: str) -> None:
+        await self._db().execute(
+            """
+            INSERT INTO sub_prompts (agent, prompt)
+            VALUES (?, ?)
+            ON CONFLICT(agent) DO UPDATE SET prompt=excluded.prompt
+            """,
+            (agent, prompt),
+        )
+        await self._db().commit()
+
+    async def delete_sub_prompt(self, agent: str) -> None:
+        await self._db().execute(
+            "DELETE FROM sub_prompts WHERE agent=?",
+            (agent,),
+        )
+        await self._db().commit()
+
+    async def get_assessment_memory(self, agent: str) -> str | None:
+        cursor = await self._db().execute(
+            "SELECT message FROM assessment_memory WHERE agent=?",
+            (agent,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return row["message"]
+
+    async def set_assessment_memory(self, agent: str, message: str) -> None:
+        await self._db().execute(
+            """
+            INSERT INTO assessment_memory (agent, message)
+            VALUES (?, ?)
+            ON CONFLICT(agent) DO UPDATE SET message=excluded.message
+            """,
+            (agent, message),
+        )
+        await self._db().commit()
+
+    async def delete_assessment_memory(self, agent: str) -> None:
+        await self._db().execute(
+            "DELETE FROM assessment_memory WHERE agent=?",
+            (agent,),
+        )
+        await self._db().commit()
 
     # --- Dynamic candle series helpers ---
 
@@ -591,6 +755,7 @@ class SQLiteRepository(AbstractRepository):
                 id TEXT PRIMARY KEY,
                 broker_name TEXT NOT NULL,
                 broker_order_id TEXT,
+                sync_key TEXT,
                 pair TEXT NOT NULL,
                 direction TEXT NOT NULL,
                 order_type TEXT NOT NULL,
@@ -633,6 +798,16 @@ class SQLiteRepository(AbstractRepository):
             ON order_book_entries(broker_name, pair);
             """
         )
+        cursor = await self._db().execute("PRAGMA table_info(order_book_entries)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "sync_key" not in columns:
+            await self._db().execute("ALTER TABLE order_book_entries ADD COLUMN sync_key TEXT")
+        await self._db().execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_obe_sync_key
+            ON order_book_entries(sync_key);
+            """
+        )
         await self._db().commit()
 
     async def save_order_book_entry(self, entry: OrderBookEntry) -> str:
@@ -641,18 +816,19 @@ class SQLiteRepository(AbstractRepository):
         await self._db().execute(
             """
             INSERT OR REPLACE INTO order_book_entries (
-                id, broker_name, broker_order_id, pair, direction, order_type, units,
+                id, broker_name, broker_order_id, sync_key, pair, direction, order_type, units,
                 requested_price, fill_price, stop_loss, take_profit, trailing_stop_distance,
                 limit_price, stop_price, status, agent_id, prompt_version, entry_reasoning,
                 signal_confidence, market_context_snapshot, requested_at, opened_at, closed_at,
                 last_broker_sync, close_reason, close_price, close_reasoning, pnl_pips,
                 pnl_account_currency, sync_confirmed
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 eid,
                 entry.broker_name,
                 entry.broker_order_id,
+                entry.sync_key,
                 entry.pair,
                 entry.direction.value,
                 entry.order_type.value,
@@ -727,6 +903,7 @@ class SQLiteRepository(AbstractRepository):
             id=uuid.UUID(r["id"]),
             broker_name=r["broker_name"],
             broker_order_id=r.get("broker_order_id"),
+            sync_key=r.get("sync_key"),
             pair=r["pair"],
             direction=TradeDirection(r["direction"]),
             order_type=_OrderType(r["order_type"]),

@@ -7,7 +7,8 @@
   },
   "system": {
     "version": "0.6.1",
-    "log_level": "INFO",
+    //"log_level": "INFO",
+	"log_level": "${OPENFOREXAI_LOG_LEVEL:-INFO}",
     "management_api": {
       "host": "127.0.0.1",
       "port": 8765

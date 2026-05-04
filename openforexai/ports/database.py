@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from openforexai.models.account import AccountStatus
 from openforexai.models.agent import AgentDecision
@@ -132,6 +133,17 @@ class AbstractRepository(ABC):
     @abstractmethod
     async def save_agent_decision(self, decision: AgentDecision) -> str: ...
 
+    @abstractmethod
+    async def get_analysis_records(
+        self,
+        agent_id: str | None = None,
+        pair: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    async def get_analysis_record(self, record_id: str) -> dict[str, Any] | None: ...
+
     # ── Optimization ─────────────────────────────────────────────────────────
 
     @abstractmethod
@@ -153,6 +165,40 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     async def save_backtest_result(self, result: BacktestResult) -> str: ...
+
+    # ── Agent sub-prompts ────────────────────────────────────────────────────
+
+    @abstractmethod
+    async def get_sub_prompt(self, agent: str) -> str | None:
+        """Return the stored sub-prompt for *agent*, if one exists."""
+        ...
+
+    @abstractmethod
+    async def set_sub_prompt(self, agent: str, prompt: str) -> None:
+        """Create or replace the stored sub-prompt for *agent*."""
+        ...
+
+    @abstractmethod
+    async def delete_sub_prompt(self, agent: str) -> None:
+        """Delete any stored sub-prompt for *agent*."""
+        ...
+
+    # ── Assessment memory ────────────────────────────────────────────────────
+
+    @abstractmethod
+    async def get_assessment_memory(self, agent: str) -> str | None:
+        """Return the stored assessment-memory message for *agent*, if one exists."""
+        ...
+
+    @abstractmethod
+    async def set_assessment_memory(self, agent: str, message: str) -> None:
+        """Create or replace the stored assessment-memory message for *agent*."""
+        ...
+
+    @abstractmethod
+    async def delete_assessment_memory(self, agent: str) -> None:
+        """Delete any stored assessment-memory message for *agent*."""
+        ...
 
 
 

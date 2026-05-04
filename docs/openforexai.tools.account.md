@@ -67,6 +67,8 @@ Both tools are in the default `allowed_tools` list for **Broker Agents** (BA):
 
 ```json
 "allowed_tools": [
+  "auto_place_order",
+  "modify_order",
   "place_order",
   "close_position",
   "get_account_status",

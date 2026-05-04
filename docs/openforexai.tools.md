@@ -11,7 +11,7 @@ tools/
 ├── base.py              # BaseTool ABC + ToolContext dataclass
 ├── registry.py          # ToolRegistry — stores and retrieves tools
 ├── dispatcher.py        # ToolDispatcher — executes tools with gating
-├── config_loader.py     # Loads agent_tools.json5 per-agent config
+├── config_loader.py     # Loads bridge_tools from agent_tools.json5
 ├── __init__.py          # DEFAULT_REGISTRY with all built-in tools
 ├── account/
 │   ├── get_account_status.py
@@ -23,6 +23,8 @@ tools/
 │   └── get_order_book.py
 ├── trading/
 │   ├── place_order.py
+│   ├── auto_place_order.py
+│   ├── modify_order.py
 │   └── close_position.py
 └── system/
     ├── alarm.py
@@ -40,8 +42,10 @@ tools/
 | `get_order_book` | `orderbook/` | Current pending orders and their state |
 | `get_account_status` | `account/` | Balance, equity, margin, open positions count |
 | `get_open_positions` | `account/` | Detailed list of all open positions with P&L |
-| `place_order` | `trading/` | Submit a market/limit/stop order |
-| `close_position` | `trading/` | Close an open position with reasoning |
+| `place_order` | `trading/` | Submit an order with explicit sizing and order-type parameters |
+| `auto_place_order` | `trading/` | Submit an order using central default settings with optional overrides |
+| `modify_order` | `trading/` | Change stop-loss and/or take-profit on an open position |
+| `close_position` | `trading/` | Close an open position fully or partially by broker position ID |
 | `raise_alarm` | `system/` | Emit a system alarm event |
 | `trigger_sync` | `system/` | Trigger order book synchronisation |
 
@@ -125,26 +129,14 @@ Each tool can require approval before execution:
 | `"supervisor"` | Publish `SIGNAL_GENERATED`, wait for `SIGNAL_APPROVED`/`SIGNAL_REJECTED` (15s timeout) |
 | `"human"` | Block until Management API approval (planned, not yet implemented) |
 
-Approval modes are configured per-tool per-agent in `config/RunTime/agent_tools.json5`.
+Approval-related tool behavior must be configured explicitly in each agent's
+`tool_config` inside the system config.
 
-### 2. Context Budget Tiers
-
-As the conversation grows, the LLM token budget fills up. The dispatcher automatically restricts available tools based on how full the budget is:
-
-```
-0% – 84% used  →  "all" tier:      all configured tools available
-85% – 99% used →  "safety" tier:   only raise_alarm
-```
-
-(Thresholds and tier names are configured per-agent in `system.json5 → tool_config.context_tiers`)
-
-This prevents the LLM from starting expensive multi-step operations when it's running out of context.
-
-### 3. Allowed-Tool Filtering
+### 2. Allowed-Tool Filtering
 
 Each agent has an `allowed_tools` list in its config. The dispatcher silently filters out any tool not on the list before presenting the tool manifest to the LLM.
 
-### 4. Monitoring Integration
+### 3. Monitoring Integration
 
 Every tool invocation emits two monitoring events:
 - `TOOL_CALL_STARTED` (with tool name and arguments)
@@ -161,7 +153,7 @@ dispatcher = ToolDispatcher(
     agent_tool_config=config["tool_config"],
 )
 
-# Get tool specs for LLM (filtered by allowed_tools + current context tier)
+# Get tool specs for LLM (filtered by allowed_tools)
 specs = dispatcher.get_specs(input_tokens=1200, max_tokens=4096)
 
 # Execute tool calls from LLM response
@@ -173,11 +165,8 @@ results = await dispatcher.execute_tool_calls(tool_calls, input_tokens, max_toke
 
 ## `config_loader.py` — Tool Configuration
 
-Loads `config/RunTime/agent_tools.json5` for per-agent tool customisation. Supports:
-- Per-agent approval mode overrides
-- Per-tool approval mode overrides
-- Context tier threshold and tool-set definitions
-- Tool tags (grouping tools for tier sets)
+Loads `config/RunTime/agent_tools.json5` for top-level `bridge_tools` only.
+Normal agent tool assignment does not come from this file.
 
 ---
 

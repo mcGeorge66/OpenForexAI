@@ -205,6 +205,7 @@ class DataContainer:
         broker_name = payload.get("broker_name", "")
         pair = payload.get("pair", "")
         candle_data = payload.get("candle", {})
+        refresh_only = bool(payload.get("refresh_only", False))
 
         key = (broker_name, pair)
         if key not in self._registered:
@@ -222,11 +223,12 @@ class DataContainer:
         async with lock:
             # Cheap dedup using the cached last timestamp — no extra DB call
             last_ts = self._last_ts.get(key)
-            if last_ts is not None and candle.timestamp <= last_ts:
+            if not refresh_only and last_ts is not None and candle.timestamp <= last_ts:
                 return  # already stored or stale
 
             await self._store.save_candle(broker_name, pair, candle)
-            self._last_ts[key] = candle.timestamp
+            if not refresh_only:
+                self._last_ts[key] = candle.timestamp
 
         self._emit(
             "data_container",
@@ -235,6 +237,7 @@ class DataContainer:
             pair=pair,
             timeframe="M5",
             timestamp=candle.timestamp.isoformat(),
+            refresh_only=refresh_only,
         )
 
     async def _on_gap_detected(self, message: AgentMessage) -> None:

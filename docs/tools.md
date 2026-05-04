@@ -19,6 +19,10 @@
 Command-line utilities for monitoring, diagnostics, and direct interaction with a running OpenForexAI system.
 Most tools communicate with the Management API (default `http://127.0.0.1:8765`).
 
+Tool execution capabilities available to agents are documented separately in:
+- [`openforexai.tools.md`](./openforexai.tools.md) — tool system overview
+- [`openforexai.tools.trading.md`](./openforexai.tools.trading.md) — trading tools including `place_order`, `auto_place_order`, `modify_order`, and `close_position`
+
 **Prerequisites:**
 - For `ask.py`, `monitor.py`, and `logging.py`: start the main system first.
 - For `test_llm.py` and `test_broker.py`: project dependencies and valid module credentials are required.

@@ -10,7 +10,7 @@ Central configuration files for OpenForexAI. The directory **[config]** is the *
 config/
 ├── system.json5              # Central config — agents, modules, database, system
 ├── RunTime/
-│   ├── agent_tools.json5     # Tool permissions, tiers, bridge tools
+│   ├── agent_tools.json5     # Bridge tools only
 │   └── event_routing.json5   # EventBus routing rules (hot-reloadable)
 └── modules/
     ├── llm/                  # Config files for the different language models
@@ -91,11 +91,6 @@ One entry per running agent:
     "system_prompt": "...",
     "tool_config": {
       "allowed_tools": ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-      "context_tiers": {"0": "all", "85": "safety"},
-      "tier_tools": {
-        "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-        "safety": ["raise_alarm"]
-      },
       "max_tool_turns": 10,
       "max_tokens": 4096
     }

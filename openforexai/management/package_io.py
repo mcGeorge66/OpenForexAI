@@ -136,34 +136,15 @@ def _collect_used_tools(export_agents: dict[str, Any]) -> set[str]:
         allowed = tool_cfg.get("allowed_tools", [])
         if isinstance(allowed, list):
             used.update(str(t) for t in allowed if isinstance(t, str) and t != "*")
-
-        tier_tools = tool_cfg.get("tier_tools", {})
-        if isinstance(tier_tools, dict):
-            for tools in tier_tools.values():
-                if isinstance(tools, list):
-                    used.update(str(t) for t in tools if isinstance(t, str) and t != "*")
     return used
 
 
 def _filter_agent_tools_for_agents(
     agent_tools: dict[str, Any],
-    selected_ids: list[str],
+    _selected_ids: list[str],
     used_tools: set[str],
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
-
-    policies = agent_tools.get("agents", [])
-    if isinstance(policies, list):
-        relevant_policies: list[dict[str, Any]] = []
-        for item in policies:
-            if not isinstance(item, dict):
-                continue
-            pattern = item.get("pattern")
-            if not isinstance(pattern, str):
-                continue
-            if any(_pattern_matches_agent(pattern, sid) for sid in selected_ids):
-                relevant_policies.append(copy.deepcopy(item))
-        out["agents"] = relevant_policies
 
     bridges = agent_tools.get("bridge_tools", [])
     if isinstance(bridges, list):
@@ -407,20 +388,38 @@ def _validate_agent_tools(
                     "message": f'Tool "{tool}" does not exist.',
                 })
 
-    tier_tools = tool_cfg.get("tier_tools", {})
-    if isinstance(tier_tools, dict):
-        for tier, tools in tier_tools.items():
-            if not isinstance(tools, list):
-                continue
-            for idx, tool in enumerate(tools):
-                if not isinstance(tool, str):
-                    continue
-                if tool != "*" and tool not in known_tools:
-                    problems.append({
-                        "level": "error",
-                        "path": f"agents.{agent_id}.tool_config.tier_tools.{tier}[{idx}]",
-                        "message": f'Tool "{tool}" does not exist.',
-                    })
+    forced_arguments = tool_cfg.get("forced_arguments", {})
+    if forced_arguments is None:
+        return
+    if not isinstance(forced_arguments, dict):
+        problems.append({
+            "level": "error",
+            "path": f"agents.{agent_id}.tool_config.forced_arguments",
+            "message": "forced_arguments must be an object keyed by tool name.",
+        })
+        return
+
+    for tool_name, forced_cfg in forced_arguments.items():
+        if not isinstance(tool_name, str):
+            problems.append({
+                "level": "error",
+                "path": f"agents.{agent_id}.tool_config.forced_arguments",
+                "message": "forced_arguments keys must be tool names.",
+            })
+            continue
+        if tool_name not in known_tools:
+            problems.append({
+                "level": "error",
+                "path": f"agents.{agent_id}.tool_config.forced_arguments.{tool_name}",
+                "message": f'Tool "{tool_name}" does not exist.',
+            })
+            continue
+        if not isinstance(forced_cfg, dict):
+            problems.append({
+                "level": "error",
+                "path": f"agents.{agent_id}.tool_config.forced_arguments.{tool_name}",
+                "message": "Forced arguments for a tool must be an object.",
+            })
 
 
 def validate_package(
@@ -532,11 +531,11 @@ def validate_package(
                 })
         agent_tools = runtime.get("agent_tools")
         if isinstance(agent_tools, dict):
-            if "agents" in agent_tools and not isinstance(agent_tools.get("agents"), list):
+            if "agents" in agent_tools:
                 problems.append({
-                    "level": "error",
+                    "level": "warning",
                     "path": "runtime.agent_tools.agents",
-                    "message": "agent_tools.agents must be a list.",
+                    "message": "agent_tools.agents is deprecated and ignored. Tool assignment must live in agents.<id>.tool_config.",
                 })
 
     has_error = any(p.get("level") == "error" for p in problems)
@@ -634,25 +633,6 @@ def apply_import_package(
                     else:
                         base_bridge.append(item)
                 next_agent_tools["bridge_tools"] = base_bridge
-
-            if isinstance(packaged_tools.get("agents"), list):
-                base_agents = next_agent_tools.get("agents", [])
-                if not isinstance(base_agents, list):
-                    base_agents = []
-                idx_by_pattern = {
-                    str(item.get("pattern")): idx
-                    for idx, item in enumerate(base_agents)
-                    if isinstance(item, dict) and isinstance(item.get("pattern"), str)
-                }
-                for item in packaged_tools["agents"]:
-                    if not isinstance(item, dict):
-                        continue
-                    pattern = item.get("pattern")
-                    if isinstance(pattern, str) and pattern in idx_by_pattern:
-                        base_agents[idx_by_pattern[pattern]] = item
-                    else:
-                        base_agents.append(item)
-                next_agent_tools["agents"] = base_agents
 
     return next_system, next_routing, next_agent_tools
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
 
 from openforexai.models.account import AccountStatus
 from openforexai.models.market import Candle
@@ -90,8 +93,18 @@ class AbstractBroker(ABC):
         ...
 
     @abstractmethod
-    async def close_position(self, position_id: str) -> TradeResult:
-        """Close an open position identified by its broker-side ID."""
+    async def modify_position(
+        self,
+        position_id: str,
+        stop_loss: Decimal | None = None,
+        take_profit: Decimal | None = None,
+    ) -> TradeResult:
+        """Modify the SL/TP limits of an open position identified by its broker-side ID."""
+        ...
+
+    @abstractmethod
+    async def close_position(self, position_id: str, units: int | None = None) -> TradeResult:
+        """Close an open position fully or partially, identified by its broker-side ID."""
         ...
 
     @abstractmethod
@@ -101,4 +114,19 @@ class AbstractBroker(ABC):
         Used by the order-book sync loop to detect SL/TP hits.
         """
         ...
+
+    async def get_closed_trade_result(
+        self,
+        position_id: str,
+        *,
+        pair: str | None = None,
+        sync_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Best-effort lookup for a broker-side closed trade result.
+
+        Used when the sync loop notices that a once-open local order no longer
+        exists at the broker. Implementations may return None if the broker does
+        not expose the information cheaply enough.
+        """
+        return None
 

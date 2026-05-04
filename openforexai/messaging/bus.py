@@ -191,7 +191,7 @@ class EventBus:
             sender=sender_id,
             target=message.target_agent_id,
             correlation_id=str(message.correlation_id) if message.correlation_id else None,
-            payload_keys=list(message.payload.keys()) if message.payload else [],
+            payload=message.payload,
         )
 
         # ── 1. Legacy handlers (always evaluated, bypass routing rules) ────────

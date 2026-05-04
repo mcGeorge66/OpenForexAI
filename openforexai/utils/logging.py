@@ -7,6 +7,11 @@ from typing import cast
 import structlog
 
 
+def normalize_log_level(log_level: str | None) -> str:
+    level = str(log_level or "INFO").strip().upper()
+    return "DEBUG" if level == "DEBUG" else "INFO"
+
+
 def configure_logging(log_level: str = "INFO") -> None:
     """Configure unified logging for app and third-party libraries.
 
@@ -14,7 +19,8 @@ def configure_logging(log_level: str = "INFO") -> None:
     are rendered through the same structlog renderer for consistent output.
     """
 
-    level = getattr(logging, log_level.upper(), logging.INFO)
+    normalized = normalize_log_level(log_level)
+    level = getattr(logging, normalized, logging.INFO)
 
     renderer = (
         structlog.dev.ConsoleRenderer()

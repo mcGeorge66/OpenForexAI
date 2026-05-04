@@ -5,22 +5,9 @@ Responsibilities
 1. Receives a list of ``ToolCall`` objects from ``LLMResponseWithTools``.
 2. Looks up each tool in the ``ToolRegistry``.
 3. Applies the **approval flow** (direct / supervisor / human).
-4. Applies **context budget gating** — only allowed tools at each token tier.
-5. Calls ``tool.execute(arguments, context)`` and wraps the result as a
+4. Calls ``tool.execute(arguments, context)`` and wraps the result as a
    ``ToolResult``.
-6. Emits ``MonitoringBus`` events for every tool call (start, success, error).
-
-Context budget tiers (percentage of max_tokens used so far)
-------------------------------------------------------------
-Configured per-agent in ``agent_tools.json5``::
-
-    "context_tiers": {
-        "0":  ["*"],          // 0–69 %: all tools available
-        "70": ["decision"],   // 70–89 %: only tools tagged "decision"
-        "90": ["safety"]      // 90–100 %: only tools tagged "safety"
-    }
-
-Tool tags are set in ``agent_tools.json5`` under ``"tool_tags"``.
+5. Emits ``MonitoringBus`` events for every tool call (start, success, error).
 
 Approval modes
 --------------
@@ -31,27 +18,25 @@ Approval modes
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 from datetime import UTC
 from typing import Any
 
 from openforexai.ports.llm import ToolCall, ToolResult
+from openforexai.tools.argument_templates import (
+    build_agent_placeholder_values,
+    resolve_argument_templates,
+)
 from openforexai.tools.base import BaseTool, ToolContext
 from openforexai.tools.registry import ToolRegistry
 
 _log = logging.getLogger(__name__)
 
-# Default context tiers (fraction of budget used → allowed tool set key)
-_DEFAULT_TIERS: list[tuple[float, str]] = [
-    (0.90, "safety"),
-    (0.70, "decision"),
-    (0.00, "all"),
-]
-
 
 class ToolDispatcher:
-    """Executes LLM-requested tool calls with approval and budget gating.
+    """Executes LLM-requested tool calls with approval gating.
 
     Instantiate once per agent; configure via ``AgentToolConfig``.
     """
@@ -72,16 +57,14 @@ class ToolDispatcher:
         # Per-tool approval mode overrides: {"place_order": "supervisor"}
         self._approval_overrides: dict[str, str] = self._config.get("approval_modes", {})
 
-        # Context tiers: {"all": [...], "decision": [...], "safety": [...]}
-        self._tier_tools: dict[str, list[str]] = self._config.get("tier_tools", {})
-
-        # Raw tier thresholds from config
-        raw_tiers = self._config.get("context_tiers", {})
-        # Convert {"0": "all", "70": "decision", "90": "safety"} → sorted list
-        self._tiers: list[tuple[float, str]] = sorted(
-            [(float(k) / 100.0, v) for k, v in raw_tiers.items()],
-            reverse=True,
-        ) or _DEFAULT_TIERS
+        # Per-tool non-overridable argument values:
+        # {"place_order": {"risk_pct": 0.5}, "ask_ga_market_outlook": {"agent": "..."}}
+        raw_forced_arguments = self._config.get("forced_arguments", {})
+        self._forced_arguments: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_forced_arguments, dict):
+            for tool_name, forced_args in raw_forced_arguments.items():
+                if isinstance(tool_name, str) and isinstance(forced_args, dict):
+                    self._forced_arguments[tool_name] = dict(forced_args)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -95,15 +78,12 @@ class ToolDispatcher:
 
         Args:
             tool_calls:    Tool calls from ``LLMResponseWithTools.tool_calls``.
-            used_tokens:   Tokens used so far in the current conversation.
-            max_tokens:    Configured max_tokens for this agent.
+            used_tokens:   Unused compatibility parameter.
+            max_tokens:    Unused compatibility parameter.
         """
-        budget_fraction = used_tokens / max(max_tokens, 1)
-        active_tier = self._active_tier(budget_fraction)
-
         results: list[ToolResult] = []
         for tc in tool_calls:
-            result = await self._execute_one(tc, active_tier)
+            result = await self._execute_one(tc)
             results.append(result)
         return results
 
@@ -112,20 +92,25 @@ class ToolDispatcher:
         used_tokens: int = 0,
         max_tokens: int = 4096,
     ) -> list[dict]:
-        """Return ToolSpec list visible to the LLM at current budget level."""
-        budget_fraction = used_tokens / max(max_tokens, 1)
-        active_tier = self._active_tier(budget_fraction)
-        allowed_names = self._tools_for_tier(active_tier)
-        return self._registry.specs_for(allowed_names)
+        """Return ToolSpec list visible to the LLM for this agent."""
+        del used_tokens, max_tokens
+        allowed_names = self._allowed_names()
+        specs: list[dict[str, Any]] = []
+        for name in allowed_names:
+            tool = self._registry.get(name)
+            if tool is None:
+                continue
+            specs.append(self._spec_with_forced_arguments_hidden(tool))
+        return specs
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
     async def _execute_one(
         self,
         tc: ToolCall,
-        active_tier: str,
     ) -> ToolResult:
         tool = self._registry.get(tc.name)
+        effective_arguments = self._merged_arguments(tc.name, tc.arguments)
 
         # Unknown tool
         if tool is None:
@@ -134,20 +119,6 @@ class ToolDispatcher:
                 tool_call_id=tc.id,
                 name=tc.name,
                 content=json.dumps({"error": f"Tool {tc.name!r} is not registered."}),
-                is_error=True,
-            )
-
-        # Tier gate
-        if not self._tool_allowed_in_tier(tc.name, active_tier):
-            msg = (
-                f"Tool {tc.name!r} is not available at the current context budget tier "
-                f"({active_tier}). Use a simpler tool or proceed without tool call."
-            )
-            _log.debug(msg)
-            return ToolResult(
-                tool_call_id=tc.id,
-                name=tc.name,
-                content=json.dumps({"error": msg}),
                 is_error=True,
             )
 
@@ -166,7 +137,7 @@ class ToolDispatcher:
             tc.name, tool.default_approval_mode if tool.requires_approval else "direct"
         )
         if approval_mode != "direct":
-            approved, reason = await self._check_approval(tc, tool, approval_mode)
+            approved, reason = await self._check_approval(tc, tool, approval_mode, effective_arguments)
             if not approved:
                 return ToolResult(
                     tool_call_id=tc.id,
@@ -180,10 +151,10 @@ class ToolDispatcher:
             "TOOL_CALL_STARTED",
             tool_name=tc.name,
             agent=self._context.agent_id,
-            arguments=tc.arguments,
+            arguments=effective_arguments,
         )
         try:
-            raw_result = await tool.execute(tc.arguments, self._context)
+            raw_result = await tool.execute(effective_arguments, self._context)
             content = json.dumps(raw_result, default=str)
             # No truncation — complete result stored for audit/evidence purposes
             self._emit_monitoring(
@@ -218,9 +189,10 @@ class ToolDispatcher:
         tc: ToolCall,
         tool: BaseTool,
         mode: str,
+        effective_arguments: dict[str, Any],
     ) -> tuple[bool, str]:
         if mode == "supervisor":
-            return await self._supervisor_approval(tc, tool)
+            return await self._supervisor_approval(tc, tool, effective_arguments)
         if mode == "human":
             # Human approval not yet implemented — log and reject
             _log.warning(
@@ -234,6 +206,7 @@ class ToolDispatcher:
         self,
         tc: ToolCall,
         tool: BaseTool,
+        effective_arguments: dict[str, Any],
     ) -> tuple[bool, str]:
         """Publish a SIGNAL_GENERATED event and wait for SIGNAL_APPROVED/REJECTED.
 
@@ -268,7 +241,7 @@ class ToolDispatcher:
             source_agent_id=self._context.agent_id,
             payload={
                 "tool_name": tc.name,
-                "arguments": tc.arguments,
+                "arguments": effective_arguments,
                 "approval_requested": True,
             },
             correlation_id=correlation_id,
@@ -284,26 +257,55 @@ class ToolDispatcher:
 
         return result.get("approved", False), result.get("reason", "")
 
-    # ── Budget tiers ──────────────────────────────────────────────────────────
+    def _allowed_names(self) -> list[str]:
+        if self._allowed:
+            return [name for name in self._registry.all_names() if name in self._allowed]
+        return self._registry.all_names()
 
-    def _active_tier(self, budget_fraction: float) -> str:
-        for threshold, tier_name in self._tiers:
-            if budget_fraction >= threshold:
-                return tier_name
-        return "all"
+    def _merged_arguments(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged = dict(arguments or {})
+        agent_config = self._context.extra.get("agent_config", {})
+        placeholders = build_agent_placeholder_values(
+            agent_id=self._context.agent_id,
+            agent_config=agent_config if isinstance(agent_config, dict) else None,
+            broker_name=self._context.broker_name,
+            pair=self._context.pair,
+        )
+        forced = resolve_argument_templates(self._forced_arguments.get(tool_name, {}), placeholders)
+        if forced:
+            merged.update(forced)
+        return merged
 
-    def _tools_for_tier(self, tier_name: str) -> list[str]:
-        if not self._tier_tools:
-            # No tier config — all registered tools are available
-            return self._registry.all_names()
-        tools = self._tier_tools.get(tier_name, [])
-        if "*" in tools:
-            return self._registry.all_names()
-        return tools
+    def _spec_with_forced_arguments_hidden(self, tool: BaseTool) -> dict[str, Any]:
+        spec = copy.deepcopy(tool.to_spec())
+        forced = self._forced_arguments.get(tool.name, {})
+        if not forced:
+            return spec
 
-    def _tool_allowed_in_tier(self, tool_name: str, tier_name: str) -> bool:
-        allowed = self._tools_for_tier(tier_name)
-        return tool_name in allowed or "*" in allowed
+        schema = spec.get("input_schema")
+        if not isinstance(schema, dict):
+            return spec
+
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            for arg_name in list(forced):
+                properties.pop(arg_name, None)
+
+        required = schema.get("required")
+        if isinstance(required, list):
+            schema["required"] = [arg_name for arg_name in required if arg_name not in forced]
+
+        forced_list = ", ".join(sorted(forced))
+        if forced_list:
+            suffix = f" Fixed by agent config: {forced_list}."
+            description = spec.get("description")
+            spec["description"] = f"{description}{suffix}" if isinstance(description, str) else suffix.strip()
+
+        return spec
 
     # ── Monitoring ────────────────────────────────────────────────────────────
 

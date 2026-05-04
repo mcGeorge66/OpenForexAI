@@ -18,6 +18,7 @@ import { api } from '@/api/client'
 // Views
 import { InitialPage } from '@/components/views/action/InitialPage'
 import { AgentChat } from '@/components/views/action/AgentChat'
+import { Orderbook } from '@/components/views/action/Orderbook'
 import { EventStream } from '@/components/views/monitor/EventStream'
 import { ConfigViewer } from '@/components/views/config/ConfigViewer'
 import { ModuleConfigViewer } from '@/components/views/config/ModuleConfigViewer'
@@ -29,6 +30,8 @@ import { InformationView } from '@/components/views/config/InformationView'
 import { ToolExecutor } from '@/components/views/test/ToolExecutor'
 import { LlmChecker } from '@/components/views/test/LlmChecker'
 
+// Important: the app subscribes to one shared, unfiltered monitoring stream.
+// These filters are applied only in the UI for the sidebar views.
 const MONITOR_FILTERS: Record<string, string[] | undefined> = {
   all:  undefined,
   llm:  ['llm_request', 'llm_response', 'llm_error'],
@@ -49,6 +52,7 @@ const MONITOR_FILTERS: Record<string, string[] | undefined> = {
     'timeframe_calculated', 'data_container_access',
     'sync_check_started', 'sync_check_completed', 'sync_discrepancy_found',
   ],
+  core: ['agent_input_built'],
 }
 
 const CONFIG_VIEWS: Record<string, { pathLabel: string; title: string; load: () => Promise<string>; save: (content: Record<string, unknown> | string) => Promise<unknown> }> = {
@@ -57,12 +61,6 @@ const CONFIG_VIEWS: Record<string, { pathLabel: string; title: string; load: () 
     title: 'System Configuration',
     load: api.getSystemConfigText,
     save: api.saveSystemConfig,
-  },
-  agent_tools: {
-    pathLabel: 'D:\\GitHub\\GHG\\OpenForexAI\\config\\RunTime\\agent_tools.json5',
-    title: 'Agent Tools Configuration',
-    load: () => api.getConfigFileText('agent_tools'),
-    save: (content: Record<string, unknown> | string) => api.saveConfigFile('agent_tools', content),
   },
   event_routing: {
     pathLabel: 'D:\\GitHub\\GHG\\OpenForexAI\\config\\RunTime\\event_routing.json5',
@@ -93,6 +91,8 @@ export default function App() {
     setSubItems(prev => ({ ...prev, [section]: id }))
   }
 
+  // Always subscribe without a server-side filter so "All Events" is truly
+  // unfiltered and the other monitor tabs are only view-level filters.
   const { events, connected, lastUpdate, clear } = useMonitoringStream()
 
   function renderMain() {
@@ -100,6 +100,7 @@ export default function App() {
       case 'action':
         if (activeSub === 'initial') return <InitialPage />
         if (activeSub === 'chat') return <AgentChat />
+        if (activeSub === 'orderbook') return <Orderbook />
         return null
 
       case 'monitor': {

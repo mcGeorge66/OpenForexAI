@@ -38,6 +38,7 @@ const EVENT_COLOURS: Record<string, string> = {
   // Bus / signal
   agent_signal_generated: 'text-purple-300',
   agent_decision_made:  'text-purple-400',
+  agent_input_built:    'text-fuchsia-300',
   event_bus_message:    'text-gray-400',
   routing_reloaded:     'text-teal-400',
   // System
@@ -77,9 +78,21 @@ function formatPayload(eventType: string, payload: Record<string, unknown>): str
     const model = typeof payload.model === 'string' ? payload.model.split('-').slice(0, 2).join('-') : ''
     return [turn, reason, tokens, calls, model].filter(Boolean).join('  ')
   }
+  if (eventType === 'agent_input_built') {
+    const agent = typeof payload.agent_id === 'string' ? `agent=${payload.agent_id}` : ''
+    const trigger = typeof payload.trigger === 'string' ? `trigger=${payload.trigger}` : ''
+    const source = typeof payload.source === 'string' ? `from=${payload.source}` : ''
+    return [agent, trigger, source].filter(Boolean).join('  ')
+  }
   // Replace escaped quotes from embedded JSON strings (e.g. "{\"key\":\"val\"}") → readable
   const s = JSON.stringify(payload).replace(/\\"/g, '"')
   return s.length > 200 ? s.substring(0, 200) + '…' : s
+}
+
+function busSender(payload: Record<string, unknown>): string | null {
+  return typeof payload.sender === 'string' && payload.sender.trim()
+    ? payload.sender
+    : null
 }
 
 // ── Event detail window (draggable + resizable) ───────────────────────────────
@@ -332,6 +345,11 @@ export function EventStream({ events, connected, filter, onClear }: EventStreamP
             <span className={`flex-shrink-0 w-36 truncate ${eventColour(evt.event_type)}`}>
               {evt.event_type}
             </span>
+            {evt.event_type === 'event_bus_message' && busSender(evt.payload) && (
+              <span className="text-purple-300 flex-shrink-0 max-w-64 truncate">
+                [{busSender(evt.payload)}]
+              </span>
+            )}
             {evt.broker && (
               <span className="text-gray-500 flex-shrink-0">[{evt.broker}{evt.pair ? `·${evt.pair}` : ''}]</span>
             )}

@@ -9,7 +9,7 @@ from typing import Any
 from openforexai.models.market import Candle
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEventType
-from openforexai.models.trade import CloseReason, OrderStatus
+from openforexai.models.trade import CloseReason, OrderBookEntry, OrderStatus, OrderType
 from openforexai.ports.broker import AbstractBroker
 from openforexai.runtime import control as runtime_control
 
@@ -109,6 +109,8 @@ class BrokerBase(AbstractBroker):
         self._running = False
         # Last successfully emitted M5 candle timestamp per pair.
         self._last_m5_time_by_pair: dict[str, datetime | None] = {}
+        # Missing-slot retry counter per pair and candle timestamp.
+        self._pending_m5_attempts_by_pair: dict[str, dict[datetime, int]] = {}
 
     # ── Background task lifecycle ─────────────────────────────────────────────
 
@@ -134,6 +136,7 @@ class BrokerBase(AbstractBroker):
 
         self._pairs.add(pair)
         self._last_m5_time_by_pair.setdefault(pair, None)
+        self._pending_m5_attempts_by_pair.setdefault(pair, {})
         self._request_agent_reasoning = self._request_agent_reasoning or request_agent_reasoning
 
         if self._account_poll_task is None or self._account_poll_task.done():
@@ -172,6 +175,7 @@ class BrokerBase(AbstractBroker):
                 task.cancel()
         self._pair_tasks.clear()
         self._pairs.clear()
+        self._pending_m5_attempts_by_pair.clear()
 
     # ── M5 streaming loop ─────────────────────────────────────────────────────
 
@@ -189,80 +193,75 @@ class BrokerBase(AbstractBroker):
                 await runtime_control.wait_until_resumed()
                 try:
                     expected_open = self._expected_latest_m5_open()
-                    candle = await self.fetch_latest_m5_candle(pair)
                     last_m5 = self._last_m5_time_by_pair.get(pair)
-                    if (
-                        candle is None
-                        or candle.timestamp < expected_open
-                        or (last_m5 is not None and candle.timestamp <= last_m5)
-                    ):
-                        synth_ts = expected_open
-                        if last_m5 is not None and synth_ts <= last_m5:
-                            synth_ts = last_m5 + timedelta(minutes=5)
-                        candle = self._build_null_m5_candle(synth_ts)
+                    recent_candles = await self.get_historical_m5_candles(pair, count=24)
+                    recent_by_ts = {c.timestamp: c for c in recent_candles if c.timestamp <= expected_open}
+                    pending_attempts = self._pending_m5_attempts_by_pair.setdefault(pair, {})
 
-                    self._emit(
-                        source, MonitoringEventType.M5_CANDLE_FETCHED,
-                        broker_name=self.short_name, pair=pair,
-                        timestamp=candle.timestamp.isoformat(),
-                        open=str(candle.open),
-                        high=str(candle.high),
-                        low=str(candle.low),
-                        close=str(candle.close),
-                        spread=str(candle.spread),
-                        tick_volume=candle.tick_volume,
-                        is_null_candle=self._is_null_candle(candle),
-                    )
+                    # Refresh the last 3 completed broker candles on every cycle so
+                    # provisional OHLC values get overwritten with the final MT5 values.
+                    recent_completed = sorted(ts for ts in recent_by_ts if ts <= expected_open)
+                    for refresh_ts in recent_completed[-3:-1]:
+                        refresh_candle = recent_by_ts.get(refresh_ts)
+                        if refresh_candle is None:
+                            continue
+                        await self._publish_m5_candle(
+                            pair=pair,
+                            candle=refresh_candle,
+                            event_bus=event_bus,
+                            source=source,
+                            source_agent_id=source_agent_id,
+                            refresh_only=True,
+                        )
 
-                    # ── Gap detection ─────────────────────────────────────────
-                    last_ts = self._last_m5_time_by_pair.get(pair)
-                    if last_ts is not None:
-                        expected = last_ts + timedelta(minutes=5)
-                        if candle.timestamp > expected + timedelta(seconds=30):
-                            gap_candles = int(
-                                (candle.timestamp - expected).total_seconds() / 300
-                            )
-                            _log.warning(
-                                "M5 gap detected broker=%s pair=%s missing=%d",
-                                self.short_name, pair, gap_candles,
-                            )
-                            self._emit(
-                                source, MonitoringEventType.CANDLE_GAP_DETECTED,
-                                broker_name=self.short_name, pair=pair,
-                                expected=expected.isoformat(),
-                                got=candle.timestamp.isoformat(),
-                                missing_candles=gap_candles,
-                            )
-                            await event_bus.publish(AgentMessage(
-                                event_type=EventType.CANDLE_GAP_DETECTED,
-                                source_agent_id=source_agent_id,
-                                payload={
-                                    "broker_name": self.short_name,
-                                    "pair": pair,
-                                    "expected_timestamp": expected.isoformat(),
-                                    "received_timestamp": candle.timestamp.isoformat(),
-                                    "missing_candles": gap_candles,
-                                },
-                            ))
+                    if last_m5 is None and recent_by_ts:
+                        newest_available = max(recent_by_ts)
+                        self._last_m5_time_by_pair[pair] = newest_available
+                        pending_attempts.clear()
+                        continue
 
-                    self._last_m5_time_by_pair[pair] = candle.timestamp
+                    if last_m5 is None:
+                        continue
 
-                    # ── Publish candle to event bus ───────────────────────────
-                    await event_bus.publish(AgentMessage(
-                        event_type=EventType.M5_CANDLE_AVAILABLE,
-                        source_agent_id=source_agent_id,
-                        payload={
-                            "broker_name": self.short_name,
-                            "pair": pair,
-                            "candle": candle.model_dump(mode="json"),
-                            "is_null_candle": self._is_null_candle(candle),
-                        },
-                    ))
-                    self._emit(
-                        source, MonitoringEventType.M5_CANDLE_QUEUED,
-                        broker_name=self.short_name, pair=pair,
-                        timestamp=candle.timestamp.isoformat(),
-                    )
+                    candidate_ts = last_m5 + timedelta(minutes=5)
+                    missing_slots: list[datetime] = []
+                    while candidate_ts <= expected_open:
+                        if candidate_ts not in recent_by_ts:
+                            pending_attempts[candidate_ts] = pending_attempts.get(candidate_ts, 0) + 1
+                            missing_slots.append(candidate_ts)
+                        candidate_ts += timedelta(minutes=5)
+
+                    if missing_slots:
+                        _log.debug(
+                            "M5 slots pending broker confirmation",
+                            extra={
+                                "broker": self.short_name,
+                                "pair": pair,
+                                "slots": [ts.isoformat() for ts in missing_slots],
+                                "attempts": {ts.isoformat(): pending_attempts.get(ts, 0) for ts in missing_slots},
+                            },
+                        )
+
+                    candidate_ts = last_m5 + timedelta(minutes=5)
+                    while candidate_ts <= expected_open:
+                        candle = recent_by_ts.get(candidate_ts)
+                        if candle is None:
+                            attempts = pending_attempts.get(candidate_ts, 0)
+                            if attempts < 3:
+                                break
+                            candle = self._build_null_m5_candle(candidate_ts)
+                            pending_attempts.pop(candidate_ts, None)
+                        else:
+                            pending_attempts.pop(candidate_ts, None)
+
+                        await self._publish_m5_candle(
+                            pair=pair,
+                            candle=candle,
+                            event_bus=event_bus,
+                            source=source,
+                            source_agent_id=source_agent_id,
+                        )
+                        candidate_ts += timedelta(minutes=5)
 
                 except Exception as exc:
                     # Transient server/network errors (502/503/504, connection
@@ -355,23 +354,85 @@ class BrokerBase(AbstractBroker):
                     local_open = await repository.get_open_order_book_entries(
                         self.short_name, pair
                     )
+                    local_by_broker_order_id = {
+                        entry.broker_order_id: entry
+                        for entry in local_open
+                        if entry.broker_order_id
+                    }
+                    local_by_sync_key = {
+                        entry.sync_key: entry
+                        for entry in local_open
+                        if entry.sync_key
+                    }
                     now = datetime.now(UTC)
                     discrepancies = 0
+                    matched_entry_ids: set[str] = set()
+
+                    for broker_position in broker_positions:
+                        if broker_position.pair != pair:
+                            continue
+                        local_entry = local_by_broker_order_id.get(broker_position.broker_position_id)
+                        if local_entry is None and broker_position.sync_key:
+                            local_entry = local_by_sync_key.get(broker_position.sync_key)
+
+                        if local_entry is None:
+                            imported = OrderBookEntry(
+                                broker_name=self.short_name,
+                                broker_order_id=broker_position.broker_position_id,
+                                sync_key=broker_position.sync_key,
+                                pair=broker_position.pair,
+                                direction=broker_position.direction,
+                                order_type=OrderType.MARKET,
+                                units=broker_position.units,
+                                requested_price=broker_position.open_price,
+                                fill_price=broker_position.open_price,
+                                stop_loss=broker_position.stop_loss,
+                                take_profit=broker_position.take_profit,
+                                status=OrderStatus.OPEN,
+                                agent_id="broker_sync",
+                                prompt_version=None,
+                                entry_reasoning="Imported from broker sync.",
+                                signal_confidence=0.0,
+                                market_context_snapshot={"source": "broker_sync_import"},
+                                requested_at=broker_position.opened_at,
+                                opened_at=broker_position.opened_at,
+                                last_broker_sync=now,
+                                sync_confirmed=True,
+                            )
+                            await repository.save_order_book_entry(imported)
+                            matched_entry_ids.add(str(imported.id))
+                            continue
+
+                        matched_entry_ids.add(str(local_entry.id))
+                        await repository.update_order_book_entry(
+                            str(local_entry.id),
+                            {
+                                "broker_order_id": broker_position.broker_position_id,
+                                "sync_key": broker_position.sync_key or local_entry.sync_key,
+                                "pair": broker_position.pair,
+                                "direction": broker_position.direction,
+                                "units": broker_position.units,
+                                "fill_price": broker_position.open_price,
+                                "stop_loss": broker_position.stop_loss,
+                                "take_profit": broker_position.take_profit,
+                                "status": OrderStatus.OPEN,
+                                "opened_at": broker_position.opened_at,
+                                "last_broker_sync": now,
+                                "sync_confirmed": True,
+                            },
+                        )
 
                     for entry in local_open:
+                        if str(entry.id) in matched_entry_ids:
+                            continue
                         if entry.broker_order_id and entry.broker_order_id not in broker_ids:
                             discrepancies += 1
                             close_reason = CloseReason.SYNC_DETECTED
 
+                            updates = await self._build_sync_close_updates(entry, now)
                             await repository.update_order_book_entry(
                                 str(entry.id),
-                                {
-                                    "status": OrderStatus.CLOSED,
-                                    "close_reason": close_reason,
-                                    "closed_at": now,
-                                    "last_broker_sync": now,
-                                    "sync_confirmed": True,
-                                },
+                                updates,
                             )
 
                             self._emit(
@@ -430,20 +491,82 @@ class BrokerBase(AbstractBroker):
         broker_positions = await self.get_open_positions()
         broker_ids = {p.broker_position_id for p in broker_positions}
         local_open = await repository.get_open_order_book_entries(self.short_name, pair)
+        local_by_broker_order_id = {
+            entry.broker_order_id: entry
+            for entry in local_open
+            if entry.broker_order_id
+        }
+        local_by_sync_key = {
+            entry.sync_key: entry
+            for entry in local_open
+            if entry.sync_key
+        }
         now = datetime.now(UTC)
         found: list[dict] = []
+        matched_entry_ids: set[str] = set()
+
+        for broker_position in broker_positions:
+            if broker_position.pair != pair:
+                continue
+            local_entry = local_by_broker_order_id.get(broker_position.broker_position_id)
+            if local_entry is None and broker_position.sync_key:
+                local_entry = local_by_sync_key.get(broker_position.sync_key)
+
+            if local_entry is None:
+                imported = OrderBookEntry(
+                    broker_name=self.short_name,
+                    broker_order_id=broker_position.broker_position_id,
+                    sync_key=broker_position.sync_key,
+                    pair=broker_position.pair,
+                    direction=broker_position.direction,
+                    order_type=OrderType.MARKET,
+                    units=broker_position.units,
+                    requested_price=broker_position.open_price,
+                    fill_price=broker_position.open_price,
+                    stop_loss=broker_position.stop_loss,
+                    take_profit=broker_position.take_profit,
+                    status=OrderStatus.OPEN,
+                    agent_id="broker_sync",
+                    prompt_version=None,
+                    entry_reasoning="Imported from broker sync.",
+                    signal_confidence=0.0,
+                    market_context_snapshot={"source": "broker_sync_import"},
+                    requested_at=broker_position.opened_at,
+                    opened_at=broker_position.opened_at,
+                    last_broker_sync=now,
+                    sync_confirmed=True,
+                )
+                await repository.save_order_book_entry(imported)
+                matched_entry_ids.add(str(imported.id))
+                continue
+
+            matched_entry_ids.add(str(local_entry.id))
+            await repository.update_order_book_entry(
+                str(local_entry.id),
+                {
+                    "broker_order_id": broker_position.broker_position_id,
+                    "sync_key": broker_position.sync_key or local_entry.sync_key,
+                    "pair": broker_position.pair,
+                    "direction": broker_position.direction,
+                    "units": broker_position.units,
+                    "fill_price": broker_position.open_price,
+                    "stop_loss": broker_position.stop_loss,
+                    "take_profit": broker_position.take_profit,
+                    "status": OrderStatus.OPEN,
+                    "opened_at": broker_position.opened_at,
+                    "last_broker_sync": now,
+                    "sync_confirmed": True,
+                },
+            )
 
         for entry in local_open:
+            if str(entry.id) in matched_entry_ids:
+                continue
             if entry.broker_order_id and entry.broker_order_id not in broker_ids:
+                updates = await self._build_sync_close_updates(entry, now)
                 await repository.update_order_book_entry(
                     str(entry.id),
-                    {
-                        "status": OrderStatus.CLOSED,
-                        "close_reason": CloseReason.SYNC_DETECTED,
-                        "closed_at": now,
-                        "last_broker_sync": now,
-                        "sync_confirmed": True,
-                    },
+                    updates,
                 )
                 disc = {
                     "entry_id": str(entry.id),
@@ -463,6 +586,79 @@ class BrokerBase(AbstractBroker):
                 ))
 
         return found
+
+    async def _publish_m5_candle(
+        self,
+        *,
+        pair: str,
+        candle: Candle,
+        event_bus,
+        source: str,
+        source_agent_id: str,
+        refresh_only: bool = False,
+    ) -> None:
+        self._emit(
+            source, MonitoringEventType.M5_CANDLE_FETCHED,
+            broker_name=self.short_name, pair=pair,
+            timestamp=candle.timestamp.isoformat(),
+            open=str(candle.open),
+            high=str(candle.high),
+            low=str(candle.low),
+            close=str(candle.close),
+            spread=str(candle.spread),
+            tick_volume=candle.tick_volume,
+            is_null_candle=self._is_null_candle(candle),
+            refresh_only=refresh_only,
+        )
+
+        if not refresh_only:
+            last_ts = self._last_m5_time_by_pair.get(pair)
+            if last_ts is not None:
+                expected = last_ts + timedelta(minutes=5)
+                if candle.timestamp > expected + timedelta(seconds=30):
+                    gap_candles = int((candle.timestamp - expected).total_seconds() / 300)
+                    _log.warning(
+                        "M5 gap detected broker=%s pair=%s missing=%d",
+                        self.short_name, pair, gap_candles,
+                    )
+                    self._emit(
+                        source, MonitoringEventType.CANDLE_GAP_DETECTED,
+                        broker_name=self.short_name, pair=pair,
+                        expected=expected.isoformat(),
+                        got=candle.timestamp.isoformat(),
+                        missing_candles=gap_candles,
+                    )
+                    await event_bus.publish(AgentMessage(
+                        event_type=EventType.CANDLE_GAP_DETECTED,
+                        source_agent_id=source_agent_id,
+                        payload={
+                            "broker_name": self.short_name,
+                            "pair": pair,
+                            "expected_timestamp": expected.isoformat(),
+                            "received_timestamp": candle.timestamp.isoformat(),
+                            "missing_candles": gap_candles,
+                        },
+                    ))
+
+            self._last_m5_time_by_pair[pair] = candle.timestamp
+
+        await event_bus.publish(AgentMessage(
+            event_type=EventType.M5_CANDLE_AVAILABLE,
+            source_agent_id=source_agent_id,
+            payload={
+                "broker_name": self.short_name,
+                "pair": pair,
+                "candle": candle.model_dump(mode="json"),
+                "is_null_candle": self._is_null_candle(candle),
+                "refresh_only": refresh_only,
+            },
+        ))
+        self._emit(
+            source, MonitoringEventType.M5_CANDLE_QUEUED,
+            broker_name=self.short_name, pair=pair,
+            timestamp=candle.timestamp.isoformat(),
+            refresh_only=refresh_only,
+        )
 
     # ── M5 time boundary helper ───────────────────────────────────────────────
 
@@ -517,6 +713,55 @@ class BrokerBase(AbstractBroker):
             and candle.spread == 0
             and candle.tick_volume == 0
         )
+
+    async def _build_sync_close_updates(self, entry: OrderBookEntry, now: datetime) -> dict[str, Any]:
+        updates: dict[str, Any] = {
+            "status": OrderStatus.CLOSED,
+            "close_reason": CloseReason.SYNC_DETECTED,
+            "closed_at": now,
+            "last_broker_sync": now,
+            "sync_confirmed": True,
+        }
+        try:
+            broker_result = await self.get_closed_trade_result(
+                entry.broker_order_id or "",
+                pair=entry.pair,
+                sync_key=entry.sync_key,
+            )
+        except Exception as exc:
+            _log.warning(
+                "Closed trade result lookup failed during sync",
+                extra={
+                    "broker_name": self.short_name,
+                    "pair": entry.pair,
+                    "broker_order_id": entry.broker_order_id,
+                    "error": str(exc),
+                },
+            )
+            broker_result = None
+
+        if isinstance(broker_result, dict):
+            pnl = broker_result.get("pnl_account_currency")
+            if isinstance(pnl, Decimal):
+                updates["pnl_account_currency"] = pnl
+            elif isinstance(pnl, (int, float, str)) and str(pnl).strip():
+                updates["pnl_account_currency"] = Decimal(str(pnl))
+
+            close_price = broker_result.get("close_price")
+            if isinstance(close_price, Decimal):
+                updates["close_price"] = close_price
+            elif isinstance(close_price, (int, float, str)) and str(close_price).strip():
+                updates["close_price"] = Decimal(str(close_price))
+
+            closed_at = broker_result.get("closed_at")
+            if isinstance(closed_at, datetime):
+                updates["closed_at"] = closed_at
+
+            close_reason = broker_result.get("close_reason")
+            if isinstance(close_reason, str) and close_reason.strip():
+                updates["close_reasoning"] = close_reason.strip()
+
+        return updates
 
     # ── Monitoring helper ─────────────────────────────────────────────────────
 

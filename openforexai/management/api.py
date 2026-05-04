@@ -43,7 +43,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -71,6 +71,11 @@ from openforexai.management.package_io import (
     validate_package,
 )
 from openforexai.runtime import control as runtime_control
+from openforexai.tools.argument_templates import (
+    build_agent_placeholder_values,
+    resolve_argument_templates,
+)
+from openforexai.utils.logging import configure_logging
 
 # ── Agent-query response registry ────────────────────────────────────────────
 # Maps correlation_id → asyncio.Future.  Populated by ask_agent(); resolved by
@@ -138,6 +143,20 @@ _EXPECTED_KEY: str | None = os.environ.get("MANAGEMENT_API_KEY")
 
 
 _GITHUB_RELEASES_URL = "https://api.github.com/repos/mcGeorge66/OpenForexAI/releases"
+
+
+def _configured_log_level() -> str:
+    system_cfg = _system_config.get("system", {}) if isinstance(_system_config, dict) else {}
+    raw = system_cfg.get("log_level", "INFO") if isinstance(system_cfg, dict) else "INFO"
+    level = str(raw).strip().upper()
+    return "DEBUG" if level == "DEBUG" else "INFO"
+
+
+def _apply_monitoring_detail_level() -> None:
+    configure_logging(_configured_log_level())
+    if _monitoring_bus is None or not hasattr(_monitoring_bus, "set_detail_level"):
+        return
+    _monitoring_bus.set_detail_level(_configured_log_level())
 
 
 def _agent_task_summary(agent_cfg: dict[str, Any]) -> str:
@@ -388,6 +407,118 @@ def _resolve_connected_broker(
     return normalized, None
 
 
+def _connected_broker_short_names() -> list[str]:
+    names: list[str] = []
+    for broker in _connected_brokers.values():
+        short_name = str(getattr(broker, "short_name", "")).strip()
+        if short_name and short_name not in names:
+            names.append(short_name)
+    return names
+
+
+def _serialize_order_book_entry(entry: Any, *, include_analysis: bool = False) -> dict[str, Any]:
+    snapshot = entry.market_context_snapshot if isinstance(entry.market_context_snapshot, dict) else {}
+    decision_context = snapshot.get("decision_context") if isinstance(snapshot.get("decision_context"), dict) else {}
+    analysis_raw = snapshot.get("analyst_recommendation_raw")
+    analysis_object = snapshot.get("analyst_recommendation") if isinstance(snapshot.get("analyst_recommendation"), dict) else None
+    analysis_overlays = snapshot.get("analysis_overlays") if isinstance(snapshot.get("analysis_overlays"), dict) else {}
+    opened_reference = entry.fill_price or entry.requested_price
+    stake_estimate = None
+    if opened_reference is not None:
+        try:
+            stake_estimate = float(opened_reference) * float(entry.units)
+        except (TypeError, ValueError):
+            stake_estimate = None
+
+    payload = {
+        "id": str(entry.id),
+        "broker_name": entry.broker_name,
+        "broker_order_id": entry.broker_order_id,
+        "sync_key": entry.sync_key,
+        "agent_id": entry.agent_id,
+        "pair": entry.pair,
+        "direction": entry.direction.value,
+        "order_type": entry.order_type.value,
+        "units": entry.units,
+        "requested_price": float(entry.requested_price),
+        "fill_price": float(entry.fill_price) if entry.fill_price is not None else None,
+        "stop_loss": float(entry.stop_loss) if entry.stop_loss is not None else None,
+        "take_profit": float(entry.take_profit) if entry.take_profit is not None else None,
+        "status": entry.status.value,
+        "requested_at": entry.requested_at.isoformat(),
+        "opened_at": entry.opened_at.isoformat() if entry.opened_at else None,
+        "closed_at": entry.closed_at.isoformat() if entry.closed_at else None,
+        "signal_confidence": entry.signal_confidence,
+        "entry_reasoning": entry.entry_reasoning,
+        "close_reason": entry.close_reason.value if hasattr(entry.close_reason, "value") else entry.close_reason,
+        "close_price": float(entry.close_price) if entry.close_price is not None else None,
+        "close_reasoning": entry.close_reasoning,
+        "pnl_pips": float(entry.pnl_pips) if entry.pnl_pips is not None else None,
+        "pnl_account_currency": float(entry.pnl_account_currency) if entry.pnl_account_currency is not None else None,
+        "sync_confirmed": entry.sync_confirmed,
+        "stake_estimate": stake_estimate,
+        "decision_context": decision_context,
+        "analysis_overlays": analysis_overlays,
+        "analysis_available": isinstance(analysis_raw, str) and bool(analysis_raw.strip()),
+    }
+    if include_analysis:
+        payload["analysis_text"] = analysis_raw if isinstance(analysis_raw, str) else None
+        payload["analysis"] = analysis_object
+        payload["market_context_snapshot"] = snapshot
+    return payload
+
+
+def _serialize_analysis_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(record.get("id", "")),
+        "agent_id": str(record.get("agent_id", "")),
+        "pair": record.get("pair"),
+        "decision_type": record.get("decision_type"),
+        "llm_model": record.get("llm_model") or "",
+        "tokens_used": int(record.get("tokens_used") or 0),
+        "latency_ms": record.get("latency_ms"),
+        "decided_at": record.get("decided_at"),
+        "analysis_text": record.get("analysis_text"),
+        "analysis": record.get("analysis"),
+        "decision": record.get("decision"),
+        "confidence": record.get("confidence"),
+        "order_start_signal": record.get("order_start_signal"),
+        "entry_quality": record.get("entry_quality"),
+        "setup_type": record.get("setup_type"),
+        "bus_payload": record.get("bus_payload") if isinstance(record.get("bus_payload"), dict) else {},
+        "input_context": record.get("input_context") if isinstance(record.get("input_context"), dict) else {},
+        "output": record.get("output") if isinstance(record.get("output"), dict) else {},
+        "market_snapshot": record.get("market_snapshot") if isinstance(record.get("market_snapshot"), dict) else {},
+    }
+
+
+def _filter_order_book_entries(entries: list[Any], status_filter: str) -> list[Any]:
+    if status_filter == "open":
+        return [e for e in entries if e.status.value in {"PENDING", "OPEN", "PARTIALLY_FILLED"}]
+    exact_status_map = {
+        "pending": "PENDING",
+        "partially_filled": "PARTIALLY_FILLED",
+        "closed": "CLOSED",
+        "rejected": "REJECTED",
+        "cancelled": "CANCELLED",
+    }
+    target_status = exact_status_map.get(status_filter)
+    if target_status is None or status_filter == "all":
+        return entries
+    return [e for e in entries if e.status.value == target_status]
+
+
+def _timeframe_delta(timeframe: str) -> timedelta:
+    return {
+        "M5": timedelta(minutes=5),
+        "M15": timedelta(minutes=15),
+        "M30": timedelta(minutes=30),
+        "H1": timedelta(hours=1),
+        "H4": timedelta(hours=4),
+        "D1": timedelta(days=1),
+    }[timeframe]
+
+
 def _check_api_key(api_key: str | None = Depends(_API_KEY_HEADER)) -> None:
     if _EXPECTED_KEY and api_key != _EXPECTED_KEY:
         raise HTTPException(
@@ -562,6 +693,37 @@ def _resolve_llm_checker_params(
     final_temp = float(temp) if isinstance(temp, (int, float)) else None
     final_max = int(max_toks) if isinstance(max_toks, int) and max_toks > 0 else None
     return final_temp, final_max
+
+
+def _emit_tool_executor_monitoring(
+    event_type: str,
+    *,
+    tool_name: str,
+    agent_id: str | None,
+    broker_name: str | None,
+    pair: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """Emit monitoring events for direct Tool Executor runs."""
+    if _monitoring_bus is None:
+        return
+    try:
+        from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+
+        _monitoring_bus.emit(MonitoringEvent(
+            timestamp=datetime.now(UTC),
+            source_module="tool_executor",
+            event_type=MonitoringEventType[event_type],
+            broker_name=broker_name,
+            pair=pair,
+            payload={
+                "tool_name": tool_name,
+                "agent_id": agent_id,
+                **payload,
+            },
+        ))
+    except Exception:
+        pass
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -1007,6 +1169,131 @@ async def get_agent_candles(
     ]
 
 
+@router.get("/orderbook")
+async def get_orderbook_entries(
+    broker_name: str | None = None,
+    pair: str | None = None,
+    status_filter: str = "all",
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+
+    normalized_pair = pair.upper().strip() if isinstance(pair, str) and pair.strip() else None
+    broker_names: list[str]
+    if broker_name:
+        _, broker_instance = _resolve_connected_broker(broker_name)
+        if broker_instance is None:
+            raise HTTPException(status_code=404, detail=f"Broker {broker_name!r} is not connected")
+        broker_names = [str(broker_instance.short_name)]
+    else:
+        broker_names = _connected_broker_short_names()
+
+    if not broker_names:
+        return []
+
+    per_broker_limit = max(1, min(limit, 1000))
+    combined: list[Any] = []
+    for short_name in broker_names:
+        combined.extend(
+            await _repository.get_order_book_entries(
+                broker_name=short_name,
+                pair=normalized_pair,
+                limit=per_broker_limit,
+            )
+        )
+
+    filtered = _filter_order_book_entries(combined, status_filter)
+    filtered.sort(key=lambda entry: entry.requested_at, reverse=True)
+    return [_serialize_order_book_entry(entry, include_analysis=False) for entry in filtered[:per_broker_limit]]
+
+
+@router.get("/orderbook/{entry_id}")
+async def get_orderbook_entry(entry_id: str) -> dict[str, Any]:
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    entry = await _repository.get_order_book_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Order book entry {entry_id!r} not found")
+    return _serialize_order_book_entry(entry, include_analysis=True)
+
+
+@router.get("/orderbook/{entry_id}/candles")
+async def get_orderbook_entry_candles(
+    entry_id: str,
+    timeframe: str = "M5",
+    count: int = 2000,
+) -> list[dict[str, Any]]:
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    tf = timeframe.upper().strip()
+    if tf not in {"M5", "M15", "M30", "H1", "H4", "D1"}:
+        raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe!r}")
+
+    entry = await _repository.get_order_book_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Order book entry {entry_id!r} not found")
+
+    candles = await _data_container.get_candles(
+        broker_name=entry.broker_name,
+        pair=entry.pair,
+        timeframe=tf,
+        limit=max(200, min(count, 5000)),
+    )
+    candles = sorted(candles, key=lambda candle: candle.timestamp)
+    if not candles:
+        return []
+
+    candle_delta = _timeframe_delta(tf)
+    start_anchor = entry.opened_at or entry.requested_at
+    end_anchor = entry.closed_at or candles[-1].timestamp
+    window_start = start_anchor - (candle_delta * 80)
+    window_end = end_anchor + (candle_delta * 80)
+    windowed = [candle for candle in candles if window_start <= candle.timestamp <= window_end]
+    source = windowed or candles
+    return [
+        {
+            "timestamp": c.timestamp.isoformat(),
+            "open": float(c.open),
+            "high": float(c.high),
+            "low": float(c.low),
+            "close": float(c.close),
+            "tick_volume": c.tick_volume,
+            "spread": float(c.spread),
+        }
+        for c in source
+    ]
+
+
+@router.get("/analyses")
+async def get_analysis_records(
+    agent_id: str | None = None,
+    pair: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    records = await _repository.get_analysis_records(
+        agent_id=agent_id.strip() if isinstance(agent_id, str) and agent_id.strip() else None,
+        pair=pair.upper().strip() if isinstance(pair, str) and pair.strip() else None,
+        limit=max(1, min(limit, 1000)),
+    )
+    return [_serialize_analysis_record(record) for record in records]
+
+
+@router.get("/analyses/{record_id}")
+async def get_analysis_record(record_id: str) -> dict[str, Any]:
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+    record = await _repository.get_analysis_record(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Analysis record {record_id!r} not found")
+    return _serialize_analysis_record(record)
+
+
 @router.post("/agents/{agent_id}/ask", response_model=AgentQueryResponse)
 async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse:
     """Send a free-text question to a specific agent and wait for its response.
@@ -1171,46 +1458,9 @@ async def monitoring_events(
     ]
 
 
-# ── WebSocket payload helpers ─────────────────────────────────────────────────
-
-# LLM_REQUEST payloads include the full system prompt, complete message history,
-# and all tool specs — they can easily be 100KB–500KB.  Truncate bulky fields
-# before sending over WebSocket; the ring buffer keeps the full data for
-# GET /monitoring/events (the console monitor uses that endpoint).
-
-_WS_MAX_STR_LEN  = 2_000   # max chars for any single string field
-_WS_MAX_MSG_KEEP = 5       # keep only the last N messages from history
-
-
 def _ws_safe_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a WebSocket-safe copy of *payload*, truncating large LLM fields."""
-    if event_type not in ("llm_request", "llm_response"):
-        return payload  # non-LLM events are small — pass through unchanged
-
-    out = dict(payload)  # shallow copy; don't mutate the original
-
-    # Truncate system prompt
-    sp = out.get("system_prompt")
-    if isinstance(sp, str) and len(sp) > _WS_MAX_STR_LEN:
-        out["system_prompt"] = sp[:_WS_MAX_STR_LEN] + f" …[{len(sp) - _WS_MAX_STR_LEN} chars omitted]"
-
-    # Keep only the last N messages to limit size
-    msgs = out.get("messages")
-    if isinstance(msgs, list) and len(msgs) > _WS_MAX_MSG_KEEP:
-        omitted = len(msgs) - _WS_MAX_MSG_KEEP
-        out["messages"] = msgs[-_WS_MAX_MSG_KEEP:]
-        out["messages_omitted"] = omitted
-
-    # Replace full tool specs with a placeholder (names are already in tool_names)
-    if "tool_specs" in out:
-        out["tool_specs"] = "[omitted — fetch /monitoring/events for full data]"
-
-    # Truncate long response content
-    content = out.get("content")
-    if isinstance(content, str) and len(content) > _WS_MAX_STR_LEN:
-        out["content"] = content[:_WS_MAX_STR_LEN] + f" …[{len(content) - _WS_MAX_STR_LEN} chars omitted]"
-
-    return out
+    """Return the full payload for WebSocket monitoring without truncation."""
+    return payload
 
 
 def _build_ws_message(event: Any) -> str:
@@ -1236,7 +1486,7 @@ async def ws_monitoring(websocket: WebSocket) -> None:
     MonitoringEvent as a JSON object to the client.  The connection is kept
     alive with 30-second heartbeat pings.
 
-    On first connect, the last 100 ring-buffer events are replayed so the
+    On first connect, the last 500 ring-buffer events are replayed so the
     client immediately sees recent history (useful if events occurred before
     the browser tab opened).
 
@@ -1279,7 +1529,7 @@ async def ws_monitoring(websocket: WebSocket) -> None:
 
     try:
         # ── Phase 1: replay recent ring-buffer history ────────────────────────
-        recent = _monitoring_bus.recent_events(limit=100)
+        recent = _monitoring_bus.recent_events(limit=500)
         for hist_event in recent:
             if allowed_types and hist_event.event_type.value not in allowed_types:
                 continue
@@ -1383,7 +1633,13 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
             )
         selected_agent_cfg = cfg
 
-    broker_selector = req.broker_name or (
+    argument_broker = None
+    if isinstance(req.arguments, dict):
+        broker_arg = req.arguments.get("broker")
+        if isinstance(broker_arg, str) and broker_arg.strip():
+            argument_broker = broker_arg.strip()
+
+    broker_selector = req.broker_name or argument_broker or (
         str(selected_agent_cfg.get("broker"))
         if selected_agent_cfg and selected_agent_cfg.get("broker")
         else None
@@ -1412,9 +1668,16 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     derived_pair: str | None = None
+    argument_pair = None
+    if isinstance(req.arguments, dict):
+        pair_arg = req.arguments.get("pair")
+        if isinstance(pair_arg, str) and pair_arg.strip():
+            argument_pair = pair_arg.strip().upper()
     manual_pair = req.pair.strip().upper() if isinstance(req.pair, str) and req.pair.strip() else None
     if manual_pair:
         derived_pair = manual_pair
+    elif argument_pair:
+        derived_pair = argument_pair
     elif selected_agent_cfg and selected_agent_cfg.get("pair"):
         derived_pair = str(selected_agent_cfg.get("pair")).upper()
     else:
@@ -1432,13 +1695,61 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         extra={
             "llm_name": llm_name,
             "llm": llm_instance,
+            "agent_config": selected_agent_cfg or {},
+            "broker_module_name": broker_module_name,
         },
     )
 
+    effective_arguments = dict(req.arguments or {})
+    if selected_agent_cfg:
+        tool_cfg = selected_agent_cfg.get("tool_config", {})
+        if isinstance(tool_cfg, dict):
+            forced = tool_cfg.get("forced_arguments", {})
+            if isinstance(forced, dict):
+                forced_for_tool = forced.get(req.tool_name, {})
+                if isinstance(forced_for_tool, dict):
+                    placeholders = build_agent_placeholder_values(
+                        agent_id=req.agent_id or "MGMT_-ALL___-GA-MGMT",
+                        agent_config=selected_agent_cfg,
+                        broker_name=context_broker_name,
+                        pair=derived_pair,
+                    )
+                    effective_arguments.update(resolve_argument_templates(forced_for_tool, placeholders))
+
+    _emit_tool_executor_monitoring(
+        "TOOL_CALL_STARTED",
+        tool_name=req.tool_name,
+        agent_id=req.agent_id,
+        broker_name=context_broker_name,
+        pair=derived_pair,
+        payload={"arguments": effective_arguments},
+    )
     try:
-        result = await tool.execute(req.arguments, context)
+        result = await tool.execute(effective_arguments, context)
+        _emit_tool_executor_monitoring(
+            "TOOL_CALL_COMPLETED",
+            tool_name=req.tool_name,
+            agent_id=req.agent_id,
+            broker_name=context_broker_name,
+            pair=derived_pair,
+            payload={
+                "arguments": effective_arguments,
+                "result": json.dumps(result, default=str),
+            },
+        )
         return ToolExecuteResponse(tool_name=req.tool_name, result=result, is_error=False)
     except Exception as exc:
+        _emit_tool_executor_monitoring(
+            "TOOL_CALL_FAILED",
+            tool_name=req.tool_name,
+            agent_id=req.agent_id,
+            broker_name=context_broker_name,
+            pair=derived_pair,
+            payload={
+                "arguments": effective_arguments,
+                "error": str(exc),
+            },
+        )
         return ToolExecuteResponse(
             tool_name=req.tool_name,
             result={"error": str(exc)},
@@ -1985,6 +2296,7 @@ async def import_agent_package(req: PackageImportRequest) -> dict[str, Any]:
 
     if _config_service is not None and hasattr(_config_service, "update_config"):
         _config_service.update_config(_system_config)
+    _apply_monitoring_detail_level()
 
     runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
 
@@ -2114,6 +2426,7 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
 
     if _config_service is not None and hasattr(_config_service, "update_config"):
         _config_service.update_config(_system_config)
+    _apply_monitoring_detail_level()
 
     runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
     return {
@@ -2313,6 +2626,7 @@ def build_app(
     _runtime_agents = {}
     _runtime_agent_tasks = {}
     _start_time = time.monotonic()
+    _apply_monitoring_detail_level()
 
     app = FastAPI(
         title="OpenForexAI Management API",

@@ -98,6 +98,40 @@ export const api = {
                     get<CandleBar[]>(
                       `/agents/${encodeURIComponent(agentId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
                     ),
+  getOrderbookEntries: (params?: {
+                    broker_name?: string | null
+                    pair?: string | null
+                    status_filter?: string
+                    limit?: number
+                  }) => {
+                    const query = new URLSearchParams()
+                    if (params?.broker_name) query.set('broker_name', params.broker_name)
+                    if (params?.pair) query.set('pair', params.pair)
+                    if (params?.status_filter) query.set('status_filter', params.status_filter)
+                    if (params?.limit) query.set('limit', String(params.limit))
+                    const suffix = query.toString() ? `?${query.toString()}` : ''
+                    return get<OrderbookEntrySummary[]>(`/orderbook${suffix}`)
+                  },
+  getOrderbookEntry: (entryId: string) =>
+                    get<OrderbookEntryDetail>(`/orderbook/${encodeURIComponent(entryId)}`),
+  getOrderbookCandles: (entryId: string, timeframe = 'M5', count = 2000) =>
+                    get<CandleBar[]>(
+                      `/orderbook/${encodeURIComponent(entryId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
+                    ),
+  getAnalyses: (params?: {
+                    agent_id?: string | null
+                    pair?: string | null
+                    limit?: number
+                  }) => {
+                    const query = new URLSearchParams()
+                    if (params?.agent_id) query.set('agent_id', params.agent_id)
+                    if (params?.pair) query.set('pair', params.pair)
+                    if (params?.limit) query.set('limit', String(params.limit))
+                    const suffix = query.toString() ? `?${query.toString()}` : ''
+                    return get<AnalysisRecord[]>(`/analyses${suffix}`)
+                  },
+  getAnalysis: (recordId: string) =>
+                    get<AnalysisRecord>(`/analyses/${encodeURIComponent(recordId)}`),
   getTools:       () => get<{ tools: ToolInfo[] }>('/tools'),
   executeTool:    (
                     tool_name: string,
@@ -235,6 +269,96 @@ export interface CandleBar {
   close: number
   tick_volume: number
   spread: number
+}
+
+export interface AnalysisIndicatorSnapshot {
+  name: string
+  timeframe: string
+  value: number
+  source?: string
+}
+
+export interface AnalysisLevelSnapshot {
+  support?: number[]
+  resistance?: number[]
+  invalidation?: number[]
+  target?: number[]
+}
+
+export interface AnalysisOverlaySnapshot {
+  levels: AnalysisLevelSnapshot
+  indicators: AnalysisIndicatorSnapshot[]
+}
+
+export interface OrderDecisionContext {
+  symbol?: string | null
+  decision?: string | null
+  confidence?: number | null
+  order_start_signal?: string | null
+  entry_quality?: string | null
+  setup_type?: string | null
+  analysis_summary?: string | null
+  conflict_flags?: string[]
+}
+
+export interface OrderbookEntrySummary {
+  id: string
+  broker_name: string
+  broker_order_id?: string | null
+  sync_key?: string | null
+  agent_id: string
+  pair: string
+  direction: string
+  order_type: string
+  units: number
+  requested_price: number
+  fill_price?: number | null
+  stop_loss?: number | null
+  take_profit?: number | null
+  status: string
+  requested_at: string
+  opened_at?: string | null
+  closed_at?: string | null
+  signal_confidence: number
+  entry_reasoning: string
+  close_reason?: string | null
+  close_price?: number | null
+  close_reasoning?: string | null
+  pnl_pips?: number | null
+  pnl_account_currency?: number | null
+  sync_confirmed: boolean
+  stake_estimate?: number | null
+  decision_context: OrderDecisionContext
+  analysis_overlays: AnalysisOverlaySnapshot
+  analysis_available: boolean
+}
+
+export interface OrderbookEntryDetail extends OrderbookEntrySummary {
+  analysis_text?: string | null
+  analysis?: Record<string, unknown> | null
+  market_context_snapshot: Record<string, unknown>
+}
+
+export interface AnalysisRecord {
+  id: string
+  agent_id: string
+  pair?: string | null
+  decision_type?: string | null
+  decided_at: string
+  llm_model: string
+  tokens_used: number
+  latency_ms?: number | null
+  analysis_text?: string | null
+  analysis?: Record<string, unknown> | null
+  decision?: string | null
+  confidence?: number | null
+  order_start_signal?: string | null
+  entry_quality?: string | null
+  setup_type?: string | null
+  bus_payload: Record<string, unknown>
+  input_context: Record<string, unknown>
+  output: Record<string, unknown>
+  market_snapshot: Record<string, unknown>
 }
 
 

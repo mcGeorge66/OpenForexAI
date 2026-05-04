@@ -108,12 +108,14 @@ function coerceArguments(
 type BrokerOption = {
   value: string
   label: string
+  moduleName: string
 }
 
 export function ToolExecutor() {
   const { tools, loading: toolsLoading } = useTools()
   const [selectedTool, setSelectedTool] = useState<string>('')
   const [values, setValues] = useState<Record<string, string>>({})
+  const [agentConfigs, setAgentConfigs] = useState<Record<string, { broker: string; llm: string; pair: string }>>({})
   const [agentOptions, setAgentOptions] = useState<string[]>([])
   const [pairOptions, setPairOptions] = useState<string[]>([])
   const [brokerOptions, setBrokerOptions] = useState<BrokerOption[]>([])
@@ -135,10 +137,27 @@ export function ToolExecutor() {
         setAgentOptions(ids)
         const pairs = Array.from(new Set(
           ids
-            .map(id => id.split('-')[1]?.trim().toUpperCase() ?? '')
+            .map(id => {
+              const parts = id.includes('_') ? id.split('_') : id.split('-')
+              return parts[1]?.trim().toUpperCase() ?? ''
+            })
             .filter(p => p && p !== 'ALL___'),
         )).sort()
         setPairOptions(pairs)
+      })
+      .catch(err => setContextError(String(err)))
+    api.getConfigView()
+      .then(cfg => {
+        const nextAgentConfigs: Record<string, { broker: string; llm: string; pair: string }> = {}
+        const agents = (cfg.agents ?? {}) as Record<string, Record<string, unknown>>
+        for (const [id, agentCfg] of Object.entries(agents)) {
+          nextAgentConfigs[id] = {
+            broker: typeof agentCfg.broker === 'string' ? agentCfg.broker : '',
+            llm: typeof agentCfg.llm === 'string' ? agentCfg.llm : '',
+            pair: typeof agentCfg.pair === 'string' ? String(agentCfg.pair).toUpperCase() : '',
+          }
+        }
+        setAgentConfigs(nextAgentConfigs)
       })
       .catch(err => setContextError(String(err)))
     api.getModuleNames('broker')
@@ -151,11 +170,13 @@ export function ToolExecutor() {
             return {
               value: shortName,
               label: `${shortName} (${moduleName})`,
+              moduleName,
             }
           } catch {
             return {
               value: moduleName,
               label: moduleName,
+              moduleName,
             }
           }
         }))
@@ -169,51 +190,111 @@ export function ToolExecutor() {
   }, [])
 
   const tool = tools.find(t => t.name === selectedTool)
-  const isPlaceOrder = tool?.name === 'place_order'
+  const isOrderPlacementTool = tool?.name === 'place_order' || tool?.name === 'auto_place_order'
+  const effectiveBrokerContext = brokerName.trim()
+  const effectivePairContext = pair.trim().toUpperCase()
+
+  useEffect(() => {
+    if (!agentId.trim()) return
+    const preset = agentConfigs[agentId]
+    if (!preset) return
+    if (preset.broker) {
+      const brokerMatch = brokerOptions.find(
+        option => option.value === preset.broker || option.moduleName === preset.broker,
+      )
+      setBrokerName(brokerMatch?.value ?? preset.broker)
+    }
+    if (preset.llm) setLlmName(preset.llm)
+    if (preset.pair && preset.pair !== 'ALL...' && preset.pair !== 'ALL___') setPair(preset.pair)
+  }, [agentId, agentConfigs, brokerOptions])
 
   useEffect(() => {
     if (!tool) return
-    const hasAgentArg = Boolean(tool.input_schema.properties?.agent)
-    if (!hasAgentArg) return
-    const nextAgent = agentId.trim()
+    const hasBrokerArg = Boolean(tool.input_schema.properties?.broker)
+    if (!hasBrokerArg) return
+    const nextBroker = effectiveBrokerContext
     setValues(prev => {
-      if ((prev.agent ?? '') === nextAgent) return prev
-      return { ...prev, agent: nextAgent }
+      if ((prev.broker ?? '') === nextBroker) return prev
+      return { ...prev, broker: nextBroker }
     })
-  }, [agentId, tool])
+  }, [effectiveBrokerContext, tool])
   useEffect(() => {
-    if (!agentId) return
-    const parts = agentId.split('-')
-    const fromId = (parts[1] ?? '').trim().toUpperCase()
-    if (fromId && fromId !== 'ALL___') setPair(fromId)
-  }, [agentId])
+    if (!tool) return
+    const hasPairArg = Boolean(tool.input_schema.properties?.pair)
+    if (!hasPairArg) return
+    const nextPair = effectivePairContext
+    setValues(prev => {
+      if ((prev.pair ?? '') === nextPair) return prev
+      return { ...prev, pair: nextPair }
+    })
+  }, [effectivePairContext, tool])
 
-  const placeOrderIssues = useMemo(() => {
-    if (!isPlaceOrder) return [] as string[]
+  const validationIssues = useMemo(() => {
+    if (!tool) return [] as string[]
+
     const issues: string[] = []
-    const orderType = (values.order_type || '').toUpperCase()
-    const units = Number(values.units)
-    if (!brokerName && !agentId) {
-      issues.push('Select a Broker (short name) or an Agent context for realistic execution tests.')
+    const requiredFields = tool.input_schema.required ?? []
+    const props = tool.input_schema.properties ?? {}
+
+    for (const field of requiredFields) {
+      const value = values[field] ?? ''
+      if (String(value).trim() === '') {
+        issues.push(`${field} is required.`)
+      }
     }
-    if (!values.direction) issues.push('direction is required.')
-    if (!orderType) issues.push('order_type is required.')
-    if (!values.units) {
-      issues.push('units is required.')
-    } else if (!Number.isFinite(units) || units <= 0 || !Number.isInteger(units)) {
-      issues.push('units must be a positive integer.')
+
+    const expectsAgent = Boolean(props.agent)
+    const expectsBroker = Boolean(props.broker)
+    const expectsPair = Boolean(props.pair)
+
+    if (expectsAgent && String(values.agent ?? '').trim() === '') {
+      issues.push('agent is required.')
     }
-    if (orderType === 'LIMIT' && !values.limit_price) issues.push('LIMIT requires limit_price.')
-    if (orderType === 'STOP' && !values.stop_price) issues.push('STOP requires stop_price.')
-    if (orderType === 'STOP_LIMIT') {
-      if (!values.stop_price) issues.push('STOP_LIMIT requires stop_price.')
-      if (!values.limit_price) issues.push('STOP_LIMIT requires limit_price.')
+    if (expectsBroker && !effectiveBrokerContext && String(values.broker ?? '').trim() === '') {
+      issues.push('Select a Broker context or provide broker explicitly.')
     }
-    if (orderType === 'TRAILING_STOP' && !values.trailing_stop_distance) {
-      issues.push('TRAILING_STOP requires trailing_stop_distance.')
+    if (expectsPair && !effectivePairContext && String(values.pair ?? '').trim() === '') {
+      issues.push('Select a Pair context or provide pair explicitly.')
     }
-    return issues
-  }, [isPlaceOrder, values, brokerName, agentId])
+
+    if (isOrderPlacementTool) {
+      const orderType = (values.order_type || '').toUpperCase()
+      const effectiveBroker = (values.broker || effectiveBrokerContext || '').trim()
+      const effectivePair = (values.pair || effectivePairContext || '').trim().toUpperCase()
+      const units = Number(values.units)
+
+      if (tool.name === 'place_order' && !values.units && !values.lots && !values.risk_pct) {
+        issues.push('place_order requires units, lots, or risk_pct.')
+      }
+      if (!effectiveBroker) {
+        issues.push('Select a Broker context or provide broker explicitly.')
+      }
+      if (!effectivePair) {
+        issues.push('Select a Pair context or provide pair explicitly.')
+      }
+      if (values.units && (!Number.isFinite(units) || units <= 0 || !Number.isInteger(units))) {
+        issues.push('units must be a positive integer.')
+      }
+      if (orderType === 'LIMIT' && !values.limit_price) issues.push('LIMIT requires limit_price.')
+      if (orderType === 'STOP' && !values.stop_price) issues.push('STOP requires stop_price.')
+      if (orderType === 'STOP_LIMIT') {
+        if (!values.stop_price) issues.push('STOP_LIMIT requires stop_price.')
+        if (!values.limit_price) issues.push('STOP_LIMIT requires limit_price.')
+      }
+      if (orderType === 'TRAILING_STOP' && !values.trailing_stop_distance) {
+        issues.push('TRAILING_STOP requires trailing_stop_distance.')
+      }
+    }
+
+    return Array.from(new Set(issues))
+  }, [
+    tool,
+    values,
+    agentId,
+    effectiveBrokerContext,
+    effectivePairContext,
+    isOrderPlacementTool,
+  ])
 
   const handleToolChange = (name: string) => {
     setSelectedTool(name)
@@ -420,7 +501,23 @@ export function ToolExecutor() {
                   </button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-auto pr-1">
-                  {isPlaceOrder && (
+                  {validationIssues.length > 0 && (
+                    <div className="mb-3 p-2 border border-gray-700 rounded bg-gray-900/50 space-y-2">
+                      {isOrderPlacementTool && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] text-gray-400 uppercase tracking-wide">Quick presets:</span>
+                          <button onClick={() => applyPlaceOrderPreset('MARKET')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Market</button>
+                          <button onClick={() => applyPlaceOrderPreset('LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Limit</button>
+                          <button onClick={() => applyPlaceOrderPreset('STOP')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop</button>
+                          <button onClick={() => applyPlaceOrderPreset('STOP_LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop-Limit</button>
+                        </div>
+                      )}
+                      <ul className="text-xs text-amber-300 space-y-1">
+                        {validationIssues.map(issue => <li key={issue}>- {issue}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {validationIssues.length === 0 && isOrderPlacementTool && (
                     <div className="mb-3 p-2 border border-gray-700 rounded bg-gray-900/50 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-gray-400 uppercase tracking-wide">Quick presets:</span>
@@ -429,13 +526,7 @@ export function ToolExecutor() {
                         <button onClick={() => applyPlaceOrderPreset('STOP')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop</button>
                         <button onClick={() => applyPlaceOrderPreset('STOP_LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop-Limit</button>
                       </div>
-                      {placeOrderIssues.length > 0 ? (
-                        <ul className="text-xs text-amber-300 space-y-1">
-                          {placeOrderIssues.map(issue => <li key={issue}>- {issue}</li>)}
-                        </ul>
-                      ) : (
-                        <p className="text-xs text-emerald-400">Smoke-check OK: required place_order fields are present.</p>
-                      )}
+                      <p className="text-xs text-emerald-400">Smoke-check OK: order tool context and required fields are present.</p>
                     </div>
                   )}
                   <SchemaForm

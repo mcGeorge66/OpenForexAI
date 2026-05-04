@@ -33,11 +33,15 @@ user message context.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any
 
 from openforexai.data.container import DataContainer
+from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
+from openforexai.models.agent import AgentDecision, AgentRole
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.ports.database import AbstractRepository
 from openforexai.registry.runtime_registry import RuntimeRegistry
@@ -85,6 +89,7 @@ class Agent:
         self._tool_dispatcher: ToolDispatcher | None = None
         self._max_tool_turns: int = _DEFAULT_MAX_TOOL_TURNS
         self._max_tokens: int = 4096
+        self._tool_context_budget_tokens: int = 32768
         self._llm_temperature: float | None = None
         self._any_candle_divider: int = _DEFAULT_ANY_CANDLE_DIVIDER
         self._m5_candle_event_count: int = 0
@@ -211,6 +216,13 @@ class Agent:
         elif isinstance(llm_default_max, int) and llm_default_max > 0:
             self._max_tokens = llm_default_max
 
+        # Tool tier gating must use a context-sized budget, not the per-response completion limit.
+        configured_context_budget = tool_cfg.get("context_budget_tokens")
+        if isinstance(configured_context_budget, int) and configured_context_budget > 0:
+            self._tool_context_budget_tokens = configured_context_budget
+        else:
+            self._tool_context_budget_tokens = max(self._max_tokens * 8, 16384)
+
         # Broker (optional — GA agents have no broker)
         broker_name = cfg.get("broker")
         if broker_name:
@@ -236,6 +248,11 @@ class Agent:
                 broker=self._broker,
                 monitoring_bus=self._monitoring_bus,
                 event_bus=self._bus,
+                extra={
+                    "agent_config": cfg,
+                    "llm_name": llm_name,
+                    "broker_module_name": broker_name,
+                },
             )
             self._tool_dispatcher = ToolDispatcher(
                 registry=DEFAULT_REGISTRY,
@@ -341,6 +358,12 @@ class Agent:
                             f"Config refresh failed: {type(exc).__name__}: {exc}"
                         )
                 elif event_val in self._event_triggers:
+                    if (
+                        event_val == EventType.M5_CANDLE_AVAILABLE.value
+                        and isinstance(msg.payload, dict)
+                        and bool(msg.payload.get("refresh_only", False))
+                    ):
+                        continue
                     if runtime_control.is_paused():
                         self._logger.debug("Runtime paused — skipping trigger", trigger=event_val)
                         continue
@@ -396,66 +419,152 @@ class Agent:
                 ))
             return
 
-        # Build the user message for this cycle
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        if trigger == "timer":
-            user_msg = f"[{now}] Periodic analysis cycle. Review current market conditions and act if appropriate."
-        elif trigger == EventType.AGENT_QUERY.value:
-            question = payload.get("question", "").strip()
-            user_msg = (
-                f"[{now}] External query from {source or 'management_api'}:\n\n"
-                f"{question}"
-            )
-        else:
-            user_msg = (
-                f"[{now}] Event received: {trigger}\n"
-                f"From: {source or 'system'}\n"
-                f"Details: {payload}"
-            )
+        context = self._tool_dispatcher._context
+        previous_pair = context.pair if context is not None else None
+        cycle_pair = self._resolve_cycle_pair(trigger, payload)
+        previous_cycle_extra: dict[str, Any] = {}
+        if context is not None and cycle_pair:
+            context.pair = cycle_pair
 
-        self._logger.debug("Starting cycle", trigger=trigger)
+        # Build the user message for this cycle
         try:
-            final_text, _ = await self._run_with_tools(user_msg, correlation_id=correlation_id)
-        except Exception as exc:
-            self._logger.exception("Cycle failed", trigger=trigger, error=str(exc))
-            self._emit_system_error(f"Cycle failed: {type(exc).__name__}: {exc}")
+            cycle_started = perf_counter()
+            now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+            if trigger == "timer":
+                user_msg = f"[{now}] Periodic analysis cycle. Review current market conditions and act if appropriate."
+            elif trigger == EventType.AGENT_QUERY.value:
+                question = payload.get("question", "").strip()
+                user_msg = (
+                    f"[{now}] External query from {source or 'management_api'}:\n\n"
+                    f"{question}"
+                )
+            elif trigger == EventType.ANALYSIS_RESULT.value:
+                analysis_response = payload.get("response")
+                analysis_object = (
+                    self._parse_json_object(analysis_response)
+                    if isinstance(analysis_response, str)
+                    else None
+                )
+                if context is not None:
+                    for key in (
+                        "cycle_trigger",
+                        "analysis_response_text",
+                        "analysis_response_object",
+                        "analysis_event_payload",
+                        "analysis_source_agent_id",
+                    ):
+                        previous_cycle_extra[key] = context.extra.get(key)
+                    context.extra["cycle_trigger"] = trigger
+                    context.extra["analysis_response_text"] = analysis_response
+                    context.extra["analysis_response_object"] = analysis_object
+                    context.extra["analysis_event_payload"] = payload
+                    context.extra["analysis_source_agent_id"] = source
+                if isinstance(analysis_response, str) and analysis_response.strip():
+                    user_msg = analysis_response
+                else:
+                    user_msg = ""
+            else:
+                user_msg = (
+                    f"[{now}] Event received: {trigger}\n"
+                    f"From: {source or 'system'}\n"
+                    f"Details: {payload}"
+                )
+
+            self._emit_agent_input_built(
+                trigger=trigger,
+                source=source,
+                raw_payload=payload,
+                derived_user_message=user_msg,
+            )
+            self._logger.debug("Starting cycle", trigger=trigger, pair=context.pair if context else None)
+            try:
+                final_text, total_tokens, executed_tool_names = await self._run_with_tools(
+                    user_msg,
+                    correlation_id=correlation_id,
+                )
+            except Exception as exc:
+                self._logger.exception("Cycle failed", trigger=trigger, error=str(exc))
+                self._emit_system_error(f"Cycle failed: {type(exc).__name__}: {exc}")
+                if trigger == EventType.AGENT_QUERY.value and correlation_id:
+                    await self._bus.publish(AgentMessage(
+                        event_type=EventType.AGENT_QUERY_RESPONSE,
+                        source_agent_id=self.agent_id,
+                        payload={
+                            "response": f"LLM cycle failed: {type(exc).__name__}: {exc}",
+                            "agent_id": self.agent_id,
+                        },
+                        correlation_id=correlation_id,
+                    ))
+                return
+
+            # For agent_query cycles: publish the LLM response back to the caller
             if trigger == EventType.AGENT_QUERY.value and correlation_id:
                 await self._bus.publish(AgentMessage(
                     event_type=EventType.AGENT_QUERY_RESPONSE,
                     source_agent_id=self.agent_id,
-                    payload={
-                        "response": f"LLM cycle failed: {type(exc).__name__}: {exc}",
-                        "agent_id": self.agent_id,
-                    },
+                    payload={"response": final_text, "agent_id": self.agent_id},
                     correlation_id=correlation_id,
                 ))
-            return
+                return
 
-        # For agent_query cycles: publish the LLM response back to the caller
-        if trigger == EventType.AGENT_QUERY.value and correlation_id:
-            await self._bus.publish(AgentMessage(
-                event_type=EventType.AGENT_QUERY_RESPONSE,
-                source_agent_id=self.agent_id,
-                payload={"response": final_text, "agent_id": self.agent_id},
-                correlation_id=correlation_id,
-            ))
+            await self._execute_broker_decision_fallback(
+                final_text=final_text,
+                executed_tool_names=executed_tool_names,
+            )
+
+            if self._is_analysis_agent():
+                analysis_timestamp = self._resolve_analysis_timestamp(trigger, payload)
+                analysis_payload = {
+                    "agent_id": self.agent_id,
+                    "trigger": trigger,
+                    "trigger_source": source,
+                    "trigger_payload": payload,
+                    "response": final_text,
+                    "timestamp": analysis_timestamp,
+                }
+                await self._persist_analysis_result(
+                    bus_payload=analysis_payload,
+                    final_text=final_text,
+                    trigger=trigger,
+                    source=source,
+                    correlation_id=correlation_id,
+                    pair=cycle_pair,
+                    total_tokens=total_tokens,
+                    latency_ms=(perf_counter() - cycle_started) * 1000.0,
+                )
+                await self._bus.publish(AgentMessage(
+                    event_type=EventType.ANALYSIS_RESULT,
+                    source_agent_id=self.agent_id,
+                    payload=analysis_payload,
+                    correlation_id=correlation_id,
+                ))
+        finally:
+            if context is not None:
+                context.pair = previous_pair
+                for key, previous_value in previous_cycle_extra.items():
+                    if previous_value is None:
+                        context.extra.pop(key, None)
+                    else:
+                        context.extra[key] = previous_value
 
     async def _run_with_tools(
         self,
         user_message: str,
         correlation_id: str | None = None,
-    ) -> tuple[str, int]:
-        """LLM ↔ tool-use conversation loop.  Returns (final_text, total_tokens)."""
+    ) -> tuple[str, int, list[str]]:
+        """LLM ↔ tool-use conversation loop. Returns (final_text, total_tokens, executed_tool_names)."""
         from openforexai.ports.llm import LLMResponseWithTools
 
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
         total_tokens = 0
+        budget_tokens = 0
         final_text = ""
+        executed_tool_names: list[str] = []
 
         for turn in range(self._max_tool_turns + 1):
             tool_specs = (
                 self._tool_dispatcher.visible_specs(
-                    used_tokens=total_tokens, max_tokens=self._max_tokens
+                    used_tokens=budget_tokens, max_tokens=self._tool_context_budget_tokens
                 )
                 if self._tool_dispatcher is not None
                 else []
@@ -486,9 +595,10 @@ class Agent:
 
             tool_results = await self._tool_dispatcher.execute_all(
                 tool_calls=response.tool_calls,
-                used_tokens=total_tokens,
-                max_tokens=self._max_tokens,
+                used_tokens=budget_tokens,
+                max_tokens=self._tool_context_budget_tokens,
             )
+            executed_tool_names.extend(result.name for result in tool_results)
 
             if hasattr(self._llm, "assistant_message_with_tools"):
                 messages.append(
@@ -503,12 +613,202 @@ class Agent:
                 messages.append(self._build_assistant_turn(response))
                 messages.append(self._build_tool_result_turn(tool_results))
 
-        return final_text, total_tokens
+            # Estimate next-turn context size from the current prompt plus the assistant turn.
+            budget_tokens = max(response.input_tokens + response.output_tokens, 0)
+
+        return final_text, total_tokens, executed_tool_names
 
     # ── EventBus helpers ──────────────────────────────────────────────────────
 
     async def publish(self, message: AgentMessage) -> None:
         await self._bus.publish(message)
+
+    def _is_analysis_agent(self) -> bool:
+        parsed = AgentId.try_parse(self.agent_id)
+        return parsed is not None and parsed.type == "AA"
+
+    def _is_broker_agent(self) -> bool:
+        parsed = AgentId.try_parse(self.agent_id)
+        return parsed is not None and parsed.type == "BA"
+
+    def _resolve_cycle_pair(self, trigger: str, payload: dict[str, Any]) -> str | None:
+        """Resolve the effective pair for the current cycle."""
+        configured_pair = self._config.get("pair")
+        if isinstance(configured_pair, str) and configured_pair.strip() and configured_pair.strip().upper() != "ALL___":
+            return configured_pair.strip().upper()
+
+        if trigger != EventType.ANALYSIS_RESULT.value:
+            return None
+
+        analysis_response = payload.get("response")
+        if isinstance(analysis_response, str) and analysis_response.strip():
+            parsed_response = self._parse_json_object(analysis_response)
+            if isinstance(parsed_response, dict):
+                symbol = parsed_response.get("symbol")
+                if isinstance(symbol, str) and symbol.strip():
+                    return symbol.strip().upper()
+
+        trigger_payload = payload.get("trigger_payload")
+        if isinstance(trigger_payload, dict):
+            pair = trigger_payload.get("pair")
+            if isinstance(pair, str) and pair.strip():
+                return pair.strip().upper()
+
+        return None
+
+    def _resolve_analysis_timestamp(self, trigger: str, payload: dict[str, Any]) -> str:
+        """Resolve the exact candle timestamp for an AA analysis cycle."""
+        if trigger != EventType.M5_CANDLE_AVAILABLE.value:
+            raise RuntimeError(
+                f"Analysis timestamp resolution only supports candle-triggered AA cycles, got {trigger!r}"
+            )
+
+        candle = payload.get("candle")
+        if not isinstance(candle, dict):
+            raise RuntimeError("Analysis trigger payload missing candle object")
+
+        candle_timestamp = candle.get("timestamp")
+        if not isinstance(candle_timestamp, str) or not candle_timestamp.strip():
+            raise RuntimeError("Analysis trigger candle missing timestamp")
+
+        return candle_timestamp
+
+    async def _execute_broker_decision_fallback(
+        self,
+        *,
+        final_text: str,
+        executed_tool_names: list[str],
+    ) -> None:
+        """Execute structured BA trade decisions when the model stopped without a tool call."""
+        if not self._is_broker_agent() or self._tool_dispatcher is None:
+            return
+
+        # If a trading tool already ran in this cycle, do nothing.
+        if any(name in {"auto_place_order", "place_order", "close_position", "modify_order"} for name in executed_tool_names):
+            return
+
+        decision = self._parse_json_object(final_text)
+        if not isinstance(decision, dict):
+            return
+
+        action_taken = str(decision.get("action_taken", "")).strip().upper()
+        if action_taken != "AUTO_PLACE_ORDER":
+            return
+
+        order_direction_raw = str(decision.get("order_direction", "")).strip().lower()
+        if order_direction_raw not in {"buy", "sell"}:
+            return
+
+        arguments: dict[str, Any] = {"direction": order_direction_raw}
+        risk_pct = decision.get("risk_pct")
+        if isinstance(risk_pct, (int, float)):
+            arguments["risk_pct"] = float(risk_pct)
+        confidence = decision.get("confidence")
+        if isinstance(confidence, (int, float)):
+            arguments["confidence"] = float(confidence)
+        reasoning = decision.get("reasoning")
+        if isinstance(reasoning, str) and reasoning.strip():
+            arguments["reasoning"] = reasoning.strip()
+
+        from openforexai.ports.llm import ToolCall
+
+        self._logger.info(
+            "Broker decision fallback executing trading tool",
+            agent_id=self.agent_id,
+            tool_name="auto_place_order",
+            direction=order_direction_raw,
+        )
+        await self._tool_dispatcher.execute_all(
+            tool_calls=[
+                ToolCall(
+                    id=f"fallback-auto-place-{datetime.now(UTC).timestamp()}",
+                    name="auto_place_order",
+                    arguments=arguments,
+                )
+            ],
+            used_tokens=0,
+            max_tokens=self._tool_context_budget_tokens,
+        )
+
+    @staticmethod
+    def _parse_json_object(raw_text: str) -> dict[str, Any] | None:
+        text = raw_text.strip()
+        if not text:
+            return None
+        candidates = [text]
+        first = text.find("{")
+        last = text.rfind("}")
+        if first >= 0 and last > first:
+            candidates.append(text[first:last + 1])
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    async def _persist_analysis_result(
+        self,
+        *,
+        bus_payload: dict[str, Any],
+        final_text: str,
+        trigger: str,
+        source: str | None,
+        correlation_id: str | None,
+        pair: str | None,
+        total_tokens: int,
+        latency_ms: float,
+    ) -> None:
+        analysis_object = self._parse_json_object(final_text) if final_text.strip() else None
+        decided_at_raw = bus_payload.get("timestamp")
+        decided_at = (
+            datetime.fromisoformat(decided_at_raw)
+            if isinstance(decided_at_raw, str) and decided_at_raw.strip()
+            else datetime.now(UTC)
+        )
+        output: dict[str, Any] = {
+            "analysis_text": final_text,
+            "analysis": analysis_object,
+        }
+        if isinstance(analysis_object, dict):
+            for key in (
+                "symbol",
+                "decision",
+                "confidence",
+                "order_start_signal",
+                "order_start_quality",
+                "entry_quality",
+                "setup_type",
+                "invalidation_level",
+                "first_target",
+                "analysis_summary",
+                "conflict_flags",
+            ):
+                output[key] = analysis_object.get(key)
+        decision = AgentDecision(
+            agent_id=self.agent_id,
+            agent_role=AgentRole.TECHNICAL_ANALYSIS,
+            pair=pair or (analysis_object.get("symbol") if isinstance(analysis_object, dict) else None),
+            decision_type="analysis_result",
+            input_context={
+                "trigger": trigger,
+                "trigger_source": source,
+                "correlation_id": correlation_id,
+                "bus_payload": bus_payload,
+            },
+            output=output,
+            llm_model=str(self._config.get("llm", "")),
+            tokens_used=total_tokens,
+            latency_ms=latency_ms,
+            decided_at=decided_at,
+        )
+        try:
+            await self._repository.save_agent_decision(decision)
+        except Exception as exc:
+            self._logger.exception("Failed to persist analysis result", error=str(exc))
+            self._emit_system_error(f"Persist analysis failed: {type(exc).__name__}: {exc}")
 
     def load_prompt(self, prompt: str) -> None:
         """Hot-swap the system prompt without restarting."""
@@ -552,6 +852,38 @@ class Agent:
             ))
         except Exception:
             pass  # monitoring must never mask a real problem
+
+    def _emit_agent_input_built(
+        self,
+        *,
+        trigger: str,
+        source: str | None,
+        raw_payload: dict[str, Any],
+        derived_user_message: str,
+    ) -> None:
+        """Emit the agent-core transformed user message built from an incoming trigger."""
+        if self._monitoring_bus is None:
+            return
+        try:
+            from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+
+            ctx = self._tool_dispatcher._context if self._tool_dispatcher is not None else None
+            self._monitoring_bus.emit(MonitoringEvent(
+                timestamp=datetime.now(UTC),
+                source_module=f"agent:{self.agent_id}",
+                event_type=MonitoringEventType.AGENT_INPUT_BUILT,
+                broker_name=ctx.broker_name if ctx else None,
+                pair=ctx.pair if ctx else None,
+                payload={
+                    "agent_id": self.agent_id,
+                    "trigger": trigger,
+                    "source": source,
+                    "raw_payload": raw_payload,
+                    "derived_user_message": derived_user_message,
+                },
+            ))
+        except Exception:
+            pass
 
     def _emit_llm_request(self, messages: list, tool_specs: list, turn: int) -> None:
         """Emit LLM_REQUEST with COMPLETE prompt context before each API call.

@@ -71,12 +71,7 @@ One entry per running agent:
     "AnyCandle": 3,
     "system_prompt": "...",
     "tool_config": {
-      "allowed_tools": ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-      "context_tiers": {"0": "all", "85": "safety"},
-      "tier_tools": {
-        "all":    ["get_candles", "calculate_indicator", "get_order_book", "raise_alarm", "trigger_sync"],
-        "safety": ["raise_alarm"]
-      },
+      "allowed_tools": ["get_candles", "calculate_indicator", "raise_alarm"],
       "max_tool_turns": 10,
       "max_tokens": 4096
     }

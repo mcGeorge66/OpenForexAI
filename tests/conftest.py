@@ -10,6 +10,7 @@ from openforexai.messaging.bus import EventBus
 from openforexai.models.account import AccountStatus
 from openforexai.models.market import Candle, MarketSnapshot, Tick
 from openforexai.models.trade import (
+    OrderStatus,
     Position,
     TradeDirection,
     TradeOrder,
@@ -124,7 +125,32 @@ class MockBroker(AbstractBroker):
             opened_at=datetime.now(UTC),
         )
 
-    async def close_position(self, position_id: str) -> TradeResult:
+    async def modify_position(
+        self,
+        position_id: str,
+        stop_loss: Decimal | None = None,
+        take_profit: Decimal | None = None,
+    ) -> TradeResult:
+        signal = TradeSignal(
+            pair="EURUSD",
+            direction=TradeDirection.BUY,
+            entry_price=Decimal("1.1000"),
+            stop_loss=stop_loss or Decimal("1.0950"),
+            take_profit=take_profit or Decimal("1.1100"),
+            confidence=0.8,
+            reasoning="test",
+            generated_at=datetime.now(UTC),
+            agent_id="test",
+        )
+        order = TradeOrder(signal=signal, units=1000, risk_pct=1.0, approved_by="supervisor")
+        return TradeResult(
+            order=order,
+            broker_order_id=position_id,
+            status=TradeStatus.OPEN,
+            opened_at=datetime.now(UTC),
+        )
+
+    async def close_position(self, position_id: str, units: int | None = None) -> TradeResult:
         signal = TradeSignal(
             pair="EURUSD",
             direction=TradeDirection.BUY,
@@ -137,10 +163,11 @@ class MockBroker(AbstractBroker):
             agent_id="test",
         )
         order = TradeOrder(signal=signal, units=1000, risk_pct=1.0, approved_by="supervisor")
+        result_units = units if units is not None else 1000
         return TradeResult(
-            order=order,
+            order=order.model_copy(update={"units": result_units}),
             broker_order_id=position_id,
-            status=TradeStatus.CLOSED,
+            status=TradeStatus.OPEN if units is not None and units < 1000 else TradeStatus.CLOSED,
             pnl=Decimal("50"),
             closed_at=datetime.now(UTC),
         )
@@ -227,6 +254,8 @@ class MockRepository(AbstractRepository):
         self.account_statuses: list[AccountStatus] = []
         self.candles: dict[tuple, list[Candle]] = {}
         self.order_book_entries: list = []
+        self.sub_prompts: dict[str, str] = {}
+        self.assessment_memory: dict[str, str] = {}
 
     async def initialize(self) -> None:
         pass
@@ -284,8 +313,14 @@ class MockRepository(AbstractRepository):
                 return entry
         return None
 
-    async def get_open_order_book_entries(self, broker_name: str) -> list:
-        return [e for e in self.order_book_entries if e.broker_name == broker_name]
+    async def get_open_order_book_entries(self, broker_name: str, pair: str | None = None) -> list:
+        entries = [
+            e for e in self.order_book_entries
+            if e.broker_name == broker_name and str(e.status) in {"PENDING", "OPEN", "PARTIALLY_FILLED"}
+        ]
+        if pair:
+            entries = [e for e in entries if e.pair == pair]
+        return entries
 
     async def get_order_book_entries(
         self, broker_name: str, pair: str | None = None, limit: int = 200
@@ -293,7 +328,8 @@ class MockRepository(AbstractRepository):
         entries = [e for e in self.order_book_entries if e.broker_name == broker_name]
         if pair:
             entries = [e for e in entries if e.pair == pair]
-        return entries[-limit:]
+        entries = sorted(entries, key=lambda e: e.requested_at, reverse=True)
+        return entries[:limit]
 
     # ── Trades ────────────────────────────────────────────────────────────────
 
@@ -311,6 +347,53 @@ class MockRepository(AbstractRepository):
     async def save_agent_decision(self, decision) -> str:
         self.decisions.append(decision)
         return str(decision.id)
+
+    async def get_analysis_records(
+        self,
+        agent_id: str | None = None,
+        pair: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for decision in self.decisions:
+            if decision.decision_type != "analysis_result":
+                continue
+            if agent_id and decision.agent_id != agent_id:
+                continue
+            if pair and decision.pair != pair:
+                continue
+            output = decision.output if isinstance(decision.output, dict) else {}
+            input_context = decision.input_context if isinstance(decision.input_context, dict) else {}
+            results.append({
+                "id": str(decision.id),
+                "agent_id": decision.agent_id,
+                "pair": decision.pair,
+                "decision_type": decision.decision_type,
+                "llm_model": decision.llm_model,
+                "tokens_used": decision.tokens_used,
+                "latency_ms": decision.latency_ms,
+                "decided_at": decision.decided_at.isoformat(),
+                "analysis_text": output.get("analysis_text"),
+                "analysis": output.get("analysis"),
+                "decision": output.get("decision"),
+                "confidence": output.get("confidence"),
+                "order_start_signal": output.get("order_start_signal"),
+                "entry_quality": output.get("entry_quality"),
+                "setup_type": output.get("setup_type"),
+                "bus_payload": input_context.get("bus_payload", {}),
+                "input_context": input_context,
+                "output": output,
+                "market_snapshot": input_context,
+            })
+        results.sort(key=lambda item: item["decided_at"], reverse=True)
+        return results[:limit]
+
+    async def get_analysis_record(self, record_id: str) -> dict[str, Any] | None:
+        records = await self.get_analysis_records(limit=10000)
+        for record in records:
+            if record["id"] == record_id:
+                return record
+        return None
 
     # ── Optimization ─────────────────────────────────────────────────────────
 
@@ -337,6 +420,24 @@ class MockRepository(AbstractRepository):
     async def save_backtest_result(self, result) -> str:
         self.backtests.append(result)
         return str(result.id)
+
+    async def get_sub_prompt(self, agent: str) -> str | None:
+        return self.sub_prompts.get(agent)
+
+    async def set_sub_prompt(self, agent: str, prompt: str) -> None:
+        self.sub_prompts[agent] = prompt
+
+    async def delete_sub_prompt(self, agent: str) -> None:
+        self.sub_prompts.pop(agent, None)
+
+    async def get_assessment_memory(self, agent: str) -> str | None:
+        return self.assessment_memory.get(agent)
+
+    async def set_assessment_memory(self, agent: str, message: str) -> None:
+        self.assessment_memory[agent] = message
+
+    async def delete_assessment_memory(self, agent: str) -> None:
+        self.assessment_memory.pop(agent, None)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

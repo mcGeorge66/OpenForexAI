@@ -16,7 +16,16 @@ class TriggerSyncTool(BaseTool):
     )
     input_schema = {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "broker": {
+                "type": "string",
+                "description": "Broker short_name or module name. Used by the Tool Executor to resolve broker context.",
+            },
+            "pair": {
+                "type": "string",
+                "description": "Currency pair, e.g. EURUSD. Used by the Tool Executor to resolve pair context.",
+            },
+        },
         "required": [],
     }
 

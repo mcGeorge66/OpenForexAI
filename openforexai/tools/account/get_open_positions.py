@@ -16,7 +16,16 @@ class GetOpenPositionsTool(BaseTool):
     )
     input_schema = {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "broker": {
+                "type": "string",
+                "description": "Broker short_name or module name. Used by the Tool Executor to resolve broker context.",
+            },
+            "pair": {
+                "type": "string",
+                "description": "Optional currency pair, e.g. EURUSD. If set, only positions for that pair are returned.",
+            },
+        },
         "required": [],
     }
 
@@ -25,6 +34,8 @@ class GetOpenPositionsTool(BaseTool):
             raise RuntimeError("Broker adapter not available in tool context")
 
         positions = await context.broker.get_open_positions()
+        if context.pair:
+            positions = [p for p in positions if p.pair.upper() == context.pair.upper()]
         return [
             {
                 "position_id": p.broker_position_id,

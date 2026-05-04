@@ -1,12 +1,8 @@
-"""Agent tool configuration loader.
+"""Bridge-tool configuration loader.
 
-Loads ``agent_tools.json5`` and resolves per-agent config using pattern matching.
-
-Usage::
-
-    config = AgentToolConfig.load(Path("config/RunTime/agent_tools.json5"))
-    agent_cfg = config.for_agent("OANDA-EURUSD-AA-TRD1")
-    # → {"allowed_tools": [...], "approval_modes": {...}, ...}
+Loads ``agent_tools.json5`` and exposes only top-level ``bridge_tools``.
+Per-agent tool assignment is configured explicitly in each agent's
+``tool_config`` inside the system config.
 """
 from __future__ import annotations
 
@@ -15,16 +11,13 @@ from pathlib import Path
 
 import json5
 
-from openforexai.messaging.agent_id import AgentId
-
 _log = logging.getLogger(__name__)
 
 
 class AgentToolConfig:
-    """Loaded and queryable agent tool configuration."""
+    """Loaded bridge-tool configuration."""
 
-    def __init__(self, entries: list[dict], bridge_tools: list[dict] | None = None) -> None:
-        self._entries = entries  # ordered list of {pattern, ...} dicts
+    def __init__(self, bridge_tools: list[dict] | None = None) -> None:
         self._bridge_tools = bridge_tools or []
 
     @classmethod
@@ -34,25 +27,11 @@ class AgentToolConfig:
             data = json5.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             _log.warning("agent_tools.json5 not found at %s — using defaults", path)
-            return cls([], [])
+            return cls([])
         except ValueError as exc:
             _log.error("Invalid JSON5 in agent_tools.json5: %s", exc)
-            return cls([], [])
-        return cls(data.get("agents", []), data.get("bridge_tools", []))
-
-    def for_agent(self, agent_id: str) -> dict:
-        """Return the config dict for *agent_id* (first matching pattern wins)."""
-        aid = AgentId.try_parse(agent_id)
-        for entry in self._entries:
-            pattern = entry.get("pattern", "*")
-            if pattern == "*":
-                return entry
-            if aid is not None and aid.matches(pattern):
-                return entry
-            # Fallback: exact string match
-            if agent_id == pattern:
-                return entry
-        return {}
+            return cls([])
+        return cls(data.get("bridge_tools", []))
 
     def raw_bridge_tools(self) -> list[dict]:
         """Return bridge-tool configs from top-level ``bridge_tools``."""

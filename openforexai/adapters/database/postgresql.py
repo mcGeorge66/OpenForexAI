@@ -154,6 +154,14 @@ class PostgreSQLRepository(AbstractRepository):
             )
             """
         )
+        await self._execute(
+            """
+            CREATE TABLE IF NOT EXISTS sub_prompts (
+                agent  TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL
+            )
+            """
+        )
         await self._ensure_account_status_table()
         await self._ensure_order_book_table()
 
@@ -250,37 +258,144 @@ class PostgreSQLRepository(AbstractRepository):
 
     async def save_agent_decision(self, decision: AgentDecision) -> str:
         decision_id = str(decision.id)
+        output_json = json.dumps(decision.output)
+        input_context_json = json.dumps(decision.input_context)
+        reasoning = ""
+        if isinstance(decision.output, dict):
+            analysis_text = decision.output.get("analysis_text")
+            if isinstance(analysis_text, str):
+                reasoning = analysis_text
         await self._execute(
             """
             INSERT INTO agent_decisions (
                 id, agent_id, agent_role, pair, decision_type,
-                input_context, output, llm_model, tokens_used, latency_ms, decided_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                decision_type_new, input_context, output, llm_model, tokens_used, latency_ms, decided_at,
+                reasoning, market_snapshot
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT (id) DO UPDATE SET
                 agent_id=EXCLUDED.agent_id,
                 agent_role=EXCLUDED.agent_role,
                 pair=EXCLUDED.pair,
                 decision_type=EXCLUDED.decision_type,
+                decision_type_new=EXCLUDED.decision_type_new,
                 input_context=EXCLUDED.input_context,
                 output=EXCLUDED.output,
                 llm_model=EXCLUDED.llm_model,
                 tokens_used=EXCLUDED.tokens_used,
                 latency_ms=EXCLUDED.latency_ms,
-                decided_at=EXCLUDED.decided_at
+                decided_at=EXCLUDED.decided_at,
+                reasoning=EXCLUDED.reasoning,
+                market_snapshot=EXCLUDED.market_snapshot
             """,
             decision_id,
             decision.agent_id,
             decision.agent_role.value,
             decision.pair,
             decision.decision_type,
-            json.dumps(decision.input_context),
-            json.dumps(decision.output),
+            decision.decision_type,
+            input_context_json,
+            output_json,
             decision.llm_model,
             decision.tokens_used,
             decision.latency_ms,
             decision.decided_at.isoformat(),
+            reasoning,
+            input_context_json,
         )
         return decision_id
+
+    @staticmethod
+    def _deserialize_json_field(raw: str | None, default: Any) -> Any:
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
+    def _row_to_analysis_record(self, row: dict[str, Any]) -> dict[str, Any]:
+        input_context = self._deserialize_json_field(row.get("input_context"), {})
+        output = self._deserialize_json_field(row.get("output"), {})
+        market_snapshot = self._deserialize_json_field(row.get("market_snapshot"), {})
+        bus_payload = {}
+        if isinstance(input_context, dict):
+            bus_payload = (
+                input_context.get("bus_payload")
+                if isinstance(input_context.get("bus_payload"), dict)
+                else {}
+            )
+        analysis = (
+            output.get("analysis")
+            if isinstance(output, dict) and isinstance(output.get("analysis"), dict)
+            else None
+        )
+        return {
+            "id": row["id"],
+            "agent_id": row["agent_id"],
+            "pair": row.get("pair"),
+            "decision_type": row.get("decision_type_new") or row.get("decision_type"),
+            "llm_model": row.get("llm_model") or "",
+            "tokens_used": row.get("tokens_used") or 0,
+            "latency_ms": row.get("latency_ms"),
+            "decided_at": row["decided_at"],
+            "analysis_text": row.get("reasoning") or (
+                output.get("analysis_text") if isinstance(output, dict) else None
+            ),
+            "analysis": analysis,
+            "decision": output.get("decision") if isinstance(output, dict) else None,
+            "confidence": output.get("confidence") if isinstance(output, dict) else None,
+            "order_start_signal": (
+                output.get("order_start_signal") if isinstance(output, dict) else None
+            ),
+            "entry_quality": output.get("entry_quality") if isinstance(output, dict) else None,
+            "setup_type": output.get("setup_type") if isinstance(output, dict) else None,
+            "bus_payload": bus_payload,
+            "input_context": input_context,
+            "output": output,
+            "market_snapshot": market_snapshot,
+        }
+
+    async def get_analysis_records(
+        self,
+        agent_id: str | None = None,
+        pair: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        clauses = ["COALESCE(decision_type_new, decision_type) = $1"]
+        params: list[Any] = ["analysis_result"]
+        next_index = 2
+        if agent_id:
+            clauses.append(f"agent_id = ${next_index}")
+            params.append(agent_id)
+            next_index += 1
+        if pair:
+            clauses.append(f"pair = ${next_index}")
+            params.append(pair)
+            next_index += 1
+        params.append(limit)
+        rows = await self._fetch(
+            f"""
+            SELECT *
+            FROM agent_decisions
+            WHERE {" AND ".join(clauses)}
+            ORDER BY decided_at DESC
+            LIMIT ${next_index}
+            """,
+            *params,
+        )
+        return [self._row_to_analysis_record(dict(row)) for row in rows]
+
+    async def get_analysis_record(self, record_id: str) -> dict[str, Any] | None:
+        row = await self._fetchrow(
+            """
+            SELECT *
+            FROM agent_decisions
+            WHERE id = $1 AND COALESCE(decision_type_new, decision_type) = $2
+            """,
+            record_id,
+            "analysis_result",
+        )
+        return self._row_to_analysis_record(dict(row)) if row else None
 
     # ── Optimization ─────────────────────────────────────────────────────────
 
@@ -452,6 +567,58 @@ class PostgreSQLRepository(AbstractRepository):
             result.completed_at.isoformat(),
         )
         return rid
+
+    async def get_sub_prompt(self, agent: str) -> str | None:
+        row = await self._fetchrow(
+            "SELECT prompt FROM sub_prompts WHERE agent=$1",
+            agent,
+        )
+        if row is None:
+            return None
+        return str(row["prompt"])
+
+    async def set_sub_prompt(self, agent: str, prompt: str) -> None:
+        await self._execute(
+            """
+            INSERT INTO sub_prompts (agent, prompt)
+            VALUES ($1, $2)
+            ON CONFLICT (agent) DO UPDATE SET prompt=EXCLUDED.prompt
+            """,
+            agent,
+            prompt,
+        )
+
+    async def delete_sub_prompt(self, agent: str) -> None:
+        await self._execute(
+            "DELETE FROM sub_prompts WHERE agent=$1",
+            agent,
+        )
+
+    async def get_assessment_memory(self, agent: str) -> str | None:
+        row = await self._fetchrow(
+            "SELECT message FROM assessment_memory WHERE agent=$1",
+            agent,
+        )
+        if row is None:
+            return None
+        return str(row["message"])
+
+    async def set_assessment_memory(self, agent: str, message: str) -> None:
+        await self._execute(
+            """
+            INSERT INTO assessment_memory (agent, message)
+            VALUES ($1, $2)
+            ON CONFLICT (agent) DO UPDATE SET message=EXCLUDED.message
+            """,
+            agent,
+            message,
+        )
+
+    async def delete_assessment_memory(self, agent: str) -> None:
+        await self._execute(
+            "DELETE FROM assessment_memory WHERE agent=$1",
+            agent,
+        )
 
     # --- Dynamic candle series helpers ---
 
@@ -678,6 +845,7 @@ class PostgreSQLRepository(AbstractRepository):
                 id                     TEXT PRIMARY KEY,
                 broker_name            TEXT NOT NULL,
                 broker_order_id        TEXT,
+                sync_key               TEXT,
                 pair                   TEXT NOT NULL,
                 direction              TEXT NOT NULL,
                 order_type             TEXT NOT NULL,
@@ -708,6 +876,8 @@ class PostgreSQLRepository(AbstractRepository):
             )
             """
         )
+        await self._execute("ALTER TABLE order_book_entries ADD COLUMN IF NOT EXISTS sync_key TEXT")
+        await self._execute("CREATE INDEX IF NOT EXISTS idx_obe_sync_key ON order_book_entries(sync_key)")
 
     async def save_order_book_entry(self, entry: OrderBookEntry) -> str:
         await self._ensure_order_book_table()
@@ -715,7 +885,7 @@ class PostgreSQLRepository(AbstractRepository):
         await self._execute(
             """
             INSERT INTO order_book_entries (
-                id, broker_name, broker_order_id, pair, direction, order_type, units,
+                id, broker_name, broker_order_id, sync_key, pair, direction, order_type, units,
                 requested_price, fill_price, stop_loss, take_profit, trailing_stop_distance,
                 limit_price, stop_price, status, agent_id, prompt_version, entry_reasoning,
                 signal_confidence, market_context_snapshot, requested_at, opened_at, closed_at,
@@ -723,11 +893,12 @@ class PostgreSQLRepository(AbstractRepository):
                 pnl_account_currency, sync_confirmed
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30
+                $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
             )
             ON CONFLICT (id) DO UPDATE SET
                 broker_name=EXCLUDED.broker_name,
                 broker_order_id=EXCLUDED.broker_order_id,
+                sync_key=EXCLUDED.sync_key,
                 pair=EXCLUDED.pair,
                 direction=EXCLUDED.direction,
                 order_type=EXCLUDED.order_type,
@@ -759,6 +930,7 @@ class PostgreSQLRepository(AbstractRepository):
             eid,
             entry.broker_name,
             entry.broker_order_id,
+            entry.sync_key,
             entry.pair,
             entry.direction.value,
             entry.order_type.value,
@@ -833,6 +1005,7 @@ class PostgreSQLRepository(AbstractRepository):
             id=uuid.UUID(row["id"]),
             broker_name=row["broker_name"],
             broker_order_id=row.get("broker_order_id"),
+            sync_key=row.get("sync_key"),
             pair=row["pair"],
             direction=TradeDirection(row["direction"]),
             order_type=_OrderType(row["order_type"]),

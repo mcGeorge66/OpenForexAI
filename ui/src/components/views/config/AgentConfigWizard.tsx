@@ -25,8 +25,7 @@ type AgentForm = {
   system_prompt: string
   event_triggers: string[]
   allowed_tools: string[]
-  context_tiers_text: string
-  tier_tools_text: string
+  forced_arguments: Record<string, Record<string, string>>
   max_tool_turns: number
   max_tokens: number
 }
@@ -46,6 +45,7 @@ const DEFAULT_EVENT_TRIGGERS = [
   'risk_breach',
   'order_book_sync_discrepancy',
 ]
+const TIMER_TRIGGER = 'timer'
 
 const EMPTY_FORM: AgentForm = {
   agent_id: '',
@@ -61,13 +61,13 @@ const EMPTY_FORM: AgentForm = {
   system_prompt: '',
   event_triggers: ['m5_candle_available'],
   allowed_tools: ['get_candles', 'calculate_indicator', 'raise_alarm'],
-  context_tiers_text: '{\n  "0": "all",\n  "85": "safety"\n}',
-  tier_tools_text: '{\n  "all": ["*"],\n  "safety": ["raise_alarm"]\n}',
+  forced_arguments: {},
   max_tool_turns: 8,
   max_tokens: 4096,
 }
 
 const AGENT_ID_RE = /^[A-Z0-9_]{5}-[A-Z0-9_]{6}-[A-Z]{2}-[A-Z0-9]{1,5}(?:-.+)?$/
+const PLACEHOLDER_RE = /\{([A-Za-z0-9_]+)\}/g
 
 const TIPS = {
   agent_id: 'Unique agent identifier. Format: BROKER(5)-PAIR(6)-TYPE(2)-NAME(1-5), e.g. OAPR1-EURUSD-AA-ANLYS. This key is used for routing and startup.',
@@ -77,14 +77,13 @@ const TIPS = {
   type: 'Agent role code: AA (Analysis), BA (Broker), GA (Global), AD (Adapter/system use). Influences behavior and routing.',
   llm: 'LLM module name from modules.llm in system config. Determines model/provider used by this agent.',
   broker: 'Broker module name from modules.broker in system config. Determines broker adapter context.',
-  timer_enabled: 'If true, the agent runs on a periodic timer in addition to event-triggered execution.',
-  timer_interval_seconds: 'Timer period in seconds. Used only when Timer Enabled is true.',
+  timer_enabled: 'Derived from the Kickoff Triggers control. If `timer` is selected there, periodic execution is enabled.',
+  timer_interval_seconds: 'Timer period in seconds. Used only when the `timer` kickoff trigger is active.',
   any_candle: 'Runs on every Nth M5 candle event. 1 = every candle (5m), 3 = every third candle (15m). Only affects m5_candle_available trigger.',
   system_prompt: 'Primary instruction prompt for this agent. Strongly affects decision logic and response style.',
-  event_triggers: 'Events that trigger this agent cycle. Only listed events will wake this agent from bus traffic.',
+  event_triggers: 'Kickoff triggers for this agent. Bus events wake the agent from traffic; `timer` is a UI pseudo-trigger mapped to timer.enabled in backend config.',
   allowed_tools: 'Tool allow-list for this agent. Only listed tools can be called by the LLM.',
-  context_tiers: 'JSON object mapping context budget thresholds to tier names, e.g. {"0":"all","85":"safety"}.',
-  tier_tools: 'JSON object mapping each tier to allowed tools. Used by ToolDispatcher budget gating.',
+  forced_arguments: 'Per-tool fixed arguments. These values are injected at runtime and override any value the LLM attempts to send. Placeholders like {llm}, {broker}, {pair}, {type}, {name}, {agent_id} are resolved from the current agent config.',
   max_tool_turns: 'Maximum tool-calling iterations per cycle. Prevents runaway tool loops.',
   max_tokens: 'Maximum token budget for this agent response/tool cycle.',
 } as const
@@ -112,12 +111,118 @@ function toStringList(v: unknown): string[] {
   return v.map(x => String(x).trim()).filter(Boolean)
 }
 
-function prettyJson(value: unknown, fallback: string): string {
+function stringifyForcedValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   try {
-    return JSON.stringify(value ?? JSON5.parse(fallback), null, 2)
+    return JSON.stringify(value)
   } catch {
-    return fallback
+    return String(value)
   }
+}
+
+function normalizeForcedArguments(value: unknown): Record<string, Record<string, string>> {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return {}
+  const out: Record<string, Record<string, string>> = {}
+  for (const [toolName, rawArgs] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawArgs || Array.isArray(rawArgs) || typeof rawArgs !== 'object') continue
+    out[toolName] = {}
+    for (const [argName, argValue] of Object.entries(rawArgs as Record<string, unknown>)) {
+      out[toolName][argName] = stringifyForcedValue(argValue)
+    }
+  }
+  return out
+}
+
+function buildFormPlaceholderValues(form: AgentForm): Record<string, unknown> {
+  const parts = form.agent_id.trim().toUpperCase().split('-')
+  return {
+    agent_id: form.agent_id.trim().toUpperCase(),
+    broker: form.broker.trim(),
+    pair: form.pair.trim().toUpperCase(),
+    type: form.type.trim().toUpperCase(),
+    name: parts[3] ?? '',
+    extension: parts[4] ?? '',
+    llm: form.llm.trim(),
+    comment: form.comment,
+    enable: form.enable,
+    AnyCandle: form.any_candle,
+    any_candle: form.any_candle,
+    timer_enabled: form.timer_enabled,
+    timer_interval_seconds: form.timer_interval_seconds,
+    system_prompt: form.system_prompt,
+  }
+}
+
+function resolvePlaceholderTemplate(raw: string, replacements: Record<string, unknown>): unknown {
+  const exact = raw.trim().match(/^\{([A-Za-z0-9_]+)\}$/)
+  if (exact) {
+    const key = exact[1]
+    return Object.prototype.hasOwnProperty.call(replacements, key) ? replacements[key] : raw
+  }
+  return raw.replace(PLACEHOLDER_RE, (_match, key: string) => {
+    const replacement = replacements[key]
+    return replacement === undefined || replacement === null ? `{${key}}` : String(replacement)
+  })
+}
+
+function coerceForcedValue(
+  raw: string,
+  prop?: { type?: string },
+  replacements?: Record<string, unknown>,
+): unknown {
+  if (raw === '') return undefined
+  const resolved = replacements ? resolvePlaceholderTemplate(raw, replacements) : raw
+  if (typeof resolved !== 'string') return resolved
+  const type = prop?.type
+  if (type === 'integer') {
+    const value = Number.parseInt(resolved, 10)
+    if (!Number.isFinite(value)) throw new Error(`Invalid integer value: ${resolved}`)
+    return value
+  }
+  if (type === 'number') {
+    const value = Number.parseFloat(resolved)
+    if (!Number.isFinite(value)) throw new Error(`Invalid number value: ${resolved}`)
+    return value
+  }
+  if (type === 'boolean') {
+    if (resolved === 'true') return true
+    if (resolved === 'false') return false
+    throw new Error(`Invalid boolean value: ${resolved}`)
+  }
+  if (type === 'object' || type === 'array') {
+    return JSON5.parse(resolved)
+  }
+  return resolved
+}
+
+function serializeForcedArguments(
+  forcedArguments: Record<string, Record<string, string>>,
+  toolsByName: Map<string, ToolInfo>,
+  form: AgentForm,
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {}
+  const replacements = buildFormPlaceholderValues(form)
+  for (const [toolName, args] of Object.entries(forcedArguments)) {
+    const tool = toolsByName.get(toolName)
+    const properties = tool?.input_schema.properties ?? {}
+    const nextArgs: Record<string, unknown> = {}
+    for (const [argName, rawValue] of Object.entries(args)) {
+      if (rawValue === '') continue
+      nextArgs[argName] = coerceForcedValue(rawValue, properties[argName], replacements)
+    }
+    if (Object.keys(nextArgs).length > 0) {
+      out[toolName] = nextArgs
+    }
+  }
+  return out
+}
+
+function kickoffTriggers(form: AgentForm): string[] {
+  const triggers = [...form.event_triggers]
+  if (form.timer_enabled) triggers.unshift(TIMER_TRIGGER)
+  return uniqueSorted(triggers)
 }
 
 function normalizeAgent(raw: Record<string, unknown>, agentId: string): AgentForm {
@@ -138,22 +243,17 @@ function normalizeAgent(raw: Record<string, unknown>, agentId: string): AgentFor
     system_prompt: toText(raw.system_prompt),
     event_triggers: toStringList(raw.event_triggers),
     allowed_tools: toStringList(toolCfg.allowed_tools),
-    context_tiers_text: prettyJson(toolCfg.context_tiers, '{}'),
-    tier_tools_text: prettyJson(toolCfg.tier_tools, '{}'),
+    forced_arguments: normalizeForcedArguments(toolCfg.forced_arguments),
     max_tool_turns: toNum(toolCfg.max_tool_turns, 8),
     max_tokens: toNum(toolCfg.max_tokens, 4096),
   }
 }
 
-function parseJsonObject(text: string): Record<string, unknown> {
-  const parsed = JSON5.parse(text)
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error('Expected a JSON object.')
-  }
-  return parsed as Record<string, unknown>
-}
-
-function serializeAgent(form: AgentForm, raw: Record<string, unknown>): Record<string, unknown> {
+function serializeAgent(
+  form: AgentForm,
+  raw: Record<string, unknown>,
+  toolsByName: Map<string, ToolInfo>,
+): Record<string, unknown> {
   const next = { ...raw }
 
   next._comment = form.comment.trim()
@@ -179,11 +279,11 @@ function serializeAgent(form: AgentForm, raw: Record<string, unknown>): Record<s
   delete next.chat_instruction
 
   const prevToolCfg = (raw.tool_config as Record<string, unknown> | undefined) ?? {}
+  const { context_tiers: _contextTiers, tier_tools: _tierTools, ...nextToolCfg } = prevToolCfg
   next.tool_config = {
-    ...prevToolCfg,
+    ...nextToolCfg,
     allowed_tools: form.allowed_tools,
-    context_tiers: parseJsonObject(form.context_tiers_text),
-    tier_tools: parseJsonObject(form.tier_tools_text),
+    forced_arguments: serializeForcedArguments(form.forced_arguments, toolsByName, form),
     max_tool_turns: form.max_tool_turns,
     max_tokens: form.max_tokens,
   }
@@ -191,7 +291,13 @@ function serializeAgent(form: AgentForm, raw: Record<string, unknown>): Record<s
   return next
 }
 
-function validateForm(form: AgentForm, rows: AgentRow[], selectedIndex: number | null): string[] {
+function validateForm(
+  form: AgentForm,
+  rows: AgentRow[],
+  selectedIndex: number | null,
+  toolsByName: Map<string, ToolInfo>,
+  brokerShortNames: Record<string, string>,
+): string[] {
   const issues: string[] = []
 
   const id = form.agent_id.trim().toUpperCase()
@@ -208,6 +314,15 @@ function validateForm(form: AgentForm, rows: AgentRow[], selectedIndex: number |
   if (!form.type.trim()) issues.push('`type` is required.')
   if (!form.llm.trim()) issues.push('`llm` is required.')
   if (!form.broker.trim()) issues.push('`broker` is required.')
+  const brokerShortName = form.broker.trim() ? brokerShortNames[form.broker.trim()] ?? '' : ''
+  if (id && brokerShortName) {
+    const agentBrokerSegment = id.split('-')[0] ?? ''
+    if (agentBrokerSegment !== brokerShortName) {
+      issues.push(
+        `Agent ID broker segment "${agentBrokerSegment}" does not match selected broker short_name "${brokerShortName}". EventBus routing for broker/pair events will fail.`,
+      )
+    }
+  }
   if (form.type.trim().toUpperCase() === 'AA' && !form.pair.trim()) issues.push('`pair` is required for AA agents.')
   if (!Number.isFinite(form.timer_interval_seconds) || form.timer_interval_seconds < 0) {
     issues.push('`timer.interval_seconds` must be >= 0.')
@@ -219,17 +334,28 @@ function validateForm(form: AgentForm, rows: AgentRow[], selectedIndex: number |
   if (form.event_triggers.length === 0) issues.push('At least one `event_trigger` is required.')
   if (!form.system_prompt.trim()) issues.push('`system_prompt` is required.')
   if (form.allowed_tools.length === 0) issues.push('At least one `allowed_tool` is required.')
+  const replacements = buildFormPlaceholderValues(form)
 
-  try {
-    parseJsonObject(form.context_tiers_text)
-  } catch (err) {
-    issues.push(`Invalid tool_config.context_tiers: ${String(err)}`)
-  }
-
-  try {
-    parseJsonObject(form.tier_tools_text)
-  } catch (err) {
-    issues.push(`Invalid tool_config.tier_tools: ${String(err)}`)
+  for (const [toolName, args] of Object.entries(form.forced_arguments)) {
+    if (!form.allowed_tools.includes(toolName)) continue
+    const tool = toolsByName.get(toolName)
+    if (!tool) {
+      issues.push(`Unknown tool in forced_arguments: "${toolName}".`)
+      continue
+    }
+    for (const [argName, rawValue] of Object.entries(args)) {
+      if (rawValue === '') continue
+      const prop = tool.input_schema.properties?.[argName]
+      if (!prop) {
+        issues.push(`Unknown forced argument "${toolName}.${argName}".`)
+        continue
+      }
+      try {
+        coerceForcedValue(rawValue, prop, replacements)
+      } catch (err) {
+        issues.push(`Invalid forced argument "${toolName}.${argName}": ${String(err)}`)
+      }
+    }
   }
 
   if (!Number.isFinite(form.max_tool_turns) || form.max_tool_turns <= 0) {
@@ -256,15 +382,17 @@ export function AgentConfigWizard() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [tools, setTools] = useState<ToolInfo[]>([])
+  const [brokerShortNames, setBrokerShortNames] = useState<Record<string, string>>({})
   const [triggerCandidate, setTriggerCandidate] = useState('')
   const [toolCandidate, setToolCandidate] = useState('')
 
   const llmNames = useMemo(() => Object.keys(cfg?.modules?.llm ?? {}), [cfg])
   const brokerNames = useMemo(() => Object.keys(cfg?.modules?.broker ?? {}), [cfg])
+  const toolsByName = useMemo(() => new Map(tools.map(tool => [tool.name, tool])), [tools])
 
   const allTriggerOptions = useMemo(() => {
     const fromRows = rows.flatMap(r => r.form.event_triggers)
-    return uniqueSorted([...DEFAULT_EVENT_TRIGGERS, ...fromRows])
+    return uniqueSorted([TIMER_TRIGGER, ...DEFAULT_EVENT_TRIGGERS, ...fromRows])
   }, [rows])
 
   const allToolNames = useMemo(() => uniqueSorted(tools.map(t => t.name)), [tools])
@@ -279,6 +407,17 @@ export function AgentConfigWizard() {
         api.getTools(),
       ])
       const system = sys as SystemConfig
+      const brokerModuleNames = Object.keys(system.modules?.broker ?? {})
+      const brokerModuleConfigs = await Promise.all(
+        brokerModuleNames.map(async (name) => {
+          try {
+            const raw = await api.getModuleConfigRaw('broker', name)
+            return [name, typeof raw.short_name === 'string' ? raw.short_name.trim().toUpperCase() : ''] as const
+          } catch {
+            return [name, ''] as const
+          }
+        }),
+      )
       const agentEntries = Object.entries(system.agents ?? {})
       const normalized: AgentRow[] = agentEntries.map(([agentId, raw]) => {
         const agentRaw = (raw as Record<string, unknown>) ?? {}
@@ -290,6 +429,7 @@ export function AgentConfigWizard() {
 
       setCfg(system)
       setTools(toolResp.tools)
+      setBrokerShortNames(Object.fromEntries(brokerModuleConfigs.filter(([, shortName]) => shortName)))
       setRows(normalized)
       if (normalized.length > 0) {
         setSelectedIndex(0)
@@ -321,16 +461,20 @@ export function AgentConfigWizard() {
     }
   }, [allToolNames, toolCandidate])
 
-  const issues = useMemo(() => validateForm(form, rows, selectedIndex), [form, rows, selectedIndex])
+  const issues = useMemo(
+    () => validateForm(form, rows, selectedIndex, toolsByName, brokerShortNames),
+    [form, rows, selectedIndex, toolsByName, brokerShortNames],
+  )
+  const selectedAgentId = selectedIndex !== null ? rows[selectedIndex]?.form.agent_id ?? '' : ''
 
   const persist = async (nextRows: AgentRow[], nextSelected: number | null, okMsg: string) => {
     if (!cfg) return
 
-    const agentsObj: Record<string, Record<string, unknown>> = {}
-    for (const row of nextRows) {
-      const id = row.form.agent_id.trim().toUpperCase()
-      agentsObj[id] = serializeAgent({ ...row.form, agent_id: id }, row.raw)
-    }
+      const agentsObj: Record<string, Record<string, unknown>> = {}
+      for (const row of nextRows) {
+        const id = row.form.agent_id.trim().toUpperCase()
+        agentsObj[id] = serializeAgent({ ...row.form, agent_id: id }, row.raw, toolsByName)
+      }
 
     const payload: SystemConfig = {
       ...cfg,
@@ -408,23 +552,38 @@ export function AgentConfigWizard() {
     setMessage(null)
   }
 
+  const selectAgentById = (agentId: string) => {
+    const idx = rows.findIndex(row => row.form.agent_id === agentId)
+    if (idx >= 0) selectAgent(idx)
+  }
+
   const setField = <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => {
     setForm(prev => ({ ...prev, [key]: value }))
   }
 
   const addTrigger = () => {
     if (!triggerCandidate) return
-    setForm(prev => ({
-      ...prev,
-      event_triggers: uniqueSorted([...prev.event_triggers, triggerCandidate]),
-    }))
+    setForm(prev => {
+      if (triggerCandidate === TIMER_TRIGGER) {
+        return { ...prev, timer_enabled: true }
+      }
+      return {
+        ...prev,
+        event_triggers: uniqueSorted([...prev.event_triggers, triggerCandidate]),
+      }
+    })
   }
 
   const removeTrigger = (trigger: string) => {
-    setForm(prev => ({
-      ...prev,
-      event_triggers: prev.event_triggers.filter(t => t !== trigger),
-    }))
+    setForm(prev => {
+      if (trigger === TIMER_TRIGGER) {
+        return { ...prev, timer_enabled: false }
+      }
+      return {
+        ...prev,
+        event_triggers: prev.event_triggers.filter(t => t !== trigger),
+      }
+    })
   }
 
   const addTool = () => {
@@ -439,10 +598,37 @@ export function AgentConfigWizard() {
     setForm(prev => ({
       ...prev,
       allowed_tools: prev.allowed_tools.filter(t => t !== tool),
+      forced_arguments: Object.fromEntries(
+        Object.entries(prev.forced_arguments).filter(([name]) => name !== tool),
+      ),
+    }))
+  }
+
+  const setForcedArgument = (toolName: string, argName: string, value: string) => {
+    setForm(prev => ({
+      ...prev,
+      forced_arguments: {
+        ...prev.forced_arguments,
+        [toolName]: {
+          ...(prev.forced_arguments[toolName] ?? {}),
+          [argName]: value,
+        },
+      },
+    }))
+  }
+
+  const clearForcedArgumentsForTool = (toolName: string) => {
+    setForm(prev => ({
+      ...prev,
+      forced_arguments: {
+        ...prev.forced_arguments,
+        [toolName]: {},
+      },
     }))
   }
 
   const summary = useMemo(() => {
+    const triggers = kickoffTriggers(form)
     const lines: string[] = []
     lines.push(`ID: ${form.agent_id || '(missing)'}`)
     lines.push(`Type: ${form.type || '(missing)'}`)
@@ -452,8 +638,9 @@ export function AgentConfigWizard() {
     if (form.type === 'AA') lines.push(`Pair: ${form.pair || '(missing)'}`)
     lines.push(`Timer: ${form.timer_enabled ? `on (${form.timer_interval_seconds}s)` : 'off'}`)
     lines.push(`AnyCandle: ${form.any_candle}`)
-    lines.push(`Triggers: ${form.event_triggers.length}`)
+    lines.push(`Triggers: ${triggers.length}`)
     lines.push(`Allowed tools: ${form.allowed_tools.length}`)
+    lines.push(`Forced tool args: ${Object.values(form.forced_arguments).reduce((sum, args) => sum + Object.values(args).filter(Boolean).length, 0)}`)
     return lines.join('\n')
   }, [form])
 
@@ -481,39 +668,34 @@ export function AgentConfigWizard() {
 
         {!loading && (
           <>
-            <div className="border border-gray-700 rounded overflow-hidden">
-              <div className="max-h-[260px] overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-900 text-gray-300">
-                    <tr>
-                      <th className="text-left px-2 py-2 w-12">#</th>
-                      <th className="text-left px-2 py-2">Agent ID</th>
-                      <th className="text-left px-2 py-2 w-14">On</th>
-                      <th className="text-left px-2 py-2 w-14">Type</th>
-                      <th className="text-left px-2 py-2">LLM</th>
-                      <th className="text-left px-2 py-2">Broker</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r, idx) => (
-                      <tr
-                        key={`${r.form.agent_id}-${idx}`}
-                        onClick={() => selectAgent(idx)}
-                        className={[
-                          'border-t border-gray-800 cursor-pointer',
-                          idx === selectedIndex ? 'bg-emerald-900/20' : 'bg-gray-950 hover:bg-gray-900/50',
-                        ].join(' ')}
-                      >
-                        <td className="px-2 py-1.5 text-gray-500">{idx + 1}</td>
-                        <td className="px-2 py-1.5 text-gray-200">{r.form.agent_id}</td>
-                        <td className="px-2 py-1.5 text-gray-300">{r.form.enable ? 'Y' : 'N'}</td>
-                        <td className="px-2 py-1.5 text-gray-300">{r.form.type}</td>
-                        <td className="px-2 py-1.5 text-gray-400">{r.form.llm}</td>
-                        <td className="px-2 py-1.5 text-gray-400">{r.form.broker}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="border border-gray-700 rounded bg-gray-900/40 p-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                <label className="block flex-1 text-xs text-gray-300">
+                  Agent Selection
+                  <select
+                    value={selectedAgentId}
+                    onChange={e => selectAgentById(e.target.value)}
+                    className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200"
+                  >
+                    {rows.length === 0 ? (
+                      <option value="">-- no agents loaded --</option>
+                    ) : (
+                      rows.map((row, idx) => (
+                        <option key={`${row.form.agent_id}-${idx}`} value={row.form.agent_id}>
+                          {row.form.agent_id} | {row.form.type} | {row.form.enable ? 'enabled' : 'disabled'} | {row.form.llm || 'no-llm'} | {row.form.broker || 'no-broker'}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span>{rows.length} agents</span>
+                  {selectedAgentId && (
+                    <span className="rounded border border-emerald-700/50 bg-emerald-900/20 px-2 py-1 text-emerald-300 font-mono">
+                      {selectedAgentId}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -521,12 +703,18 @@ export function AgentConfigWizard() {
               <section className="xl:col-span-2 border border-gray-700 rounded p-3 bg-gray-900/40 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm text-gray-200 font-medium">Agent Editor</h3>
-                  <button
-                    onClick={() => { setSelectedIndex(null); setForm({ ...EMPTY_FORM }); setError(null); setMessage(null) }}
-                    className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
-                  >
-                    New Empty Agent
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setSelectedIndex(null); setForm({ ...EMPTY_FORM }); setError(null); setMessage(null) }}
+                      className="text-xs px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white border border-amber-400/40 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      New Empty Agent
+                    </button>
+                    <button onClick={() => void handleUpdate()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" />Update</button>
+                    <button onClick={() => void handleSaveAsNew()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50">Save As New</button>
+                    <button onClick={() => void handleDelete()} disabled={saving || selectedIndex === null} className="text-xs px-3 py-1.5 rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50 flex items-center gap-1"><Trash2 className="w-3.5 h-3.5" />Delete</button>
+                  </div>
                 </div>
 
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
@@ -559,14 +747,10 @@ export function AgentConfigWizard() {
                     Broker
                     <select title={TIPS.broker} value={form.broker} onChange={e => setField('broker', e.target.value)} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"><option value="">-- select --</option>{brokerNames.map(n => <option key={n} value={n}>{n}</option>)}</select>
                   </label>
-                  <div className="col-span-4 grid grid-cols-3 gap-2">
-                    <label title={TIPS.timer_enabled} className="text-xs text-gray-300">
-                      Timer Enabled
-                      <select title={TIPS.timer_enabled} value={form.timer_enabled ? 'true' : 'false'} onChange={e => setField('timer_enabled', e.target.value === 'true')} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"><option value="false">false</option><option value="true">true</option></select>
-                    </label>
+                  <div className="col-span-4 grid grid-cols-2 gap-2">
                     <label title={TIPS.timer_interval_seconds} className="text-xs text-gray-300">
                       Timer Interval
-                      <input title={TIPS.timer_interval_seconds} type="number" value={form.timer_interval_seconds} onChange={e => setField('timer_interval_seconds', Number(e.target.value))} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" />
+                      <input title={TIPS.timer_interval_seconds} type="number" value={form.timer_interval_seconds} onChange={e => setField('timer_interval_seconds', Number(e.target.value))} disabled={!form.timer_enabled} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50" />
                     </label>
                     <label title={TIPS.any_candle} className="text-xs text-gray-300">
                       AnyCandle
@@ -581,9 +765,9 @@ export function AgentConfigWizard() {
                   </label>
 
                   <div title={TIPS.event_triggers} className="text-xs text-gray-300 col-span-8">
-                    Event Trigger
+                    Kickoff Triggers
                     <div className="mt-1 flex gap-2"><select title={TIPS.event_triggers} value={triggerCandidate} onChange={e => setTriggerCandidate(e.target.value)} className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200">{allTriggerOptions.map(t => <option key={t} value={t}>{t}</option>)}</select><button title="Add selected event trigger" onClick={addTrigger} className="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"><Plus className="w-3.5 h-3.5" /></button></div>
-                    <div className="mt-2 border border-gray-700 rounded p-2 min-h-[84px] bg-gray-950/60"><div className="flex flex-wrap gap-2">{form.event_triggers.map(t => <span key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-800 text-gray-200">{t}<button title="Remove" onClick={() => removeTrigger(t)} className="text-red-300 hover:text-red-200"><Minus className="w-3.5 h-3.5" /></button></span>)}</div></div>
+                    <div className="mt-2 border border-gray-700 rounded p-2 min-h-[84px] bg-gray-950/60"><div className="flex flex-wrap gap-2">{kickoffTriggers(form).map(t => <span key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-800 text-gray-200">{t}<button title="Remove" onClick={() => removeTrigger(t)} className="text-red-300 hover:text-red-200"><Minus className="w-3.5 h-3.5" /></button></span>)}</div></div>
                   </div>
 
                   <div title={TIPS.allowed_tools} className="text-xs text-gray-300 col-span-8">
@@ -592,17 +776,102 @@ export function AgentConfigWizard() {
                     <div className="mt-2 border border-gray-700 rounded p-2 min-h-[84px] bg-gray-950/60"><div className="flex flex-wrap gap-2">{form.allowed_tools.map(t => <span key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-gray-800 text-gray-200">{t}<button title="Remove" onClick={() => removeTool(t)} className="text-red-300 hover:text-red-200"><Minus className="w-3.5 h-3.5" /></button></span>)}</div></div>
                   </div>
 
-                  <label title={TIPS.context_tiers} className="block text-xs text-gray-300 col-span-6 row-span-2">tool_config.context_tiers<textarea title={TIPS.context_tiers} rows={8} value={form.context_tiers_text} onChange={e => setField('context_tiers_text', e.target.value)} className="mt-1 w-full h-[calc(100%-1.6rem)] bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono" /></label>
-                  <label title={TIPS.tier_tools} className="block text-xs text-gray-300 col-span-6 row-span-2">tool_config.tier_tools<textarea title={TIPS.tier_tools} rows={8} value={form.tier_tools_text} onChange={e => setField('tier_tools_text', e.target.value)} className="mt-1 w-full h-[calc(100%-1.6rem)] bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono" /></label>
+                  <div title={TIPS.forced_arguments} className="col-span-full text-xs text-gray-300">
+                    <div className="flex items-center justify-between">
+                      <span>tool_config.forced_arguments</span>
+                      <span className="text-[11px] text-gray-500">LLM cannot override these values</span>
+                    </div>
+                    <div className="mt-2 space-y-3">
+                      {form.allowed_tools.length === 0 ? (
+                        <div className="rounded border border-dashed border-gray-700 px-3 py-2 text-gray-500">
+                          Add allowed tools first.
+                        </div>
+                      ) : (
+                        form.allowed_tools.map(toolName => {
+                          const tool = toolsByName.get(toolName)
+                          const props = Object.entries(tool?.input_schema.properties ?? {})
+                          return (
+                            <div key={toolName} className="rounded border border-gray-700 bg-gray-950/50 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-mono text-sm text-emerald-300">{toolName}</div>
+                                  <div className="text-[11px] text-gray-500">
+                                    {tool?.description ?? 'Tool schema unavailable.'}
+                                  </div>
+                                  <div className="text-[11px] text-gray-600">
+                                    Placeholders: {'{llm}'}, {'{broker}'}, {'{pair}'}, {'{type}'}, {'{name}'}, {'{agent_id}'}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => clearForcedArgumentsForTool(toolName)}
+                                  className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                              {props.length === 0 ? (
+                                <div className="text-[11px] text-gray-500">This tool has no configurable arguments.</div>
+                              ) : (
+                                <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
+                                  {props.map(([argName, prop]) => {
+                                    const required = tool?.input_schema.required?.includes(argName) ?? false
+                                    const value = form.forced_arguments[toolName]?.[argName] ?? ''
+                                    const inputType = prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'
+                                    return (
+                                      <label key={`${toolName}-${argName}`} className="col-span-4 text-xs text-gray-300">
+                                        <span className="font-mono text-gray-200">{argName}</span>
+                                        {required && <span className="ml-1 text-gray-500">*</span>}
+                                        <span className="ml-1 text-gray-600">({prop.type ?? 'any'})</span>
+                                        {prop.description && (
+                                          <span className="mt-0.5 block text-[11px] text-gray-500">{prop.description}</span>
+                                        )}
+                                        {prop.enum ? (
+                                          <select
+                                            value={value}
+                                            onChange={e => setForcedArgument(toolName, argName, e.target.value)}
+                                            className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
+                                          >
+                                            <option value="">-- not forced --</option>
+                                            {prop.enum.map(option => (
+                                              <option key={option} value={option}>{option}</option>
+                                            ))}
+                                          </select>
+                                        ) : prop.type === 'boolean' ? (
+                                          <select
+                                            value={value}
+                                            onChange={e => setForcedArgument(toolName, argName, e.target.value)}
+                                            className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
+                                          >
+                                            <option value="">-- not forced --</option>
+                                            <option value="true">true</option>
+                                            <option value="false">false</option>
+                                          </select>
+                                        ) : (
+                                          <input
+                                            type={inputType}
+                                            value={value}
+                                            onChange={e => setForcedArgument(toolName, argName, e.target.value)}
+                                            placeholder="leave empty = not forced"
+                                            className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
+                                          />
+                                        )}
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+
                   <label title={TIPS.max_tool_turns} className="text-xs text-gray-300 col-span-2">max_tool_turns<input title={TIPS.max_tool_turns} type="number" value={form.max_tool_turns} onChange={e => setField('max_tool_turns', Number(e.target.value))} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" /></label>
                   <div className="col-span-2" />
                   <label title={TIPS.max_tokens} className="text-xs text-gray-300 col-span-2">max_tokens<input title={TIPS.max_tokens} type="number" value={form.max_tokens} onChange={e => setField('max_tokens', Number(e.target.value))} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" /></label>
 
-                  <div className="col-span-full flex items-center gap-2 pt-1">
-                    <button onClick={() => void handleUpdate()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" />Update</button>
-                    <button onClick={() => void handleSaveAsNew()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50">Save As New</button>
-                    <button onClick={() => void handleDelete()} disabled={saving || selectedIndex === null} className="text-xs px-3 py-1.5 rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50 flex items-center gap-1"><Trash2 className="w-3.5 h-3.5" />Delete</button>
-                  </div>
                 </div>
               </section>
 

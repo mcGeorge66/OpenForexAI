@@ -93,10 +93,10 @@ from openforexai.tools.my_domain.my_tool import MyTool
 DEFAULT_REGISTRY.register(MyTool())
 ```
 
-3. Allow it in agent config (`config/system.json`):
+3. Allow it in agent config (`config/system.json5`):
 Add the tool name under each relevant agent `tool_config.allowed_tools`.
 
-4. Configure approval mode (`config/agent_tools.json`) if needed:
+4. Configure approval mode in `config/system.json5` if needed:
 Use `direct`, `supervisor`, or `human` depending on risk.
 
 5. Ensure runtime context requirements are satisfied:
@@ -221,8 +221,8 @@ pytest template/tool/demo_tool_test.py -q
 
 6. Registry And Config Wiring
 - Register tool in `DEFAULT_REGISTRY` (manual or via `tool_registry_manager.py`).
-- Add tool to target agents in `config/system.json`.
-- Set approval behavior in `config/agent_tools.json` where required.
+- Add tool to target agents in `config/system.json5`.
+- Set approval behavior in each agent's `tool_config.approval_modes` where required.
 
 7. Controlled Functional Testing
 - Start system in a safe environment.
