@@ -23,9 +23,10 @@ Abstract base class all broker adapters extend. Provides the background task inf
 
 **`_m5_loop(pair)`**
 Runs as an asyncio task. Every 5 minutes:
-1. Calls `get_candles(pair, "M5", count=1)` for the latest bar
-2. Publishes `M5_CANDLE_AVAILABLE` event to the EventBus
-3. Sleeps until the next 5-minute boundary
+1. Calls `get_historical_m5_candles(pair, count=N)` for the recent M5 window
+2. Publishes `M5_CANDLE_UPDATE` events for DB/chart updates
+3. Publishes delayed `M5_AGENT_TRIGGER` events for analysis-agent wakeups
+4. Sleeps until the next poll interval
 
 Error handling:
 - **Transient errors** (502/503/504, connection timeout): logged as `WARNING` without traceback, retried next cycle

@@ -135,7 +135,7 @@ GA agent  ──prompt_updated──►  ALL agents (broadcast)
 Any      ──risk_breach──►  BA agent (same broker)
 ```
 
-Infrastructure events (`m5_candle_available`, `account_status_updated`, etc.) route to `@handlers` (DataContainer and BrokerBase legacy subscribers), bypassing agent queues.
+Infrastructure events (`m5_candle_update`, `account_status_updated`, etc.) route to `@handlers` (DataContainer and BrokerBase legacy subscribers), bypassing agent queues. Agent-facing M5 analysis triggers use the separate `m5_agent_trigger` event.
 
 ### Hot-Reload
 

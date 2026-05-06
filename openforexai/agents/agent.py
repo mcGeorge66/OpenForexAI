@@ -18,7 +18,7 @@ broker           str | None          Broker module name — omit for GA agents
 pair             str | None          Currency pair — AA agents only
 timer            {enabled, interval} Periodic self-activation
 event_triggers   list[str]           EventType values that wake the agent
-AnyCandle       int >= 1            Divider for m5_candle_available triggers
+AnyCandle       int >= 1            Divider for m5_agent_trigger triggers
 system_prompt    str                 LLM system prompt
 tool_config      dict                Passed directly to ToolDispatcher
 
@@ -276,20 +276,21 @@ class Agent:
         )
         return _DEFAULT_ANY_CANDLE_DIVIDER
 
-    def _should_run_for_trigger(self, event_val: str) -> bool:
-        if event_val != EventType.M5_CANDLE_AVAILABLE.value:
-            return True
-        if self._any_candle_divider <= 1:
-            return True
+    def _should_run_for_trigger(self, event_val: str) -> tuple[bool, int | None]:
+        if event_val != EventType.M5_AGENT_TRIGGER.value:
+            return True, None
         self._m5_candle_event_count += 1
-        if self._m5_candle_event_count % self._any_candle_divider != 0:
+        trigger_count = self._m5_candle_event_count
+        if self._any_candle_divider <= 1:
+            return True, trigger_count
+        if trigger_count % self._any_candle_divider != 0:
             self._logger.debug(
                 "Skipping M5 trigger because AnyCandle divider not reached",
                 any_candle=self._any_candle_divider,
-                candle_count=self._m5_candle_event_count,
+                candle_count=trigger_count,
             )
-            return False
-        return True
+            return False, trigger_count
+        return True, trigger_count
 
     # ── Run loops ─────────────────────────────────────────────────────────────
 
@@ -358,16 +359,19 @@ class Agent:
                             f"Config refresh failed: {type(exc).__name__}: {exc}"
                         )
                 elif event_val in self._event_triggers:
-                    if (
-                        event_val == EventType.M5_CANDLE_AVAILABLE.value
-                        and isinstance(msg.payload, dict)
-                        and bool(msg.payload.get("refresh_only", False))
-                    ):
-                        continue
+                    should_run, trigger_count = self._should_run_for_trigger(event_val)
+                    if event_val == EventType.M5_AGENT_TRIGGER.value:
+                        await self._publish_m5_trigger_counter(
+                            payload=msg.payload,
+                            trigger_count=trigger_count or 0,
+                            divider=self._any_candle_divider,
+                            divider_reached=should_run,
+                            runtime_paused=runtime_control.is_paused(),
+                        )
                     if runtime_control.is_paused():
                         self._logger.debug("Runtime paused — skipping trigger", trigger=event_val)
                         continue
-                    if not self._should_run_for_trigger(event_val):
+                    if not should_run:
                         continue
                     await self._run_cycle(
                         trigger=event_val,
@@ -459,6 +463,13 @@ class Agent:
                     context.extra["analysis_response_object"] = analysis_object
                     context.extra["analysis_event_payload"] = payload
                     context.extra["analysis_source_agent_id"] = source
+                if self._is_broker_agent() and not isinstance(analysis_object, dict):
+                    self._logger.warning(
+                        "Skipping invalid analysis_result payload for broker agent",
+                        agent_id=self.agent_id,
+                        source=source,
+                    )
+                    return
                 if isinstance(analysis_response, str) and analysis_response.strip():
                     user_msg = analysis_response
                 else:
@@ -513,6 +524,13 @@ class Agent:
             )
 
             if self._is_analysis_agent():
+                if not final_text.strip():
+                    self._logger.warning(
+                        "Analysis agent produced empty final_text; suppressing analysis_result publish",
+                        agent_id=self.agent_id,
+                        trigger=trigger,
+                    )
+                    return
                 analysis_timestamp = self._resolve_analysis_timestamp(trigger, payload)
                 analysis_payload = {
                     "agent_id": self.agent_id,
@@ -623,6 +641,31 @@ class Agent:
     async def publish(self, message: AgentMessage) -> None:
         await self._bus.publish(message)
 
+    async def _publish_m5_trigger_counter(
+        self,
+        *,
+        payload: dict[str, Any],
+        trigger_count: int,
+        divider: int,
+        divider_reached: bool,
+        runtime_paused: bool,
+    ) -> None:
+        candle = payload.get("candle") if isinstance(payload, dict) else None
+        candle_timestamp = candle.get("timestamp") if isinstance(candle, dict) else None
+        await self._bus.publish(AgentMessage(
+            event_type=EventType.M5_TRIGGER_COUNTER,
+            source_agent_id=self.agent_id,
+            payload={
+                "pair": payload.get("pair") if isinstance(payload, dict) else None,
+                "count": trigger_count,
+                "every": divider,
+                "due": divider_reached,
+                "paused": runtime_paused,
+                "run": divider_reached and not runtime_paused,
+                "ts": candle_timestamp,
+            },
+        ))
+
     def _is_analysis_agent(self) -> bool:
         parsed = AgentId.try_parse(self.agent_id)
         return parsed is not None and parsed.type == "AA"
@@ -658,7 +701,7 @@ class Agent:
 
     def _resolve_analysis_timestamp(self, trigger: str, payload: dict[str, Any]) -> str:
         """Resolve the exact candle timestamp for an AA analysis cycle."""
-        if trigger != EventType.M5_CANDLE_AVAILABLE.value:
+        if trigger != EventType.M5_AGENT_TRIGGER.value:
             raise RuntimeError(
                 f"Analysis timestamp resolution only supports candle-triggered AA cycles, got {trigger!r}"
             )

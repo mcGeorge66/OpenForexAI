@@ -121,7 +121,7 @@ export function EventRoutingEditor() {
   const fieldHelp = useMemo(() => {
     const map: Record<string, string> = {
       id: 'Unique technical rule key. Use stable snake_case, e.g. "m5_candle_to_matching_aa". Must be unique across all rules.',
-      event: 'Event type value from backend (e.g. "m5_candle_available", "signal_generated", "*" for all events). Exact spelling matters.',
+      event: 'Event type value from backend (e.g. "m5_candle_update", "m5_agent_trigger", "signal_generated", "*" for all events). Exact spelling matters.',
       description: 'Optional human-readable explanation for maintainers. Keep it short and specific.',
       from: 'Sender pattern in Agent-ID format with "-" segments (e.g. "*-*-AA-*"). Use "*" wildcards carefully.',
       to: 'Target expression: literal agent id, wildcard pattern, template like "{sender.broker}-ALL___-BA-*", "*" (all), or "@handlers".',

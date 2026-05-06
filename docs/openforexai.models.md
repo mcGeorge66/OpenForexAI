@@ -31,7 +31,8 @@ The core communication primitives.
 All event types in the system. Key events:
 
 **Market data pipeline:**
-- `m5_candle_available` — broker adapter → DataContainer, agents
+- `m5_candle_update` — broker adapter → DataContainer
+- `m5_agent_trigger` — broker adapter → matching analysis agents
 - `candle_gap_detected` — DataContainer signals a gap
 - `candle_repair_requested` / `candle_repair_completed`
 

@@ -36,7 +36,7 @@ type AgentRow = {
 }
 
 const DEFAULT_EVENT_TRIGGERS = [
-  'm5_candle_available',
+  'm5_agent_trigger',
   'prompt_updated',
   'agent_query',
   'analysis_result',
@@ -59,7 +59,7 @@ const EMPTY_FORM: AgentForm = {
   timer_interval_seconds: 300,
   any_candle: 1,
   system_prompt: '',
-  event_triggers: ['m5_candle_available'],
+  event_triggers: ['m5_agent_trigger'],
   allowed_tools: ['get_candles', 'calculate_indicator', 'raise_alarm'],
   forced_arguments: {},
   max_tool_turns: 8,
@@ -79,7 +79,7 @@ const TIPS = {
   broker: 'Broker module name from modules.broker in system config. Determines broker adapter context.',
   timer_enabled: 'Derived from the Kickoff Triggers control. If `timer` is selected there, periodic execution is enabled.',
   timer_interval_seconds: 'Timer period in seconds. Used only when the `timer` kickoff trigger is active.',
-  any_candle: 'Runs on every Nth M5 candle event. 1 = every candle (5m), 3 = every third candle (15m). Only affects m5_candle_available trigger.',
+  any_candle: 'Runs on every Nth M5 agent trigger. 1 = every candle (5m), 3 = every third candle (15m). Only affects m5_agent_trigger.',
   system_prompt: 'Primary instruction prompt for this agent. Strongly affects decision logic and response style.',
   event_triggers: 'Kickoff triggers for this agent. Bus events wake the agent from traffic; `timer` is a UI pseudo-trigger mapped to timer.enabled in backend config.',
   allowed_tools: 'Tool allow-list for this agent. Only listed tools can be called by the LLM.',

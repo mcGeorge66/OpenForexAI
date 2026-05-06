@@ -29,7 +29,7 @@ publish(message)
 dispatch loop (asyncio.Task)
     │
     ├── Legacy handlers (always called, bypass routing rules)
-    │   subscribe(EventType.M5_CANDLE_AVAILABLE, handler)
+    │   subscribe(EventType.M5_CANDLE_UPDATE, handler)
     │
     ├── Direct targeting (target_agent_id set, bypass routing)
     │   → put into that agent's personal Queue
@@ -81,14 +81,14 @@ bus = EventBus(routing)
 queue = bus.register_agent("OAPR1_EURUSD_AA_ANLYS")
 
 # Infrastructure subscribes a handler
-bus.subscribe(EventType.M5_CANDLE_AVAILABLE, data_container._on_m5_candle)
+bus.subscribe(EventType.M5_CANDLE_UPDATE, data_container._on_m5_candle)
 
 # Start the dispatch loop
 asyncio.create_task(bus.start_dispatch_loop())
 
 # Publish a message
 await bus.publish(AgentMessage(
-    event_type=EventType.M5_CANDLE_AVAILABLE,
+    event_type=EventType.M5_CANDLE_UPDATE,
     source_agent_id="broker:oanda",
     payload={"broker": "OAPR1", "pair": "EURUSD", ...}
 ))
@@ -177,13 +177,17 @@ substitute_template("OAPR1_{sender.pair}_BA_TRADE", sender_aid)
 ## Event Flow Overview
 
 ```
-Broker (M5 candle arrives)
+Broker (M5 candle pipeline)
     ↓
-bus.publish(M5_CANDLE_AVAILABLE)
-    ├── handler: DataContainer._on_m5_candle() → stores to DB
+bus.publish(M5_CANDLE_UPDATE)
+    └── handler: DataContainer._on_m5_candle() → stores to DB
+
+Broker (delayed agent wakeup)
+    ↓
+bus.publish(M5_AGENT_TRIGGER)
     └── routing: → OAPR1_EURUSD_AA_ANLYS queue
 
-AA Agent (woken by M5_CANDLE_AVAILABLE)
+AA Agent (woken by M5_AGENT_TRIGGER)
     ↓ runs LLM cycle ↓
 bus.publish(ANALYSIS_RESULT)
     └── routing rule "aa_to_ba" → OAPR1_ALL..._BA_TRADE queue

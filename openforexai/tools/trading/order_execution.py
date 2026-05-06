@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from openforexai.data.indicators import atr
-from openforexai.models.trade import OrderBookEntry, OrderStatus
+from openforexai.models.trade import CloseReason, OrderBookEntry, OrderStatus
 from openforexai.tools.base import ToolContext
+from openforexai.utils.time_utils import is_market_open, utcnow
 from openforexai.utils.sync_keys import generate_sync_key
 
 
@@ -36,6 +37,8 @@ _INDICATOR_PATTERNS: dict[str, re.Pattern[str]] = {
     "RSI7": re.compile(r"RSI(?:\(7\))?(?:\s*=\s*|\s*~\s*|\s*≈\s*|\s*is\s+)([-+]?\d+(?:\.\d+)?)", re.IGNORECASE),
     "ATR7": re.compile(r"ATR(?:\(7\))?(?:\s*=\s*|\s*~\s*|\s*≈\s*|\s*is\s+)([-+]?\d+(?:\.\d+)?)", re.IGNORECASE),
 }
+
+_MAX_M5_DATA_AGE = timedelta(minutes=20)
 
 
 def build_auto_place_order_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -150,6 +153,30 @@ def _build_market_context_snapshot(
             "conflict_flags": analysis_obj.get("conflict_flags") or [],
         }
     return snapshot
+
+
+async def _assert_trading_window_open(context: ToolContext) -> None:
+    if not is_market_open():
+        raise RuntimeError("Forex market session is currently closed; order blocked.")
+
+    if context.data_container is None or not context.broker_name or not context.pair:
+        return
+
+    candles = await context.data_container.get_candles(
+        context.broker_name,
+        context.pair,
+        "M5",
+        limit=1,
+    )
+    if not candles:
+        raise RuntimeError("No recent M5 candle data available; order blocked.")
+
+    latest = candles[-1]
+    age = utcnow() - latest.timestamp
+    if age > _MAX_M5_DATA_AGE:
+        raise RuntimeError(
+            f"Latest M5 candle is stale ({int(age.total_seconds() // 60)} min old); order blocked."
+        )
 
 
 async def _load_m5_candles(context: ToolContext, count: int):
@@ -300,6 +327,7 @@ async def execute_place_order_arguments(
         raise RuntimeError("Account status unavailable; trading is blocked.")
     if not account.trade_allowed:
         raise RuntimeError("Broker reports trading is not allowed; order blocked.")
+    await _assert_trading_window_open(context)
 
     if lots_arg is not None and str(lots_arg) != "":
         lots = float(lots_arg)
@@ -414,7 +442,11 @@ async def execute_place_order_arguments(
                 {
                     "status": OrderStatus.REJECTED,
                     "broker_order_id": result.broker_order_id or None,
+                    "closed_at": datetime.now(UTC),
                     "last_broker_sync": datetime.now(UTC),
+                    "close_reason": "REJECTED",
+                    "close_reasoning": result.close_reason or "Broker rejected order",
+                    "sync_confirmed": True,
                 },
             )
         elif result.broker_order_id:

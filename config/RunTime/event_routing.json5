@@ -9,20 +9,28 @@
       "priority": 1
     },
     {
-      "id": "m5_candle_to_handlers",
-      "description": "New M5 candle → DataContainer (legacy handler)",
-      "event": "m5_candle_available",
+      "id": "m5_candle_update_to_handlers",
+      "description": "M5 candle update → DataContainer (legacy handler)",
+      "event": "m5_candle_update",
       "from": "*",
       "to": "@handlers",
       "priority": 10
     },
     {
-      "id": "m5_candle_to_matching_aa",
-      "description": "New M5 candle from broker adapter → matching AA (same broker+pair)",
-      "event": "m5_candle_available",
+      "id": "m5_agent_trigger_to_matching_aa",
+      "description": "Delayed M5 agent trigger from broker adapter → matching AA (same broker+pair)",
+      "event": "m5_agent_trigger",
       "from": "*-*-AD-ADPT",
       "to": "{sender.broker}-{sender.pair}-AA-*",
       "priority": 11
+    },
+    {
+      "id": "m5_trigger_counter_to_handlers",
+      "description": "M5 trigger counter info → monitoring handlers",
+      "event": "m5_trigger_counter",
+      "from": "*",
+      "to": "@handlers",
+      "priority": 12
     },
     {
       "id": "candle_gap_to_handlers",

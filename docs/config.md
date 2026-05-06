@@ -86,7 +86,7 @@ One entry per running agent:
     "broker": "oanda",
     "pair": "EURUSD",
     "timer": {"enabled": true, "interval_seconds": 300},
-    "event_triggers": ["m5_candle_available", "prompt_updated", "agent_query"],
+    "event_triggers": ["m5_agent_trigger", "prompt_updated", "agent_query"],
     "AnyCandle": 3,
     "system_prompt": "...",
     "tool_config": {

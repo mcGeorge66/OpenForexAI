@@ -42,9 +42,9 @@ Each integration test:
    - `MockRepository` — in-memory storage
 
 3. **Drives the agent via events:**
-   ```python
-   await bus.publish(AgentMessage(
-       event_type=EventType.M5_CANDLE_AVAILABLE,
+    ```python
+    await bus.publish(AgentMessage(
+       event_type=EventType.M5_AGENT_TRIGGER,
        source_agent_id="broker:oanda",
        payload={"broker": "OAPR1", "pair": "EURUSD"},
    ))
@@ -63,7 +63,7 @@ Each integration test:
 
 ### AA Agent (`test_technical_analysis_agent.py`)
 
-- **M5 candle triggers analysis:** Agent wakes on `M5_CANDLE_AVAILABLE` and publishes `ANALYSIS_RESULT`
+- **M5 candle triggers analysis:** Agent wakes on `M5_AGENT_TRIGGER` and publishes `ANALYSIS_RESULT`
 - **Tool-use loop:** Agent calls `get_candles` and `calculate_indicator` before providing output
 - **Context tier downgrade:** When `MockLLM` returns high token counts, fewer tools are available in subsequent turns
 - **Query response:** Agent responds to `AGENT_QUERY` with a complete answer

@@ -3,19 +3,33 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
+from openforexai.models.market import Candle
 from openforexai.models.trade import (
     CloseReason,
     OrderBookEntry,
     OrderStatus,
     OrderType,
     Position,
+    TradeOrder,
     TradeDirection,
+    TradeResult,
+    TradeStatus,
 )
 from openforexai.tools.base import ToolContext
 from openforexai.tools.orderbook.get_order_book import GetOrderBookTool
 from openforexai.tools.trading.auto_place_order import AutoPlaceOrderTool
 from openforexai.tools.trading.close_position import ClosePositionTool
 from openforexai.tools.trading.modify_order import ModifyOrderTool
+
+
+class FreshDataContainer:
+    def __init__(self, candles):
+        self._candles = candles
+
+    async def get_candles(self, broker_name: str, pair: str, timeframe: str, limit: int = 1):
+        return self._candles[-limit:]
 
 
 def _entry(status: OrderStatus, broker_order_id: str) -> OrderBookEntry:
@@ -227,6 +241,133 @@ async def test_auto_place_order_uses_defaults_and_risk_sizing(
     assert entry.units > 0
     assert entry.stop_loss is not None
     assert entry.take_profit is not None
+
+
+async def test_auto_place_order_blocks_when_market_closed(
+    mock_broker,
+    mock_repository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openforexai.tools.trading import order_execution
+
+    monkeypatch.setattr(order_execution, "is_market_open", lambda dt=None: False)
+
+    tool = AutoPlaceOrderTool()
+    context = ToolContext(
+        agent_id="TEST",
+        broker_name="MOCKB",
+        pair="EURUSD",
+        broker=mock_broker,
+        repository=mock_repository,
+        data_container=FreshDataContainer([]),
+    )
+
+    with pytest.raises(RuntimeError, match="market session is currently closed"):
+        await tool.execute({"direction": "buy"}, context)
+
+
+async def test_auto_place_order_blocks_when_m5_data_is_stale(
+    mock_broker,
+    mock_repository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openforexai.tools.trading import order_execution
+
+    monkeypatch.setattr(order_execution, "is_market_open", lambda dt=None: True)
+
+    stale_candle = Candle(
+        timestamp=datetime(2026, 5, 1, 0, 0, tzinfo=UTC),
+        open=Decimal("1.1000"),
+        high=Decimal("1.1010"),
+        low=Decimal("1.0990"),
+        close=Decimal("1.1005"),
+        tick_volume=100,
+        spread=Decimal("0.0001"),
+        timeframe="M5",
+    )
+
+    tool = AutoPlaceOrderTool()
+    context = ToolContext(
+        agent_id="TEST",
+        broker_name="MOCKB",
+        pair="EURUSD",
+        broker=mock_broker,
+        repository=mock_repository,
+        data_container=FreshDataContainer([stale_candle]),
+    )
+
+    with pytest.raises(RuntimeError, match="Latest M5 candle is stale"):
+        await tool.execute(
+            {
+                "direction": "buy",
+                "units": 1000,
+                "entry_price": 1.1005,
+                "stop_loss": 1.0950,
+                "take_profit": 1.1100,
+            },
+            context,
+        )
+
+
+async def test_rejected_order_is_finalized_in_order_book(
+    mock_broker,
+    mock_repository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openforexai.tools.trading import order_execution
+
+    monkeypatch.setattr(order_execution, "is_market_open", lambda dt=None: True)
+
+    latest = Candle(
+        timestamp=datetime.now(UTC),
+        open=Decimal("1.1000"),
+        high=Decimal("1.1010"),
+        low=Decimal("1.0990"),
+        close=Decimal("1.1005"),
+        tick_volume=100,
+        spread=Decimal("0.0001"),
+        timeframe="M5",
+    )
+
+    async def _reject(order: TradeOrder) -> TradeResult:
+        return TradeResult(
+            order=order,
+            broker_order_id="",
+            broker_name=mock_broker.short_name,
+            status=TradeStatus.REJECTED,
+            close_reason="market closed",
+        )
+
+    monkeypatch.setattr(mock_broker, "place_order", _reject)
+
+    tool = AutoPlaceOrderTool()
+    context = ToolContext(
+        agent_id="TEST",
+        broker_name="MOCKB",
+        pair="EURUSD",
+        broker=mock_broker,
+        repository=mock_repository,
+        data_container=FreshDataContainer([latest]),
+    )
+
+    result = await tool.execute(
+        {
+            "direction": "buy",
+            "units": 1000,
+            "entry_price": 1.1005,
+            "stop_loss": 1.0950,
+            "take_profit": 1.1100,
+        },
+        context,
+    )
+
+    assert result["success"] is False
+    assert len(mock_repository.order_book_entries) == 1
+    entry = mock_repository.order_book_entries[0]
+    assert entry.status == OrderStatus.REJECTED
+    assert entry.closed_at is not None
+    assert entry.close_reason == "REJECTED"
+    assert entry.close_reasoning == "market closed"
 
 
 async def test_close_position_zero_closes_all_matching_positions(

@@ -16,6 +16,7 @@ Flow
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.config_loader import AgentToolConfig
 from openforexai.tools.system.agent_bridge import register_bridge_tools_from_config
 from openforexai.utils.logging import get_logger
+from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 
 _ROOT = Path(__file__).parent.parent
 _CONFIG_DIR = _ROOT / "config"
@@ -112,6 +114,17 @@ async def bootstrap(
                 return default
         return default
 
+    def _int_at_least_zero(value: Any, default: int) -> int:
+        if isinstance(value, int):
+            return value if value >= 0 else default
+        if isinstance(value, str):
+            try:
+                parsed = int(value)
+                return parsed if parsed >= 0 else default
+            except ValueError:
+                return default
+        return default
+
     for broker_name, cfg_path in broker_module_paths.items():
         broker_mod = load_json_config(_ROOT / cfg_path)
         adapter = broker_mod.get("adapter", broker_name)
@@ -147,14 +160,40 @@ async def bootstrap(
             bg_cfg.get("sync_interval_seconds", 60),
             60,
         )
+        candle_poll_interval = _int_at_least_one(
+            bg_cfg.get("candle_poll_interval_seconds", 30),
+            30,
+        )
+        candle_poll_lookback = _int_at_least_one(
+            bg_cfg.get("candle_poll_lookback_count", 3),
+            3,
+        )
+        agent_trigger_delay = _int_at_least_zero(
+            bg_cfg.get("agent_trigger_delay_seconds", 60),
+            60,
+        )
         request_agent_reasoning = bool(bg_cfg.get("request_agent_reasoning", False))
         broker_task_cfg[broker_name] = {
             "account_poll_interval": account_poll_interval,
             "sync_interval": sync_interval,
+            "candle_poll_interval": candle_poll_interval,
+            "candle_poll_lookback": candle_poll_lookback,
+            "agent_trigger_delay_seconds": agent_trigger_delay,
             "request_agent_reasoning": request_agent_reasoning,
         }
 
         await broker_instance.connect()
+        if monitoring_bus is not None:
+            monitoring_bus.emit(MonitoringEvent(
+                timestamp=datetime.now(UTC),
+                source_module=f"broker.{short_name}",
+                event_type=MonitoringEventType.BROKER_CONNECTED,
+                broker_name=short_name,
+                payload={
+                    "module_name": broker_name,
+                    "adapter": adapter,
+                },
+            ))
         RuntimeRegistry.register_broker(broker_name, broker_instance)
         connected_brokers[broker_name] = broker_instance
         _log.info(
@@ -164,6 +203,9 @@ async def bootstrap(
             adapter=adapter,
             account_poll_interval=account_poll_interval,
             sync_interval=sync_interval,
+            candle_poll_interval=candle_poll_interval,
+            candle_poll_lookback=candle_poll_lookback,
+            agent_trigger_delay_seconds=agent_trigger_delay,
             request_agent_reasoning=request_agent_reasoning,
         )
 
@@ -239,6 +281,8 @@ async def bootstrap(
                 repository=repository,
                 account_poll_interval=task_cfg.get("account_poll_interval", 60),
                 sync_interval=task_cfg.get("sync_interval", 60),
+                candle_poll_interval=task_cfg.get("candle_poll_interval", 30),
+                candle_poll_lookback=task_cfg.get("candle_poll_lookback", 3),
                 request_agent_reasoning=task_cfg.get("request_agent_reasoning", False),
                 monitoring_bus=monitoring_bus,
             )

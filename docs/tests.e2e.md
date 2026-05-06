@@ -35,7 +35,7 @@ pytest tests/e2e/ -v -s   # with stdout output (useful to see the full cycle)
    └── Start all tasks in asyncio.TaskGroup
 
 2. Inject M5 Candle
-   └── Publish M5_CANDLE_AVAILABLE event for EURUSD
+   └── Publish M5_CANDLE_UPDATE + M5_AGENT_TRIGGER events for EURUSD
    └── Wait for DataContainer to store candle
 
 3. Agent Cycle

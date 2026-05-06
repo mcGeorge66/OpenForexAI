@@ -6,7 +6,7 @@
     ]
   },
   "system": {
-    "version": "0.6.1",
+    "version": "0.6.2",
     //"log_level": "INFO",
 	"log_level": "${OPENFOREXAI_LOG_LEVEL:-INFO}",
     "management_api": {

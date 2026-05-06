@@ -138,7 +138,7 @@ async def test_aa_agent_publishes_analysis_on_m5_candle(
 
     # Simulate M5 candle arriving
     await event_bus.publish(AgentMessage(
-        event_type=EventType.M5_CANDLE_AVAILABLE,
+        event_type=EventType.M5_AGENT_TRIGGER,
         source_agent_id="broker:oanda",
         payload={"broker": "OAPR1", "pair": "EURUSD"}
     ))

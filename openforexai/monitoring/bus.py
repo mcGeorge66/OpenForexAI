@@ -19,7 +19,6 @@ _INFO_SUPPRESSED_EVENT_TYPES = {
     MonitoringEventType.BROKER_HTTP_RESPONSE,
     MonitoringEventType.DATA_CONTAINER_ACCESS,
     MonitoringEventType.M5_CANDLE_FETCHED,
-    MonitoringEventType.M5_CANDLE_QUEUED,
     MonitoringEventType.SYNC_CHECK_STARTED,
     MonitoringEventType.SYNC_CHECK_COMPLETED,
     MonitoringEventType.TIMEFRAME_CALCULATED,
