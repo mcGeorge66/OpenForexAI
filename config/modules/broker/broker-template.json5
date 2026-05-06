@@ -9,6 +9,9 @@
   "api_url":    "${BR_URL}",
   "practice":   true,
   "background_tasks": {
+    "candle_poll_interval_seconds": 30,
+    "candle_poll_lookback_count": 3,
+    "agent_trigger_delay_seconds": 60,
     "account_poll_interval_seconds": 60,
     "sync_interval_seconds": 60,
     "request_agent_reasoning": false

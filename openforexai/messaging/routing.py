@@ -7,7 +7,7 @@ Rule file format (``config/RunTime/event_routing.json5``)::
         {
           "id":          "unique_rule_id",
           "description": "Human-readable comment",
-          "event":       "m5_candle_available",   // EventType.value or "*"
+          "event":       "m5_candle_update",      // EventType.value or "*"
           "from":        "OANDA-*-AA-*",          // sender agent-id pattern or "*"
           "to":          "SYSTM-ALL___-GA-DATA1", // target (see below)
           "priority":    100                       // lower number = higher priority

@@ -67,7 +67,7 @@ One entry per running agent:
     "broker": "oanda",
     "pair": "EURUSD",
     "timer": {"enabled": true, "interval_seconds": 300},
-    "event_triggers": ["m5_candle_available", "prompt_updated", "agent_query"],
+    "event_triggers": ["m5_agent_trigger", "prompt_updated", "agent_query"],
     "AnyCandle": 3,
     "system_prompt": "...",
     "tool_config": {
@@ -127,6 +127,8 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
   "practice": "${OANDA_PRACTICE:-true}",
   "short_name": "${OANDA_SHORT_NAME:-OAPR1}",
   "background_tasks": {
+    "candle_poll_interval_seconds": 30,
+    "candle_poll_lookback_count": 3,
     "account_poll_interval_seconds": 60,
     "sync_interval_seconds": 60,
     "request_agent_reasoning": false
@@ -135,6 +137,8 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
 ```
 `short_name` is the 5-character identifier used in agent IDs and database table names (e.g., `OAPR1_EURUSD_M5`).
 `background_tasks` controls broker polling/sync frequency per broker module.
+`candle_poll_interval_seconds` controls how often the adapter refreshes the recent M5 window.
+`candle_poll_lookback_count` controls how many recent broker candles are inspected for changes.
 
 ### `mt5.json5`
 ```json
@@ -145,6 +149,8 @@ Each file contains connection details for one LLM provider. Values use `${ENV_VA
   "server": "${MT5_SERVER}",
   "short_name": "${MT5_SHORT_NAME:-MT5B1}",
   "background_tasks": {
+    "candle_poll_interval_seconds": 30,
+    "candle_poll_lookback_count": 3,
     "account_poll_interval_seconds": 60,
     "sync_interval_seconds": 60,
     "request_agent_reasoning": false

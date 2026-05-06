@@ -107,10 +107,11 @@ class BrokerBase(AbstractBroker):
         self._sync_task: asyncio.Task | None = None
         self._request_agent_reasoning = False
         self._running = False
-        # Last successfully emitted M5 candle timestamp per pair.
+        # Last observed trigger timestamp per pair (the second-most-recent candle).
         self._last_m5_time_by_pair: dict[str, datetime | None] = {}
         # Missing-slot retry counter per pair and candle timestamp.
         self._pending_m5_attempts_by_pair: dict[str, dict[datetime, int]] = {}
+        self._agent_trigger_tasks_by_pair: dict[str, asyncio.Task] = {}
 
     # ── Background task lifecycle ─────────────────────────────────────────────
 
@@ -121,6 +122,9 @@ class BrokerBase(AbstractBroker):
         repository,                         # AbstractRepository
         account_poll_interval: int = 60,    # seconds
         sync_interval: int = 60,            # seconds
+        candle_poll_interval: int = 30,     # seconds
+        candle_poll_lookback: int = 3,
+        agent_trigger_delay_seconds: int = 60,
         request_agent_reasoning: bool = False,
         monitoring_bus=None,
     ) -> None:
@@ -157,10 +161,29 @@ class BrokerBase(AbstractBroker):
 
         self._pair_tasks[pair] = [
             asyncio.create_task(
-                self._m5_loop(pair, event_bus),
+                self._m5_loop(
+                    pair,
+                    event_bus,
+                    poll_interval_seconds=max(1, int(candle_poll_interval)),
+                    lookback_count=max(2, int(candle_poll_lookback)),
+                    agent_trigger_delay_seconds=max(0, int(agent_trigger_delay_seconds)),
+                ),
                 name=f"{self.short_name}_{pair}_m5_loop",
             ),
         ]
+        self._emit(
+            f"broker.{self.short_name}",
+            MonitoringEventType.SYSTEM_INFO,
+            broker_name=self.short_name,
+            pair=pair,
+            action="background_tasks_started",
+            account_poll_interval=account_poll_interval,
+            sync_interval=sync_interval,
+            candle_poll_interval=max(1, int(candle_poll_interval)),
+            candle_poll_lookback=max(2, int(candle_poll_lookback)),
+            agent_trigger_delay_seconds=max(0, int(agent_trigger_delay_seconds)),
+            request_agent_reasoning=self._request_agent_reasoning,
+        )
 
     def stop_background_tasks(self) -> None:
         self._running = False
@@ -174,94 +197,107 @@ class BrokerBase(AbstractBroker):
             for task in tasks:
                 task.cancel()
         self._pair_tasks.clear()
+        for task in self._agent_trigger_tasks_by_pair.values():
+            task.cancel()
+        self._agent_trigger_tasks_by_pair.clear()
         self._pairs.clear()
         self._pending_m5_attempts_by_pair.clear()
 
     # ── M5 streaming loop ─────────────────────────────────────────────────────
 
-    async def _m5_loop(self, pair: str, event_bus) -> None:
-        """Wait for the next M5 boundary, fetch the candle, publish events.
+    async def _m5_loop(
+        self,
+        pair: str,
+        event_bus,
+        *,
+        poll_interval_seconds: int = 30,
+        lookback_count: int = 3,
+        agent_trigger_delay_seconds: int = 60,
+    ) -> None:
+        """Poll recent M5 candles and publish when a completed candle changes.
 
         One adapter = one pair.
         """
         source = f"broker.{self.short_name}"
         source_agent_id = _adapter_agent_id(self.short_name, pair)
+        first_run = True
         while self._running:
             try:
                 await runtime_control.wait_until_resumed()
-                await self._sleep_until_next_m5()
-                await runtime_control.wait_until_resumed()
+                if not first_run:
+                    await asyncio.sleep(poll_interval_seconds)
+                    await runtime_control.wait_until_resumed()
+                first_run = False
                 try:
                     expected_open = self._expected_latest_m5_open()
                     last_m5 = self._last_m5_time_by_pair.get(pair)
-                    recent_candles = await self.get_historical_m5_candles(pair, count=24)
-                    recent_by_ts = {c.timestamp: c for c in recent_candles if c.timestamp <= expected_open}
+                    fetch_count = max(lookback_count, 24)
+                    recent_candles = await self.get_historical_m5_candles(pair, count=fetch_count)
+                    recent_window = self._select_recent_m5_window(
+                        recent_candles,
+                        expected_open=expected_open,
+                        window_size=lookback_count,
+                    )
+                    if len(recent_window) < 2:
+                        continue
+                    trigger_candle = recent_window[-2]
+                    building_candle = recent_window[-1]
                     pending_attempts = self._pending_m5_attempts_by_pair.setdefault(pair, {})
+                    if last_m5 is not None:
+                        expected = last_m5 + timedelta(minutes=5)
+                        if trigger_candle.timestamp > expected + timedelta(seconds=30):
+                            gap_candles = int((trigger_candle.timestamp - expected).total_seconds() / 300)
+                            _log.warning(
+                                "M5 gap detected broker=%s pair=%s missing=%d",
+                                self.short_name, pair, gap_candles,
+                            )
+                            self._emit(
+                                source, MonitoringEventType.CANDLE_GAP_DETECTED,
+                                broker_name=self.short_name, pair=pair,
+                                expected=expected.isoformat(),
+                                got=trigger_candle.timestamp.isoformat(),
+                                missing_candles=gap_candles,
+                            )
+                            await event_bus.publish(AgentMessage(
+                                event_type=EventType.CANDLE_GAP_DETECTED,
+                                source_agent_id=source_agent_id,
+                                payload={
+                                    "broker_name": self.short_name,
+                                    "pair": pair,
+                                    "expected_timestamp": expected.isoformat(),
+                                    "received_timestamp": trigger_candle.timestamp.isoformat(),
+                                    "missing_candles": gap_candles,
+                                },
+                            ))
 
-                    # Refresh the last 3 completed broker candles on every cycle so
-                    # provisional OHLC values get overwritten with the final MT5 values.
-                    recent_completed = sorted(ts for ts in recent_by_ts if ts <= expected_open)
-                    for refresh_ts in recent_completed[-3:-1]:
-                        refresh_candle = recent_by_ts.get(refresh_ts)
-                        if refresh_candle is None:
-                            continue
-                        await self._publish_m5_candle(
-                            pair=pair,
-                            candle=refresh_candle,
-                            event_bus=event_bus,
-                            source=source,
-                            source_agent_id=source_agent_id,
-                            refresh_only=True,
-                        )
-
-                    if last_m5 is None and recent_by_ts:
-                        newest_available = max(recent_by_ts)
-                        self._last_m5_time_by_pair[pair] = newest_available
-                        pending_attempts.clear()
+                    if last_m5 is not None and trigger_candle.timestamp <= last_m5:
                         continue
 
-                    if last_m5 is None:
-                        continue
+                    self._last_m5_time_by_pair[pair] = trigger_candle.timestamp
+                    pending_attempts.clear()
 
-                    candidate_ts = last_m5 + timedelta(minutes=5)
-                    missing_slots: list[datetime] = []
-                    while candidate_ts <= expected_open:
-                        if candidate_ts not in recent_by_ts:
-                            pending_attempts[candidate_ts] = pending_attempts.get(candidate_ts, 0) + 1
-                            missing_slots.append(candidate_ts)
-                        candidate_ts += timedelta(minutes=5)
-
-                    if missing_slots:
-                        _log.debug(
-                            "M5 slots pending broker confirmation",
-                            extra={
-                                "broker": self.short_name,
-                                "pair": pair,
-                                "slots": [ts.isoformat() for ts in missing_slots],
-                                "attempts": {ts.isoformat(): pending_attempts.get(ts, 0) for ts in missing_slots},
-                            },
-                        )
-
-                    candidate_ts = last_m5 + timedelta(minutes=5)
-                    while candidate_ts <= expected_open:
-                        candle = recent_by_ts.get(candidate_ts)
-                        if candle is None:
-                            attempts = pending_attempts.get(candidate_ts, 0)
-                            if attempts < 3:
-                                break
-                            candle = self._build_null_m5_candle(candidate_ts)
-                            pending_attempts.pop(candidate_ts, None)
-                        else:
-                            pending_attempts.pop(candidate_ts, None)
-
-                        await self._publish_m5_candle(
+                    for candle in recent_window[:-1]:
+                        await self._publish_m5_candle_update(
                             pair=pair,
                             candle=candle,
                             event_bus=event_bus,
                             source=source,
                             source_agent_id=source_agent_id,
                         )
-                        candidate_ts += timedelta(minutes=5)
+
+                    if last_m5 is None:
+                        continue
+
+                    self._schedule_agent_trigger(
+                        pair=pair,
+                        building_candle=building_candle,
+                        event_bus=event_bus,
+                        source=source,
+                        source_agent_id=source_agent_id,
+                        expected_open=expected_open,
+                        lookback_count=lookback_count,
+                        delay_seconds=agent_trigger_delay_seconds,
+                    )
 
                 except Exception as exc:
                     # Transient server/network errors (502/503/504, connection
@@ -587,7 +623,92 @@ class BrokerBase(AbstractBroker):
 
         return found
 
-    async def _publish_m5_candle(
+    def _schedule_agent_trigger(
+        self,
+        *,
+        pair: str,
+        building_candle: Candle,
+        event_bus,
+        source: str,
+        source_agent_id: str,
+        expected_open: datetime,
+        lookback_count: int,
+        delay_seconds: int,
+    ) -> None:
+        existing = self._agent_trigger_tasks_by_pair.get(pair)
+        if existing is not None and not existing.done():
+            existing.cancel()
+        task = asyncio.create_task(
+            self._delayed_agent_trigger(
+                pair=pair,
+                initial_building_candle=building_candle,
+                event_bus=event_bus,
+                source=source,
+                source_agent_id=source_agent_id,
+                expected_open=expected_open,
+                lookback_count=lookback_count,
+                delay_seconds=delay_seconds,
+            ),
+            name=f"{self.short_name}_{pair}_agent_trigger",
+        )
+        self._agent_trigger_tasks_by_pair[pair] = task
+
+    async def _delayed_agent_trigger(
+        self,
+        *,
+        pair: str,
+        initial_building_candle: Candle,
+        event_bus,
+        source: str,
+        source_agent_id: str,
+        expected_open: datetime,
+        lookback_count: int,
+        delay_seconds: int,
+    ) -> None:
+        try:
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+                await runtime_control.wait_until_resumed()
+
+            building_candle = initial_building_candle
+            try:
+                fetch_count = max(lookback_count, 24)
+                refreshed = await self.get_historical_m5_candles(pair, count=fetch_count)
+                refreshed_window = self._select_recent_m5_window(
+                    refreshed,
+                    expected_open=expected_open,
+                    window_size=lookback_count,
+                )
+                if refreshed_window:
+                    building_candle = refreshed_window[-1]
+            except Exception as exc:
+                _log.warning(
+                    "Delayed M5 trigger refresh failed broker=%s pair=%s: %s",
+                    self.short_name, pair, exc,
+                )
+
+            await self._publish_m5_candle_update(
+                pair=pair,
+                candle=building_candle,
+                event_bus=event_bus,
+                source=source,
+                source_agent_id=source_agent_id,
+            )
+            await self._publish_m5_agent_trigger(
+                pair=pair,
+                candle=building_candle,
+                event_bus=event_bus,
+                source=source,
+                source_agent_id=source_agent_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            task = self._agent_trigger_tasks_by_pair.get(pair)
+            if task is asyncio.current_task():
+                self._agent_trigger_tasks_by_pair.pop(pair, None)
+
+    async def _publish_m5_candle_update(
         self,
         *,
         pair: str,
@@ -595,7 +716,6 @@ class BrokerBase(AbstractBroker):
         event_bus,
         source: str,
         source_agent_id: str,
-        refresh_only: bool = False,
     ) -> None:
         self._emit(
             source, MonitoringEventType.M5_CANDLE_FETCHED,
@@ -608,78 +728,49 @@ class BrokerBase(AbstractBroker):
             spread=str(candle.spread),
             tick_volume=candle.tick_volume,
             is_null_candle=self._is_null_candle(candle),
-            refresh_only=refresh_only,
         )
-
-        if not refresh_only:
-            last_ts = self._last_m5_time_by_pair.get(pair)
-            if last_ts is not None:
-                expected = last_ts + timedelta(minutes=5)
-                if candle.timestamp > expected + timedelta(seconds=30):
-                    gap_candles = int((candle.timestamp - expected).total_seconds() / 300)
-                    _log.warning(
-                        "M5 gap detected broker=%s pair=%s missing=%d",
-                        self.short_name, pair, gap_candles,
-                    )
-                    self._emit(
-                        source, MonitoringEventType.CANDLE_GAP_DETECTED,
-                        broker_name=self.short_name, pair=pair,
-                        expected=expected.isoformat(),
-                        got=candle.timestamp.isoformat(),
-                        missing_candles=gap_candles,
-                    )
-                    await event_bus.publish(AgentMessage(
-                        event_type=EventType.CANDLE_GAP_DETECTED,
-                        source_agent_id=source_agent_id,
-                        payload={
-                            "broker_name": self.short_name,
-                            "pair": pair,
-                            "expected_timestamp": expected.isoformat(),
-                            "received_timestamp": candle.timestamp.isoformat(),
-                            "missing_candles": gap_candles,
-                        },
-                    ))
-
-            self._last_m5_time_by_pair[pair] = candle.timestamp
-
         await event_bus.publish(AgentMessage(
-            event_type=EventType.M5_CANDLE_AVAILABLE,
+            event_type=EventType.M5_CANDLE_UPDATE,
             source_agent_id=source_agent_id,
             payload={
                 "broker_name": self.short_name,
                 "pair": pair,
                 "candle": candle.model_dump(mode="json"),
                 "is_null_candle": self._is_null_candle(candle),
-                "refresh_only": refresh_only,
             },
         ))
         self._emit(
             source, MonitoringEventType.M5_CANDLE_QUEUED,
             broker_name=self.short_name, pair=pair,
             timestamp=candle.timestamp.isoformat(),
-            refresh_only=refresh_only,
+            routed_event=EventType.M5_CANDLE_UPDATE.value,
         )
 
-    # ── M5 time boundary helper ───────────────────────────────────────────────
-
-    @staticmethod
-    async def _sleep_until_next_m5() -> None:
-        """Sleep until 10 seconds after the next M5 candle close boundary.
-
-        M5 candles close at :00, :05, :10, ... past the hour.
-        The 10-second buffer gives the broker time to finalise the bar.
-        """
-        now = datetime.now(UTC)
-        # Minutes since epoch
-        total_minutes = int(now.timestamp() / 60)
-        # Next 5-minute boundary (in minutes since epoch)
-        next_boundary_minutes = ((total_minutes // 5) + 1) * 5
-        next_boundary = datetime.fromtimestamp(next_boundary_minutes * 60, tz=UTC)
-        # Add 10-second buffer
-        target = next_boundary + timedelta(seconds=10)
-        wait = (target - datetime.now(UTC)).total_seconds()
-        if wait > 0:
-            await asyncio.sleep(wait)
+    async def _publish_m5_agent_trigger(
+        self,
+        *,
+        pair: str,
+        candle: Candle,
+        event_bus,
+        source: str,
+        source_agent_id: str,
+    ) -> None:
+        await event_bus.publish(AgentMessage(
+            event_type=EventType.M5_AGENT_TRIGGER,
+            source_agent_id=source_agent_id,
+            payload={
+                "broker_name": self.short_name,
+                "pair": pair,
+                "candle": candle.model_dump(mode="json"),
+                "is_null_candle": self._is_null_candle(candle),
+            },
+        ))
+        self._emit(
+            source, MonitoringEventType.M5_CANDLE_QUEUED,
+            broker_name=self.short_name, pair=pair,
+            timestamp=candle.timestamp.isoformat(),
+            routed_event=EventType.M5_AGENT_TRIGGER.value,
+        )
 
     @staticmethod
     def _expected_latest_m5_open(now: datetime | None = None) -> datetime:
@@ -688,6 +779,22 @@ class BrokerBase(AbstractBroker):
         slot_minute = dt.minute - (dt.minute % 5)
         boundary = dt.replace(minute=slot_minute, second=0, microsecond=0)
         return boundary - timedelta(minutes=5)
+
+    @staticmethod
+    def _select_recent_m5_window(
+        candles: list[Candle],
+        *,
+        expected_open: datetime,
+        window_size: int,
+    ) -> list[Candle]:
+        if not candles:
+            return []
+        ordered = sorted(candles, key=lambda candle: candle.timestamp)
+        latest = ordered[-1]
+        if latest.timestamp <= expected_open:
+            completed = [c for c in ordered if c.timestamp <= expected_open]
+            return completed[-window_size:]
+        return ordered[-window_size:]
 
     @staticmethod
     def _build_null_m5_candle(ts: datetime) -> Candle:

@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 class EventType(StrEnum):
     # ── Market data / candle pipeline ─────────────────────────────────────────
-    M5_CANDLE_AVAILABLE = "m5_candle_available"     # broker adapter → event bus
+    M5_CANDLE_UPDATE = "m5_candle_update"           # broker adapter → DB/chart consumers
+    M5_AGENT_TRIGGER = "m5_agent_trigger"           # broker adapter → matching AA agents
+    M5_TRIGGER_COUNTER = "m5_trigger_counter"       # agent emits counter info for monitoring
     CANDLE_GAP_DETECTED = "candle_gap_detected"     # adapter signals a gap in M5 sequence
     CANDLE_REPAIR_REQUESTED = "candle_repair_requested"  # data container → broker
     CANDLE_REPAIR_COMPLETED = "candle_repair_completed"  # data container broadcasts

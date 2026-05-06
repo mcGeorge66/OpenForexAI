@@ -70,7 +70,7 @@ If runtime control is paused, normal trigger events are skipped.
 
 ### 3. `AnyCandle` filter
 
-For `m5_candle_available`, the agent can skip most events and only run every Nth candle.
+For `m5_agent_trigger`, the agent can skip most events and only run every Nth candle.
 
 This is controlled by:
 - `AnyCandle = 1` -> every candle

@@ -66,7 +66,7 @@ spread       TEXT
 
 **When populated:**
 - Initial at system startup: `BrokerBase` loads historical M5 candles via bulk insert (`save_candles_bulk`)
-- Continuously every 5 minutes: broker adapter publishes `m5_candle_available`; `DataContainer` persists via `save_candle`
+- Continuously every 5 minutes: broker adapter publishes `m5_candle_update`; `DataContainer` persists via `save_candle`
 
 **Writer:** `BrokerBase` → `SQLiteRepository.save_candle / save_candles_bulk`
 

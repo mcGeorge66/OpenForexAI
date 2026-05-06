@@ -26,7 +26,7 @@ The single source of truth for all market data in the running system.
 
 ```
 Broker adapter
-    │  M5_CANDLE_AVAILABLE event
+    │  M5_CANDLE_UPDATE event
     ▼
 DataContainer._on_m5_candle()
     │  INSERT OR REPLACE into DB
@@ -52,8 +52,8 @@ All candle data lives in the database.
 ### Candle Deduplication
 
 Two layers prevent duplicate candles:
-1. **In-memory**: `_last_ts` — if the incoming timestamp ≤ last known, discard
-2. **Database**: `INSERT OR REPLACE` — silently replaces any duplicate (same primary key)
+1. **In-memory**: `_last_ts` tracks the newest seen timestamp per series
+2. **Database**: `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` overwrites duplicate timestamps with fresher OHLC values
 
 ### Backfill on Startup
 

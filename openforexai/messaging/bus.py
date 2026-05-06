@@ -68,7 +68,7 @@ class EventBus:
         queue = bus.register_agent("OANDA-EURUSD-AA-TRD1")
 
         # Legacy handler subscribe (backward compat)
-        bus.subscribe(EventType.M5_CANDLE_AVAILABLE, data_container._on_m5_candle)
+        bus.subscribe(EventType.M5_CANDLE_UPDATE, data_container._on_m5_candle)
 
         # Start dispatch (one long-running task)
         asyncio.create_task(bus.start_dispatch_loop())

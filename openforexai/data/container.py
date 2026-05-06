@@ -56,7 +56,7 @@ class DataContainer:
     * One ``DataContainer`` instance serves the whole system.
     * Each broker registers its pairs via ``register_broker()``.
     * Data is keyed by ``(broker_name, pair)`` throughout.
-    * M5 candles arrive via ``EventType.M5_CANDLE_AVAILABLE`` on the EventBus.
+    * M5 candles arrive via ``EventType.M5_CANDLE_UPDATE`` on the EventBus.
       Each candle is written **directly** to the ``AbstractDataContainer`` (DB)
       — there is no in-memory rolling window.  A power outage cannot cause data
       loss.
@@ -126,7 +126,7 @@ class DataContainer:
 
     def subscribe_to_bus(self) -> None:
         """Wire EventBus subscriptions.  Call once after ``register_broker()``."""
-        self._event_bus.subscribe(EventType.M5_CANDLE_AVAILABLE,    self._on_m5_candle)
+        self._event_bus.subscribe(EventType.M5_CANDLE_UPDATE,       self._on_m5_candle)
         self._event_bus.subscribe(EventType.CANDLE_GAP_DETECTED,    self._on_gap_detected)
         self._event_bus.subscribe(EventType.CANDLE_REPAIR_REQUESTED, self._on_repair_requested)
 
@@ -205,7 +205,6 @@ class DataContainer:
         broker_name = payload.get("broker_name", "")
         pair = payload.get("pair", "")
         candle_data = payload.get("candle", {})
-        refresh_only = bool(payload.get("refresh_only", False))
 
         key = (broker_name, pair)
         if key not in self._registered:
@@ -221,13 +220,9 @@ class DataContainer:
             return
 
         async with lock:
-            # Cheap dedup using the cached last timestamp — no extra DB call
-            last_ts = self._last_ts.get(key)
-            if not refresh_only and last_ts is not None and candle.timestamp <= last_ts:
-                return  # already stored or stale
-
             await self._store.save_candle(broker_name, pair, candle)
-            if not refresh_only:
+            last_ts = self._last_ts.get(key)
+            if last_ts is None or candle.timestamp > last_ts:
                 self._last_ts[key] = candle.timestamp
 
         self._emit(
@@ -237,7 +232,6 @@ class DataContainer:
             pair=pair,
             timeframe="M5",
             timestamp=candle.timestamp.isoformat(),
-            refresh_only=refresh_only,
         )
 
     async def _on_gap_detected(self, message: AgentMessage) -> None:
@@ -378,10 +372,13 @@ class DataContainer:
         if required_m5_count <= 0:
             return []
 
+        latest_completed = self._latest_completed_m5_open()
         if existing_newest_first:
-            end_ts = max(c.timestamp for c in existing_newest_first)
+            latest_existing = max(c.timestamp for c in existing_newest_first)
+            # A contiguous but stale DB window must still be refreshed from the broker.
+            end_ts = max(latest_existing, latest_completed)
         else:
-            end_ts = self._latest_completed_m5_open()
+            end_ts = latest_completed
         start_ts = end_ts - _M5_STEP * (required_m5_count - 1)
 
         existing_set = {c.timestamp for c in existing_newest_first}
@@ -432,45 +429,88 @@ class DataContainer:
                 )
                 return
 
-            # Add a small buffer to reduce repeated top-up calls for near-edge reads.
-            fetch_count = max(required_m5_count + 24, _GAP_CHECK_COUNT)
-            fresh = await broker.get_historical_m5_candles(pair, fetch_count)
-            if fresh:
-                await self._store.save_candles_bulk(broker_name, pair, fresh)
-                newest = fresh[-1].timestamp
-                current_last = self._last_ts.get(key)
-                if current_last is None or newest > current_last:
-                    self._last_ts[key] = newest
-
-            # Re-check and fill residual gaps with synthetic null candles.
-            refreshed = await self._store.get_candles(
-                broker_name, pair, "M5", limit=required_m5_count
-            )
-            if not refreshed:
-                _log.warning(
-                    "Cannot synthesize missing M5 bars: no source candles",
-                    broker=broker_name,
-                    pair=pair,
-                )
-                return
-            missing_after_fetch = self._missing_slots_in_recent_window(refreshed, required_m5_count)
-            if missing_after_fetch:
-                nulls = [self._build_null_m5_candle(ts) for ts in missing_after_fetch]
-                await self._store.save_candles_bulk(broker_name, pair, nulls)
-                newest_null = missing_after_fetch[-1]
-                current_last = self._last_ts.get(key)
-                if current_last is None or newest_null > current_last:
-                    self._last_ts[key] = newest_null
-
-            _log.info(
-                "Back-filled missing M5 for read",
-                broker=broker_name,
+            self._emit(
+                "data_container",
+                MonitoringEventType.CANDLE_REPAIR_STARTED,
+                broker_name=broker_name,
                 pair=pair,
+                reason="read_refresh",
                 requested=required_m5_count,
                 missing=len(missing_before),
-                fetched=len(fresh),
-                synthesized_nulls=len(missing_after_fetch),
+                first_missing=missing_before[0].isoformat() if missing_before else None,
+                last_missing=missing_before[-1].isoformat() if missing_before else None,
             )
+
+            # Add a small buffer to reduce repeated top-up calls for near-edge reads.
+            fetch_count = max(required_m5_count + 24, _GAP_CHECK_COUNT)
+            try:
+                fresh = await broker.get_historical_m5_candles(pair, fetch_count)
+                if fresh:
+                    await self._store.save_candles_bulk(broker_name, pair, fresh)
+                    newest = fresh[-1].timestamp
+                    current_last = self._last_ts.get(key)
+                    if current_last is None or newest > current_last:
+                        self._last_ts[key] = newest
+
+                # Re-check and fill residual gaps with synthetic null candles.
+                refreshed = await self._store.get_candles(
+                    broker_name, pair, "M5", limit=required_m5_count
+                )
+                if not refreshed:
+                    _log.warning(
+                        "Cannot synthesize missing M5 bars: no source candles",
+                        broker=broker_name,
+                        pair=pair,
+                    )
+                    self._emit(
+                        "data_container",
+                        MonitoringEventType.CANDLE_REPAIR_FAILED,
+                        broker_name=broker_name,
+                        pair=pair,
+                        reason="read_refresh",
+                        error="No source candles after broker fetch",
+                    )
+                    return
+                missing_after_fetch = self._missing_slots_in_recent_window(refreshed, required_m5_count)
+                if missing_after_fetch:
+                    nulls = [self._build_null_m5_candle(ts) for ts in missing_after_fetch]
+                    await self._store.save_candles_bulk(broker_name, pair, nulls)
+                    newest_null = missing_after_fetch[-1]
+                    current_last = self._last_ts.get(key)
+                    if current_last is None or newest_null > current_last:
+                        self._last_ts[key] = newest_null
+
+                self._emit(
+                    "data_container",
+                    MonitoringEventType.CANDLE_REPAIR_COMPLETED,
+                    broker_name=broker_name,
+                    pair=pair,
+                    reason="read_refresh",
+                    requested=required_m5_count,
+                    missing=len(missing_before),
+                    fetched=len(fresh),
+                    synthesized_nulls=len(missing_after_fetch),
+                    latest_fetched=fresh[-1].timestamp.isoformat() if fresh else None,
+                )
+                _log.info(
+                    "Back-filled missing M5 for read",
+                    broker=broker_name,
+                    pair=pair,
+                    requested=required_m5_count,
+                    missing=len(missing_before),
+                    fetched=len(fresh),
+                    synthesized_nulls=len(missing_after_fetch),
+                )
+            except Exception as exc:
+                self._emit(
+                    "data_container",
+                    MonitoringEventType.CANDLE_REPAIR_FAILED,
+                    broker_name=broker_name,
+                    pair=pair,
+                    reason="read_refresh",
+                    error=str(exc),
+                )
+                raise
 
     async def get_candles(
         self,

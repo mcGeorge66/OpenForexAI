@@ -109,7 +109,7 @@ All broker adapters implement `AbstractBroker` from `ports/broker.py`.
 ### `base.py` — BrokerBase
 
 Shared base class providing:
-- **`_m5_loop()`** — Background asyncio task: fetches M5 candles every 5 minutes, publishes `M5_CANDLE_AVAILABLE` events to the EventBus. Transient errors (502/503/504) are logged as `WARNING` without traceback.
+- **`_m5_loop()`** — Background asyncio task: polls recent M5 candles, publishes `M5_CANDLE_UPDATE` events for DB/chart state and delayed `M5_AGENT_TRIGGER` events for AA wakeups. Transient errors (502/503/504) are logged as `WARNING` without traceback.
 - **`_account_poll_loop()`** — Background asyncio task: polls account status periodically, publishes `ACCOUNT_STATUS_UPDATED` events.
 - Candle normalisation helpers (OHLCV → `Candle` model)
 

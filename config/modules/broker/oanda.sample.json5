@@ -8,6 +8,8 @@
   "account_id": "${OA_ACCOUNT_ID}",
   "practice":   "${OA_PRACTICE:-true}",
   "background_tasks": {
+    "candle_poll_interval_seconds": 30,
+    "candle_poll_lookback_count": 3,
     "account_poll_interval_seconds": 60,
     "sync_interval_seconds": 60,
     "request_agent_reasoning": false

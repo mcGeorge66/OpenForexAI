@@ -18,8 +18,8 @@ import {
 type StatusFilter = 'all' | 'open' | 'closed' | 'pending' | 'partially_filled' | 'rejected' | 'cancelled'
 type ChartTimeframe = 'M5' | 'M15' | 'M30' | 'H1'
 
-function formatTs(value?: string | null): string {
-  if (!value) return 'running'
+function formatTs(value?: string | null, fallback = '-'): string {
+  if (!value) return fallback
   return value.replace('T', ' ').replace('+00:00', ' UTC')
 }
 
@@ -41,6 +41,27 @@ function getTradeStartAt(
 
 function getTradeEndAt(entry: Pick<OrderbookEntrySummary, 'closed_at'> | null | undefined): string | null {
   return entry?.closed_at ?? null
+}
+
+function getTradeEndDisplay(
+  entry: Pick<OrderbookEntrySummary, 'status' | 'requested_at' | 'opened_at' | 'closed_at'> | null | undefined,
+): string | null {
+  if (!entry) return null
+  if (entry.closed_at) return entry.closed_at
+  if (entry.status === 'REJECTED' || entry.status === 'CANCELLED') {
+    return getTradeStartAt(entry)
+  }
+  return null
+}
+
+function getCloseDisplay(
+  entry: Pick<OrderbookEntrySummary, 'status' | 'close_reason'> | null | undefined,
+): string {
+  if (!entry) return '-'
+  if (entry.close_reason) return entry.close_reason
+  if (entry.status === 'REJECTED' || entry.status === 'CANCELLED') return entry.status
+  if (entry.status === 'CLOSED') return 'closed'
+  return 'running'
 }
 
 function findMarkerTimestamp(
@@ -335,8 +356,8 @@ export function Orderbook() {
       <div class="card">
         <h2>Timing</h2>
         <div class="row"><div class="label">From</div><div class="value">${formatTs(getTradeStartAt(selectedEntry))}</div></div>
-        <div class="row"><div class="label">To</div><div class="value">${formatTs(getTradeEndAt(selectedEntry))}</div></div>
-        <div class="row"><div class="label">Close</div><div class="value">${selectedEntry.close_reason ?? 'running'}</div></div>
+        <div class="row"><div class="label">To</div><div class="value">${formatTs(getTradeEndDisplay(selectedEntry))}</div></div>
+        <div class="row"><div class="label">Close</div><div class="value">${getCloseDisplay(selectedEntry)}</div></div>
       </div>
       <div class="card">
         <h2>Execution</h2>
@@ -449,7 +470,7 @@ export function Orderbook() {
                       <div className="text-xs text-gray-500">{entry.direction} · {entry.status}</div>
                     </td>
                     <td className="px-3 py-2 text-gray-300">{formatTs(getTradeStartAt(entry))}</td>
-                    <td className="px-3 py-2 text-gray-300">{formatTs(getTradeEndAt(entry))}</td>
+                    <td className="px-3 py-2 text-gray-300">{formatTs(getTradeEndDisplay(entry))}</td>
                     <td className="px-3 py-2 text-right text-gray-200">{entry.units.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right text-gray-200">{formatMoney(entry.stake_estimate)}</td>
                     <td className={[
@@ -459,7 +480,7 @@ export function Orderbook() {
                       {formatMoney(entry.pnl_account_currency)}
                     </td>
                     <td className="px-3 py-2 text-gray-300">
-                      <div>{entry.close_reason ?? 'running'}</div>
+                      <div>{getCloseDisplay(entry)}</div>
                       <div className="text-xs text-gray-500 truncate max-w-[260px]">
                         {entry.close_reasoning || entry.status}
                       </div>
