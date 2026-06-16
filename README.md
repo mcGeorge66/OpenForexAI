@@ -1,10 +1,15 @@
 OpenForexAI
 ===========
 
-**Autonomous multi-agent LLM and rule based Forex Trading Framework**
+**Autonomous Multi-Agent LLM and Rule-Based Forex Trading Framework**
 
-OpenForexAI uses configurable AI agents for market analysis, risk-aware trade
-execution, and strategy optimization.
+OpenForexAI can utilize configurable AI agents for market analysis, risk-aware trade execution, and strategy optimization. Furthermore, fully script-based trading or trading in combination with LLM is possible (and advisable, as LLMs can hallucinate). The LLM prompts can be static, but don't have to be, as a "Decision Prompt" module can supplement or replace them based on rules.
+
+The entire framework is built with open interfaces to the broker and the LLM, enabling easy integration of additional providers.
+
+The current version (under development) uses the MetaTrader 5 Python library and a GPT LLM.
+
+Integration with the Oanda API has also been tested, but will be fully developed at a later date if demand arises. Integration with other LLM providers is also already prepared.
 
 ![Dashboard](image/Dashboard.jpg)
 
