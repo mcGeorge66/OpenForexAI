@@ -1,0 +1,16 @@
+{
+  // OANDA broker module configuration
+  // This file is managed by the module owner. The system only loads it by name.
+  "adapter":    "oanda",
+  "short_name": "OAPR1",
+  "api_url":    "${OAPR1_API_URL}",
+  "api_key":    "${OAPR1_API_KEY}",
+  "account_id": "${OAPR1_ACCOUNT_ID}",
+  "practice":   true,
+  "background_tasks": {
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
+}
+

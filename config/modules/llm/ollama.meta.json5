@@ -1,0 +1,5 @@
+{
+  display_name: "Ollama (Local)",
+  description: "Local Ollama runtime via OpenAI-compatible API endpoint.",
+  notes: "Start Ollama server first. Typical base URL is http://127.0.0.1:11434/v1."
+}

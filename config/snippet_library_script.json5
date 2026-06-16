@@ -1,0 +1,81 @@
+{
+  "snippets": [
+    {
+      "id": "snip_transform_normalize",
+      "name": "Normalize candles",
+      "version": "1",
+      "description": "Transform script — normalize get_candles output with the timeframe-aware helper. Standard usage for all candle tool blocks.",
+      "code": "result = normalize_candle_tool_output(tool_output, timeframe=tool_input.get(\"timeframe\"))\n"
+    },
+    {
+      "id": "snip_transform_passthrough",
+      "name": "Pass-through",
+      "version": "1",
+      "description": "Transform script — forward raw tool output unchanged. Use when the tool output already has the required structure.",
+      "code": "result = tool_output"
+    },
+    {
+      "id": "snip_transform_slice",
+      "name": "Slice last N candles",
+      "version": "1",
+      "description": "Transform script — trim candle list to the last 20 entries. Adjust the number as needed.",
+      "code": "# Trim candle list to the last N entries to limit payload size.\n# Non-list outputs (e.g. error dicts) are forwarded as-is.\nresult = tool_output[-20:] if isinstance(tool_output, list) else tool_output\n"
+    },
+    {
+      "id": "snip_transform_indicator",
+      "name": "Build indicator output",
+      "version": "1",
+      "description": "Transform script — normalize calculate_indicator output using the standard indicator helper.",
+      "code": "result = build_indicator_tool_output(tool_output, tool_input=tool_input)"
+    },
+    {
+      "id": "snip_calc_tool_outputs",
+      "name": "Access tool outputs",
+      "version": "1",
+      "description": "Calculation script — access transformed tool block outputs via the tool_outputs dict and build a result dict.",
+      "code": "# All transformed tool block outputs are available via tool_outputs dict.\ncandles = tool_outputs.get(\"m5_recent\") or []\nindicator = tool_outputs.get(\"rsi_primary\") or {}\n\nresult = {\n    \"candle_count\": len(candles),\n    \"rsi_latest\": indicator.get(\"latest\"),\n    \"custom_flag\": True,\n}"
+    },
+    {
+      "id": "snip_calc_iterate_candles",
+      "name": "Iterate candles",
+      "version": "1",
+      "description": "Calculation script — iterate a candle list and extract high values. Useful as a starting point for custom calculations.",
+      "code": "candles = tool_outputs.get(\"m5_recent\") or []\nhighs = [c[\"high\"] for c in candles if isinstance(c, dict) and \"high\" in c]\nresult = {\n    \"max_high\": max(highs) if highs else None,\n    \"candle_count\": len(candles),\n}"
+    },
+    {
+      "id": "snip_calc_indicator_latest",
+      "name": "Read indicator latest",
+      "version": "1",
+      "description": "Calculation script — read the latest value and direction from a pre-processed indicator tool block output.",
+      "code": "ind = tool_outputs.get(\"ema_fast\") or {}\nresult = {\n    \"ema_latest\": ind.get(\"latest\"),\n    \"ema_direction\": ind.get(\"direction\"),\n}"
+    },
+    {
+      "id": "snip_assembly_result_dict",
+      "name": "Build result dict",
+      "version": "1",
+      "description": "Assembly script — build the final snapshot result with core metadata fields.",
+      "code": "result = {\n    \"symbol\":                  snapshot.get(\"symbol\"),\n    \"timestamp_utc\":           snapshot.get(\"timestamp_utc\"),\n    \"strategy_aggressiveness\": snapshot.get(\"strategy_aggressiveness\"),\n    \"price\":                   snapshot.get(\"latest_price\"),\n    \"trigger_candle\":          snapshot.get(\"trigger_candle\"),\n}"
+    },
+    {
+      "id": "snip_assembly_include_calcs",
+      "name": "Include calculations",
+      "version": "1",
+      "description": "Assembly script — include calculation block results (trend, RSI state, entry gates) from snapshot.calculations.",
+      "code": "calcs = snapshot.get(\"calculations\") or {}\nglobal_calcs = calcs.get(\"global\") or {}\n\nresult = {\n    \"symbol\":      snapshot.get(\"symbol\"),\n    \"price\":       snapshot.get(\"latest_price\"),\n    \"trend\":       global_calcs.get(\"trend\"),\n    \"rsi_state\":   global_calcs.get(\"rsi_state\"),\n    \"entry_gates\": global_calcs.get(\"entry_gates\"),\n}"
+    },
+    {
+      "id": "snip_assembly_trigger_candle",
+      "name": "Include trigger candle",
+      "version": "1",
+      "description": "Assembly script — add the trigger candle to an already-built result dict.",
+      "code": "result[\"trigger_candle\"] = snapshot.get(\"trigger_candle\")"
+    },
+    {
+      "id": "snip_assembly_cancel",
+      "name": "Cancel cycle",
+      "version": "1",
+      "description": "Assembly script — abort the snapshot cycle (e.g. outside trading hours). Set cancel_reason to explain why.",
+      "code": "# Set cancel = True to abort this snapshot cycle.\ncancel = True\ncancel_reason = \"Condition not met\""
+    }
+  ]
+}

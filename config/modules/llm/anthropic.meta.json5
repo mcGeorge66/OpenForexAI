@@ -1,0 +1,5 @@
+{
+  display_name: "Anthropic Claude",
+  description: "Anthropic-hosted Claude models via API key.",
+  notes: "Use one config per model profile, for example anthropic-reasoning or anthropic-fast."
+}

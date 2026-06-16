@@ -1,0 +1,156 @@
+{
+  "snippets": [
+    {
+      "id": "ec_tool_get_candles",
+      "name": "get_candles",
+      "version": "1",
+      "description": "Fetch OHLCV candles for a pair and timeframe.",
+      "code": "async def main(input, config, tools):\n    # Fetch candle data for a pair and timeframe.\n    # timeframe: M5 | M15 | M30 | H1 | H4 | D1\n    # count: number of candles to return (1–500, default 50)\n    candles = await tools.call(\n        'get_candles',\n        pair='EURUSD',\n        timeframe='M5',\n        count=50,\n    )\n    # Returns a list of dicts:\n    # { timestamp, open, high, low, close, tick_volume, spread }\n    latest = candles[-1] if candles else None\n    return {'candles': candles, 'latest': latest}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_calculate_indicator",
+      "name": "calculate_indicator",
+      "version": "1",
+      "description": "Compute a technical indicator (RSI, ATR, SMA, EMA, BB, VWAP, DXY).",
+      "code": "async def main(input, config, tools):\n    # Supported indicators: RSI | ATR | SMA | EMA | BB | VWAP | DXY\n    # period:    lookback period (e.g. 14 for RSI/ATR, 20 for BB/SMA)\n    # timeframe: M5 | M15 | M30 | H1 | H4 | D1\n    # history:   how many historical values to return (1 = latest only)\n    #            use > 1 for trend / divergence analysis\n    result = await tools.call(\n        'calculate_indicator',\n        pair='EURUSD',\n        indicator='RSI',\n        period=14,\n        timeframe='H1',\n        history=3,\n    )\n    # Returns: { indicator, period, timeframe, history,\n    #            values: [{ timestamp, value }, ...] }\n    latest_rsi = result['values'][-1]['value'] if result.get('values') else None\n    return {'rsi': latest_rsi, 'history': result.get('values')}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_session_status",
+      "name": "get_session_status",
+      "version": "1",
+      "description": "Get current Forex session status, liquidity estimate, and pair-specific relevance.",
+      "code": "async def main(input, config, tools):\n    # Returns active sessions, overlap, liquidity estimate, and recommended action.\n    # Pass pair to get pair-specific session relevance and liquidity.\n    # timestamp_utc is optional — defaults to now.\n    session = await tools.call(\n        'get_session_status',\n        pair='EURUSD',\n        # timestamp_utc='2025-01-15T10:00:00Z',  # optional override\n    )\n    # Returns: { timestamp_utc, active_sessions, session_count, overlap,\n    #            liquidity_estimate (very_low..very_high),\n    #            recommended_action (trade/caution/avoid),\n    #            pair_context: { primary_sessions, active_primary,\n    #                            current_relevance, pair_liquidity } }\n    return {\n        'active_sessions': session.get('active_sessions'),\n        'liquidity': session.get('liquidity_estimate'),\n        'recommended_action': session.get('recommended_action'),\n    }\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_swing_levels",
+      "name": "get_swing_levels",
+      "version": "1",
+      "description": "Detect swing high/low support and resistance levels.",
+      "code": "async def main(input, config, tools):\n    # Detects swing highs and lows using scipy peak detection.\n    # prominence:   0.0 = all local extremes; higher filters noise\n    #               typical: 0.0005 for M5, 0.001–0.003 for H1\n    # min_gap_atr:  minimum distance between levels as ATR multiple\n    #               (0.3 = 30% of ATR14; 0.0 = no clustering)\n    # max_levels:   max swing highs and lows to return each (1–20)\n    # sort_by:      'nearest' (default) or 'prominent'\n    levels = await tools.call(\n        'get_swing_levels',\n        pair='EURUSD',\n        timeframe='H1',\n        lookback=100,\n        prominence=0.001,\n        atr_period=14,\n        min_gap_atr=0.3,\n        max_levels=5,\n    )\n    # Returns: { timeframe, current_price, atr, min_gap,\n    #            highs, lows, confluence: [{ price, timestamp, distance, type }],\n    #            nearest_resistance, nearest_support }\n    return {\n        'nearest_resistance': levels.get('nearest_resistance'),\n        'nearest_support': levels.get('nearest_support'),\n        'confluence': levels.get('confluence'),\n    }\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_account_status",
+      "name": "get_account_status",
+      "version": "1",
+      "description": "Retrieve balance, equity, margin, leverage, and trade_allowed flag.",
+      "code": "async def main(input, config, tools):\n    # Retrieves current account snapshot from the broker.\n    # Use before placing orders to verify available capital.\n    # broker is optional — resolved from EC context if omitted.\n    account = await tools.call(\n        'get_account_status',\n        # broker='mt5_oxs_t',  # optional override\n    )\n    # Returns: { broker_name, balance, equity, margin, margin_free,\n    #            margin_level, leverage, currency,\n    #            trade_allowed (bool), recorded_at }\n    if not account.get('trade_allowed'):\n        return {'blocked': True, 'reason': 'trading not allowed by broker'}\n    return {\n        'equity': account.get('equity'),\n        'margin_free': account.get('margin_free'),\n        'leverage': account.get('leverage'),\n    }\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_open_positions",
+      "name": "get_open_positions",
+      "version": "1",
+      "description": "List all currently open broker positions, optionally filtered by pair.",
+      "code": "async def main(input, config, tools):\n    # Returns all open positions for this broker.\n    # pair is optional — omit to get positions across all pairs.\n    positions = await tools.call(\n        'get_open_positions',\n        pair='EURUSD',  # optional\n    )\n    # Returns a list of dicts:\n    # { position_id, pair, direction (buy/sell), units,\n    #   entry_price, current_price, stop_loss, take_profit,\n    #   unrealized_pnl, broker_name }\n    long_count  = sum(1 for p in positions if p.get('direction') == 'buy')\n    short_count = sum(1 for p in positions if p.get('direction') == 'sell')\n    return {'positions': positions, 'long': long_count, 'short': short_count}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_order_book",
+      "name": "get_order_book",
+      "version": "1",
+      "description": "Query the internal order book (agent-placed orders) with status filter.",
+      "code": "async def main(input, config, tools):\n    # Retrieves agent-placed orders from the internal order book.\n    # status_filter: 'open' (default) | 'pending' | 'closed' | 'all'\n    # limit: max entries to return (1–100, default 20)\n    entries = await tools.call(\n        'get_order_book',\n        pair='EURUSD',      # optional\n        status_filter='open',\n        limit=20,\n    )\n    # Each entry contains:\n    # { id, pair, direction, order_type, units, fill_price,\n    #   stop_loss, take_profit, status, entry_reasoning,\n    #   signal_confidence, pnl_pips, pnl_account_currency, ... }\n    return {'open_orders': len(entries), 'entries': entries}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_place_order",
+      "name": "place_order",
+      "version": "1",
+      "description": "Submit a trade order with full parameter control.",
+      "code": "async def main(input, config, tools):\n    # Full-control order placement.\n    # direction:  'buy' or 'sell'\n    # order_type: MARKET | LIMIT | STOP | STOP_LIMIT | TRAILING_STOP\n    # Size: provide one of units, lots, or risk_pct.\n    #   risk_pct sizes position so that a stop hit costs that % of equity.\n    # stop_loss / take_profit are strongly recommended for risk management.\n    result = await tools.call(\n        'place_order',\n        pair='EURUSD',\n        direction='buy',\n        order_type='MARKET',\n        risk_pct=1.0,           # 1% of account equity at risk\n        stop_loss=1.0820,\n        take_profit=1.0920,\n        reasoning='EC rule fired: momentum threshold crossed',\n        confidence=0.75,\n    )\n    # Returns: { success, order_id, status, fill_price,\n    #            broker_name, broker_message, order_book_entry_id }\n    return result\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_auto_place_order",
+      "name": "auto_place_order",
+      "version": "1",
+      "description": "Place an order using sensible defaults — only direction is required.",
+      "code": "async def main(input, config, tools):\n    # Simplified order placement — only direction is required.\n    # SL/TP are auto-derived from ATR(14) when not provided.\n    # Default order type is MARKET, default risk_pct is 1.0.\n    direction = config.get('direction', 'buy')  # read from EC config\n    result = await tools.call(\n        'auto_place_order',\n        pair='EURUSD',\n        direction=direction,\n        # risk_pct=1.0,       # optional override\n        # stop_loss=1.0820,   # optional — auto-derived if omitted\n        # take_profit=1.0920, # optional — auto-derived if omitted\n        reasoning='EC auto order',\n    )\n    # Returns: { success, order_id, status, fill_price,\n    #            broker_name, broker_message, order_book_entry_id }\n    return result\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_close_position",
+      "name": "close_position",
+      "version": "1",
+      "description": "Close a single open position or all positions for a pair.",
+      "code": "async def main(input, config, tools):\n    # Close a specific position by its broker-assigned position_id.\n    # Use get_open_positions first to retrieve valid position IDs.\n    # Use position_id='0' to close ALL open positions (or all for the pair).\n    # Omit units/lots for a full close; provide them for a partial close.\n    positions = await tools.call('get_open_positions', pair='EURUSD')\n    if not positions:\n        return {'closed': 0}\n\n    results = []\n    for pos in positions:\n        result = await tools.call(\n            'close_position',\n            pair='EURUSD',\n            position_id=pos['position_id'],\n            reasoning='EC rule: exit condition met',\n        )\n        results.append(result)\n    # Returns per position: { success, position_id, status, close_price,\n    #                         pnl, closed_units, remaining_units }\n    return {'results': results}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_modify_order",
+      "name": "modify_order",
+      "version": "1",
+      "description": "Move stop-loss or take-profit on an open broker position.",
+      "code": "async def main(input, config, tools):\n    # Modify SL and/or TP of an open position.\n    # At least one of stop_loss or take_profit must be provided.\n    # Use get_open_positions to get valid position_id values.\n    position_id = input.get('position_id')  # pass in from trigger payload\n    new_sl      = config.get('trailing_sl')  # read target SL from EC config\n\n    result = await tools.call(\n        'modify_order',\n        pair='EURUSD',\n        position_id=position_id,\n        stop_loss=new_sl,\n        # take_profit=1.0950,  # optional — omit to keep unchanged\n        reasoning='EC trailing stop adjustment',\n    )\n    # Returns: { success, position_id, status, broker_name,\n    #            stop_loss, take_profit, order_book_entry_id }\n    return result\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_raise_alarm",
+      "name": "raise_alarm",
+      "version": "1",
+      "description": "Emit a structured alarm to the monitoring system.",
+      "code": "async def main(input, config, tools):\n    # Raise a monitoring alarm. Use for anomalies, risk warnings,\n    # data integrity issues, or anything needing human awareness.\n    # severity: info | warning | error | critical\n    result = await tools.call(\n        'raise_alarm',\n        severity='warning',\n        title='Threshold breached',\n        message=f\"Rule fired: value={input.get('value')} exceeds threshold\",\n        context={\n            'ec_id': 'GLOBL-ALL___-EC-ECHO',\n            'trigger': input.get('trigger'),\n        },\n    )\n    # Returns: { alarm_raised (bool), severity, title }\n    return result\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_assessment_memory_get",
+      "name": "assessment_memory — get",
+      "version": "1",
+      "description": "Read a persisted assessment-memory message for an agent.",
+      "code": "async def main(input, config, tools):\n    # Read the assessment memory stored for a target agent.\n    # Useful for reading context that another agent has written.\n    target_agent = config.get('target_agent', 'OXS_T-EURUSD-AA-ANLYS')\n    result = await tools.call(\n        'assessment_memory',\n        agentid=target_agent,\n        mode='get',\n    )\n    # Returns: { agentid, mode, message (str or None), exists (bool) }\n    if not result.get('exists'):\n        return {'memory': None}\n    return {'memory': result.get('message')}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_assessment_memory_set",
+      "name": "assessment_memory — set",
+      "version": "1",
+      "description": "Persist an assessment-memory message for a target agent.",
+      "code": "async def main(input, config, tools):\n    # Write an assessment memory for a target agent.\n    # The agent will receive this as additional context on its next run.\n    target_agent = config.get('target_agent', 'OXS_T-EURUSD-AA-ANLYS')\n    message = input.get('message', 'EC update: conditions changed.')\n    result = await tools.call(\n        'assessment_memory',\n        agentid=target_agent,\n        mode='set',\n        message=message,\n    )\n    # Returns: { agentid, mode, message, length }\n    return result\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_manage_sub_prompt",
+      "name": "manage_sub_prompt",
+      "version": "1",
+      "description": "Read, replace, append, or delete a DB-backed sub-prompt for an agent.",
+      "code": "async def main(input, config, tools):\n    # Manage the runtime sub-prompt of a target agent.\n    # command: 'read' | 'replace' | 'append' | 'delete'\n    # The sub-prompt extends the agent's system prompt at runtime.\n    target_agent = config.get('target_agent', 'OXS_T-EURUSD-AA-ANLYS')\n\n    # --- read current sub-prompt ---\n    current = await tools.call(\n        'manage_sub_prompt',\n        agent=target_agent,\n        command='read',\n    )\n    # Returns: { agent, command, prompt (str or None), exists (bool) }\n\n    # --- append a context note ---\n    updated = await tools.call(\n        'manage_sub_prompt',\n        agent=target_agent,\n        command='append',\n        prompt='\\n[EC note] Volatility elevated — prefer CONSERVATIVE stance.',\n    )\n    return {'before': current.get('prompt'), 'after': updated.get('prompt')}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_get_last_decision",
+      "name": "get_last_decision",
+      "version": "1",
+      "description": "Retrieve the most recent analysis decision record for an agent.",
+      "code": "async def main(input, config, tools):\n    # Fetch the last stored decision for an agent from the DB.\n    # agentid defaults to the current EC's id if omitted.\n    target_agent = config.get('target_agent', 'OXS_T-EURUSD-AA-ANLYS')\n    result = await tools.call(\n        'get_last_decision',\n        agentid=target_agent,\n    )\n    # Returns: { agent_id, found (bool), decision (full record or None) }\n    # decision contains: bias, confidence, order_start_signal,\n    #                    entry_quality, decided_at, output payload\n    if not result.get('found'):\n        return {'decision': None}\n    decision = result.get('decision', {})\n    return {\n        'bias':               decision.get('output', {}).get('decision'),\n        'confidence':         decision.get('output', {}).get('confidence'),\n        'order_start_signal': decision.get('output', {}).get('order_start_signal'),\n    }\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "ec_tool_trigger_sync",
+      "name": "trigger_sync",
+      "version": "1",
+      "description": "Manually trigger an order book sync to detect broker discrepancies.",
+      "code": "async def main(input, config, tools):\n    # Trigger a broker sync for a pair.\n    # The broker adapter compares open positions against the internal\n    # order book and reports any discrepancies found.\n    # Use when positions may have been closed externally.\n    result = await tools.call(\n        'trigger_sync',\n        pair='EURUSD',\n        # broker='mt5_oxs_t',  # optional\n    )\n    # Returns: { sync_triggered (bool), pair, broker,\n    #            discrepancies_found (int), discrepancies (list) }\n    if result.get('discrepancies_found', 0) > 0:\n        return {'alert': True, 'discrepancies': result['discrepancies']}\n    return {'alert': False}\n",
+      "tags": "Entity"
+    },
+    {
+      "id": "mq70e5pj9b6rw2rrip",
+      "name": "get_orders main",
+      "version": "1",
+      "description": "This script stops the workflow, if it finds a running order for the current pair.",
+      "tags": "Entity",
+      "code": "async def main(input, config, tools):\n    symbol = input.get(\"symbol\")\n    if not symbol:\n        return input\n\n    resp = await tools.call(\"get_open_positions\", pair=symbol )\n\n    result = resp.get(\"result\", {})\n    pairs = result.get(\"pairs\", {})\n    pair_data = pairs.get(symbol, {})\n    count = pair_data.get(\"count\", 0)\n\n    if count > 0:\n        return None\n\n    return input"
+    },
+    {
+      "id": "mqh5q8z33pydcs6j33v",
+      "name": "Follow_StopLoss",
+      "version": "1",
+      "description": "This script will adjust the SL value based on ATR. Simulate a trailing SL.",
+      "tags": "Entity",
+      "code": "\"\"\" Config\n{\n  \"atr_period\": 14,\n  \"atr_timeframe\": \"M5\",\n  \"max_sl_distance_atr\": 2.0,\n  \"target_sl_distance_atr\": 1.5,\n  \"tp_clear_atr_threshold\": 0.5\n}\n\"\"\"\n\nasync def main(input, config, tools):\n    pair = (input.get(\"pair\") or \"\").strip().upper()\n    candle = input.get(\"candle\") or {}\n    current_price = candle.get(\"close\")\n\n    if input.get(\"is_null_candle\") or not pair or current_price is None:\n        return None\n\n    # -- Config ---------------------------------------------------------------\n    atr_period          = int(config.get(\"atr_period\", 14))\n    atr_timeframe       = str(config.get(\"atr_timeframe\", \"H1\")).upper()\n    max_sl_atr          = float(config.get(\"max_sl_distance_atr\", 2.0))\n    target_sl_atr       = float(config.get(\"target_sl_distance_atr\", 1.5))\n    tp_clear_threshold  = float(config.get(\"tp_clear_atr_threshold\", 0.5))\n\n    # -- Open Positions -------------------------------------------------------\n    pos_resp = await tools.call(\"get_open_positions\", pair=pair)\n    pos_result = pos_resp.get(\"result\") or {}\n    orders = ((pos_result.get(\"pairs\") or {}).get(pair) or {}).get(\"orders\") or []\n\n    if not orders:\n        return None\n\n    # -- ATR ------------------------------------------------------------------\n    atr_resp = await tools.call(\n        \"calculate_indicator\",\n        indicator=\"ATR\",\n        period=atr_period,\n        timeframe=atr_timeframe,\n        history=1,\n    )\n    atr_values = ((atr_resp.get(\"result\") or {}).get(\"values\") or [])\n    if not atr_values or atr_values[0].get(\"value\") is None:\n        return None\n\n    atr = float(atr_values[0][\"value\"])\n    if atr <= 0:\n        return None\n\n    # -- Check SL and maybe correct -------------------------------------------\n    adjustments = []\n\n    for order in orders:\n        pos_id    = order.get(\"broker_position_id\")\n        direction = str(order.get(\"direction\") or \"\").lower()\n        sl        = order.get(\"stop_loss\")\n        tp        = order.get(\"take_profit\")\n\n        if pos_id is None or sl is None:\n            continue\n\n        sl    = float(sl)\n        tp    = float(tp) if tp is not None else None\n        price = float(current_price)\n\n        distance = abs(price - sl)\n        max_dist = max_sl_atr * atr\n\n        if distance <= max_dist:\n            continue\n\n        if direction == \"buy\":\n            new_sl = round(price - target_sl_atr * atr, 5)\n            if new_sl <= sl:\n                continue\n        elif direction == \"sell\":\n            new_sl = round(price + target_sl_atr * atr, 5)\n            if new_sl >= sl:\n                continue\n        else:\n            continue\n\n        # Check if new SL is too close to TP → clear TP\n        clear_tp = False\n        if tp is not None:\n            if direction == \"buy\" and (tp - new_sl) <= tp_clear_threshold * atr:\n                clear_tp = True\n            elif direction == \"sell\" and (new_sl - tp) <= tp_clear_threshold * atr:\n                clear_tp = True\n\n        mod_kwargs = dict(\n            position_id=str(pos_id),\n            stop_loss=new_sl,\n            reasoning=f\"Trailing SL: dist {distance:.5f} > max {max_dist:.5f} (ATR {atr:.5f})\"\n                      + (\" — TP cleared (SL within threshold)\" if clear_tp else \"\"),\n        )\n        if tp is not None:\n            mod_kwargs[\"take_profit\"] = 0 if clear_tp else tp\n\n        mod_resp = await tools.call(\"modify_order\", **mod_kwargs)\n        adjustments.append({\n            \"position_id\": str(pos_id),\n            \"direction\":   direction,\n            \"old_sl\":      sl,\n            \"new_sl\":      new_sl,\n            \"atr\":         atr,\n            \"tp_cleared\":  clear_tp,\n            \"success\":     (mod_resp.get(\"result\") or {}).get(\"success\", False),\n        })\n\n    return {\"pair\": pair, \"adjustments\": adjustments} if adjustments else None"
+    }
+  ]
+}

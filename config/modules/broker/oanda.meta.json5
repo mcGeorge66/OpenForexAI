@@ -1,0 +1,5 @@
+{
+  display_name: "OANDA REST Broker",
+  description: "Connects to OANDA REST API for candles, account, and trading operations.",
+  notes: "Use one config file per account, for example oanda-live1 or oanda-demo1."
+}

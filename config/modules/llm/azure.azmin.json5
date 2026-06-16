@@ -1,0 +1,20 @@
+{
+  // Azure OpenAI LLM module configuration
+  // This file is managed by the module owner. The system only loads it by name.
+  "adapter": "azure",
+  "endpoint":    "${OFAI_AZURE-ENDPOINT}",
+  "deployment":  "${OFAI_AZURE-DEVELOPMENT}",
+  "model":       "${OFAI_AZURE-MODEL}",
+  "api_version": "${OFAI_AZURE-API-VERSION}",
+  "api_key":     "${OFAI_AZURE-KEY}",
+  "reasoning_effort": "medium",
+  "retry_attempts": 3,
+  "retry_base_delay": 1.0,
+  "timeout_seconds": 60,
+  "sdk_max_retries": 0,
+  "transcript_enabled": true,
+  "transcript_path": "./logs/azure_llm_transcript.log",
+  "temperature": 1.0,
+  "max_tokens": 16384
+  
+}

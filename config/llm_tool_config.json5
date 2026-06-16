@@ -1,0 +1,23 @@
+// Default parameter values for LLM tool calls.
+// When the LLM omits a parameter or sends null, the tool reads the value from here.
+// forced_arguments in agent tool_config always take priority over these defaults.
+{
+  get_candles: {
+    timeframe: "M15",
+    count: 100,
+  },
+  calculate_indicator: {
+    timeframe: "M15",
+    history: 1,
+  },
+  get_swing_levels: {
+    timeframe: "H1",
+    lookback: 100,
+    prominence: 0.0,
+    atr_period: 14,
+    min_gap_atr: 0.3,
+    max_levels: 5,
+  },
+  get_session_status: {
+  },
+}
