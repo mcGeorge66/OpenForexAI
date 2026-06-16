@@ -14,7 +14,7 @@ execution, and strategy optimization.
 
 ![Status](https://img.shields.io/badge/status-beta-orange)
 
-![Safety](https://img.shields.io/badge/trading-practice only-red)
+![Safety](https://img.shields.io/badge/trading-practice%2B-red)
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
