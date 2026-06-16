@@ -8,7 +8,7 @@ ACTION
 - **Orderbook**: The orderbook is a persistent log of every trade the system has placed — each entry records the full lifecycle of a position (signal → order placed → opened → closed) with P&L, candle data, and agent analysis attached. It serves as the historical trade record you can browse in the UI to review past decisions and outcomes.  
 ![####](image/OrderBook.jpg)
   
-- **Chart Analysis**: Chart analysis is the output produced by an AA (Analysis Agent) after it processes a candle snapshot — it contains the LLM's interpretation of price action, indicators, and market structure for a given pair. It gets stored in the database and can be overlaid on the chart in the UI (the "Show Analyses" toggle in AgentChat).  
+- **Chart Analysis**: Chart Analysis is the interactive candlestick chart in AgentChat that displays live price data for an agent's pair across selectable timeframes (M5–H1) and candle counts. It optionally overlays the AA agent's past analysis results directly on the chart via the "Show Analyses" toggle.  
 ![####](image/ChartAnalysis.jpg)
   
 - **Knowledgebase**: The Knowledge Base is a collection of user-managed documents (text, markdown) that can be injected into an agent's context to provide persistent background knowledge — such as trading rules, pair-specific notes, or strategy guidelines. It is stored in the database and accessible via the KB section in the UI.  
