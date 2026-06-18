@@ -17,8 +17,6 @@ Integration with the Oanda API has also been tested, but will be fully developed
 
  
 
-![Status](https://img.shields.io/badge/status-beta-orange)
-
 ![Safety](https://img.shields.io/badge/trading-practice%2B-red)
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
@@ -30,7 +28,7 @@ Integration with the Oanda API has also been tested, but will be fully developed
 Project Status
 --------------
 
->   [!WARNING] This project is in **beta**.  
+>   [!WARNING]  
 >   Do not run with unattended real-money trading.
 
 -   The system is not yet considered production-ready.
