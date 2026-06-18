@@ -15,7 +15,7 @@ Integration with the Oanda API has also been tested, but will be fully developed
 
 >   [!NOTE] Here some interesting [Screenshots](Screenshots.md)
 
- 
+||||
 |---|---|---|
 | ![Safety](https://img.shields.io/badge/trading-practice%2B-red) | ![Python](https://img.shields.io/badge/python-3.11%2B-blue) | ![Architecture](https://img.shields.io/badge/architecture-multi--agent-teal) |
 
