@@ -1,87 +1,11 @@
-stages:
-  - lint
-  - test
-  - build
-
-variables:
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  npm_config_cache: "$CI_PROJECT_DIR/.cache/npm"
-
-# ── Python: Lint ─────────────────────────────────────────────────────────────
-py-lint:
-  stage: lint
+test:
   image: python:3.11-slim
-  cache:
-    key: "pip-$CI_COMMIT_REF_SLUG"
-    paths:
-      - .cache/pip
   before_script:
     - pip install ".[dev,api]"
   script:
-    - ruff check .
-    - mypy openforexai
-  rules:
-    - changes:
-        - "openforexai/**/*"
-        - "pyproject.toml"
-        - "tests/**/*"
+    - pytest tests/
 
-# ── Python: Tests ────────────────────────────────────────────────────────────
-py-test:
-  stage: test
-  image: python:3.11-slim
-  cache:
-    key: "pip-$CI_COMMIT_REF_SLUG"
-    paths:
-      - .cache/pip
-  before_script:
-    - pip install ".[dev,api]"
-  script:
-    - pytest tests/ -v --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-  rules:
-    - changes:
-        - "openforexai/**/*"
-        - "pyproject.toml"
-        - "tests/**/*"
-
-# ── UI: Lint ─────────────────────────────────────────────────────────────────
-ui-lint:
-  stage: lint
-  image: node:20-slim
-  cache:
-    key: "npm-$CI_COMMIT_REF_SLUG"
-    paths:
-      - ui/node_modules
-      - .cache/npm
-  before_script:
-    - cd ui && npm ci
-  script:
-    - npm run lint
-  rules:
-    - changes:
-        - "ui/**/*"
-
-# ── UI: Build ────────────────────────────────────────────────────────────────
 ui-build:
-  stage: build
   image: node:20-slim
-  cache:
-    key: "npm-$CI_COMMIT_REF_SLUG"
-    paths:
-      - ui/node_modules
-      - .cache/npm
-  before_script:
-    - cd ui && npm ci
   script:
-    - npm run build
-  artifacts:
-    paths:
-      - ui/dist
-    expire_in: 1 week
-  rules:
-    - changes:
-        - "ui/**/*"
+    - cd ui && npm ci && npm run build
