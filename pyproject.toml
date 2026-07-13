@@ -27,7 +27,7 @@ dependencies = [
     "rich>=13.7",
     "questionary>=2.0",
     "matplotlib>=3.8",
-    "mplfinance>=0.12",
+    "mplfinance>=0.12.10b0",
 ]
 
 [project.optional-dependencies]
