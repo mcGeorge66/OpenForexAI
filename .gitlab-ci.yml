@@ -1,0 +1,15 @@
+stages:
+  - build
+
+frontend_build:
+  stage: build
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build
+
+backend_install:
+  stage: build
+  script:
+    - cd backend
+    - npm ci
