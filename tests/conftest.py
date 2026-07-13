@@ -256,6 +256,7 @@ class MockRepository(AbstractRepository):
         self.order_book_entries: list = []
         self.sub_prompts: dict[str, str] = {}
         self.assessment_memory: dict[str, str] = {}
+        self.ec_runs: list = []
 
     async def initialize(self) -> None:
         pass
@@ -438,6 +439,12 @@ class MockRepository(AbstractRepository):
 
     async def delete_assessment_memory(self, agent: str) -> None:
         self.assessment_memory.pop(agent, None)
+
+    # ── EventComposer runs ───────────────────────────────────────────────────
+
+    async def save_ec_run(self, run) -> str:
+        self.ec_runs.append(run)
+        return str(run.id)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

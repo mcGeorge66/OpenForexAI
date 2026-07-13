@@ -31,10 +31,12 @@ async def test_azure_provider_emits_http_attempt_debug_callbacks() -> None:
     provider._retry_base_delay = 0.0
     provider._default_temperature = None
     provider._default_max_tokens = 512
+    provider._reasoning_effort = None
+    provider._verbosity = None
     provider._debug_diagnostics_context = {}
     provider._debug_diagnostics_callback = lambda event_name, payload: seen.append((event_name, payload))
     provider._transcript_enabled = False
-    provider._transcript_path = None
+    provider._transcript_base_path = None
     provider._client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=SimpleNamespace(

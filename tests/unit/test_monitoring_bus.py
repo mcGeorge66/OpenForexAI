@@ -6,8 +6,23 @@ from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.monitoring.bus import MonitoringBus
 
 
-def test_info_monitoring_keeps_m5_candle_queued_events_visible():
+def test_info_monitoring_suppresses_m5_candle_queued_events():
     bus = MonitoringBus(detail_level="INFO")
+
+    bus.emit(MonitoringEvent(
+        timestamp=datetime.now(UTC),
+        source_module="broker.TEST1",
+        event_type=MonitoringEventType.M5_CANDLE_QUEUED,
+        broker_name="TEST1",
+        pair="EURUSD",
+        payload={"timestamp": "2026-05-05T12:00:00+00:00"},
+    ))
+
+    assert bus.recent_events(limit=10) == []
+
+
+def test_debug_monitoring_keeps_m5_candle_queued_events_visible():
+    bus = MonitoringBus(detail_level="DEBUG")
 
     bus.emit(MonitoringEvent(
         timestamp=datetime.now(UTC),

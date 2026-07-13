@@ -39,10 +39,8 @@ def _make_async_callable(value):
 
 
 async def test_azure_provider_writes_full_transcript_records() -> None:
-    transcript_path = Path.cwd() / ".tmp" / f"azure_llm_transcript_{uuid4().hex}.log"
-    transcript_path.parent.mkdir(parents=True, exist_ok=True)
-    if transcript_path.exists():
-        transcript_path.unlink()
+    transcript_base_path = Path.cwd() / ".tmp" / f"azure_llm_transcript_{uuid4().hex}.log"
+    transcript_base_path.parent.mkdir(parents=True, exist_ok=True)
 
     provider = AzureOpenAILLMProvider.__new__(AzureOpenAILLMProvider)
     provider._deployment = "gpt-5-mini"
@@ -51,10 +49,14 @@ async def test_azure_provider_writes_full_transcript_records() -> None:
     provider._retry_base_delay = 0.0
     provider._default_temperature = None
     provider._default_max_tokens = 512
+    provider._reasoning_effort = None
+    provider._verbosity = None
     provider._debug_diagnostics_context = {"agent_id": "OXS_T-EURUSD-AA-ANLYS", "turn": 6}
     provider._debug_diagnostics_callback = None
     provider._transcript_enabled = True
-    provider._transcript_path = transcript_path
+    provider._transcript_base_path = transcript_base_path
+    provider._transcript_last_date = None
+    provider._transcript_max_files = 10
     import asyncio
     provider._transcript_lock = asyncio.Lock()
     provider._client = SimpleNamespace(
@@ -72,6 +74,7 @@ async def test_azure_provider_writes_full_transcript_records() -> None:
     )
 
     assert response.content == "plain response"
+    transcript_path = provider._today_transcript_path()
     text = transcript_path.read_text(encoding="utf-8")
     assert "sender: openforexai" in text
     assert "receiver: azure_openai" in text
