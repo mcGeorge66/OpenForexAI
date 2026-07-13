@@ -1,11 +1,9 @@
 test:
-  image: python:3.11-slim
-  before_script:
-    - pip install ".[dev,api]"
   script:
-    - pytest tests/
+    - python3 -m venv .venv
+    - .venv/bin/pip install ".[dev,api]"
+    - .venv/bin/pytest tests/
 
 ui-build:
-  image: node:20-slim
   script:
     - cd ui && npm ci && npm run build
