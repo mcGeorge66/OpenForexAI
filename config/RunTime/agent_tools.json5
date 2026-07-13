@@ -1,0 +1,10 @@
+{
+  "bridge_tools": [
+    {
+      "name": "ask_ga_market_outlook",
+      "description": "Ask a global analysis agent for an additional market outlook and return its answer.",
+      "timeout_seconds": 90,
+      "question_description": "Specific question for the target agent, e.g. macro drivers for the next hours."
+    }
+  ]
+}

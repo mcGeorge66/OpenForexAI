@@ -1,0 +1,360 @@
+{
+  // Event schema registry — single source of truth for every EventType in the system.
+  //
+  // Per-event attributes:
+  //   required     list[str]  Payload fields the bus validates on every publish().
+  //                           Bus raises ValueError and drops the event if any are missing.
+  //   trace_root   bool       When true, this event STARTS a new observable trace in the
+  //                           Event Log.  All downstream events that carry this event's ID
+  //                           in their chain are shown as children.  Default: false.
+  //   description  str        Human-readable explanation shown in the UI and Test-Event modal.
+  //
+  // NOTE: The trading instrument (currency pair, stock symbol, etc.) is carried on the
+  // AgentMessage.instrument field — NOT as a payload field. Schemas no longer require "pair".
+  //
+  // Unknown EventTypes log a warning but are not hard-rejected (gradual rollout).
+  // Fields starting with "_" are ignored by the bus.
+
+  // ── Market data / candle pipeline ───────────────────────────────────────────
+  "m5_candle_update": {
+    "required": ["broker_name"],
+    "trace_root": false,
+    "description": "Raw M5 candle data received from broker — internal update, not a trigger"
+  },
+  "m5_candle_trigger": {
+    "required": ["broker_name"],
+    "trace_root": true,
+    "description": "New M5 candle closed — primary trigger for EC scripts and analysis agents"
+  },
+  "m5_trigger_counter": {
+    "required": [],
+    "trace_root": false,
+    "description": "Internal counter event for any_candle divider tracking"
+  },
+  "candle_gap_detected": {
+    "required": ["broker_name"],
+    "trace_root": true,
+    "description": "A gap in candle history was detected — instrument carries the pair"
+  },
+  "candle_repair_requested": {
+    "required": ["broker_name"],
+    "trace_root": false,
+    "description": "Candle repair fetch requested from broker — instrument carries the pair"
+  },
+  "candle_repair_completed": {
+    "required": [],
+    "trace_root": false,
+    "description": "Candle repair fetch completed and stored"
+  },
+
+  // ── Account & position status ────────────────────────────────────────────────
+  "account_status_updated": {
+    "required": [],
+    "trace_root": false,
+    "description": "Broker account balance/equity snapshot updated in repo"
+  },
+  "account_status_request": {
+    "required": [],
+    "trace_root": false,
+    "description": "Request to broker adapter for account status"
+  },
+  "account_status_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Raw broker account status response"
+  },
+  "positions_request": {
+    "required": [],
+    "trace_root": false,
+    "description": "Request to broker adapter for open positions — instrument field is the optional pair filter"
+  },
+  "positions_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Raw broker open positions response"
+  },
+
+  // ── Trading flow ─────────────────────────────────────────────────────────────
+  "signal_generated": {
+    "required": ["direction"],
+    "trace_root": false,
+    "description": "Analysis agent published a trading signal — instrument carries the pair"
+  },
+  "signal_approved": {
+    "required": [],
+    "trace_root": false,
+    "description": "EC guard approved a signal for execution — instrument carries the pair"
+  },
+  "signal_rejected": {
+    "required": ["reason"],
+    "trace_root": false,
+    "description": "EC guard rejected a signal — instrument carries the pair"
+  },
+  "order_placed": {
+    "required": ["direction", "volume"],
+    "trace_root": false,
+    "description": "Order was confirmed placed with the broker — instrument carries the pair"
+  },
+  "position_opened": {
+    "required": [],
+    "trace_root": false,
+    "description": "A new position is now open — instrument carries the pair"
+  },
+  "position_closed": {
+    "required": [],
+    "trace_root": false,
+    "description": "An existing position was closed — instrument carries the pair"
+  },
+  "risk_breach": {
+    "required": ["reason"],
+    "trace_root": true,
+    "description": "A risk limit was breached — system-level alert"
+  },
+
+  // ── Order book sync ──────────────────────────────────────────────────────────
+  "order_book_sync_discrepancy": {
+    "required": ["entry_id"],
+    "trace_root": true,
+    "description": "Discrepancy detected between local order book and broker state — instrument carries the pair"
+  },
+  "order_book_close_reasoning": {
+    "required": ["entry_id"],
+    "trace_root": false,
+    "description": "LLM-generated reasoning for a position close decision"
+  },
+
+  // ── Technical analysis ───────────────────────────────────────────────────────
+  "analysis_requested": {
+    "required": [],
+    "trace_root": false,
+    "description": "Analysis was explicitly requested — instrument carries the pair"
+  },
+  "analysis_result": {
+    "required": [],
+    "trace_root": false,
+    "description": "Analysis agent completed its LLM cycle and published a result — instrument carries the pair"
+  },
+
+  // ── Optimization ─────────────────────────────────────────────────────────────
+  "optimization_complete": {
+    "required": [],
+    "trace_root": true,
+    "description": "Prompt optimization run completed"
+  },
+  "prompt_updated": {
+    "required": ["agent_id"],
+    "trace_root": false,
+    "description": "An agent's system prompt was updated by the optimizer"
+  },
+
+  // ── Agent lifecycle ──────────────────────────────────────────────────────────
+  "agent_config_requested": {
+    "required": [],
+    "trace_root": false,
+    "description": "Agent bootstrap: requesting its config from ConfigService"
+  },
+  "agent_config_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Agent bootstrap: config delivered to agent"
+  },
+  "agent_query": {
+    "required": ["question"],
+    "trace_root": true,
+    "description": "Interactive query from management UI or external caller"
+  },
+  "agent_query_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Agent's LLM response to an agent_query"
+  },
+
+  // ── EventComposer lifecycle ──────────────────────────────────────────────────
+  "ec_config_requested": {
+    "required": [],
+    "trace_root": false,
+    "description": "EC bootstrap: requesting its config"
+  },
+  "ec_config_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "EC bootstrap: config delivered to EC"
+  },
+  "ec_output": {
+    "required": [],
+    "trace_root": false,
+    "description": "EC script produced output (analysis, guard decision, relay)"
+  },
+  "ec_guard_block": {
+    "required": ["reason"],
+    "trace_root": false,
+    "description": "EC guard blocked a flow — reason must explain why"
+  },
+
+  // ── Repository service ────────────────────────────────────────────────────────
+  "repo_request": {
+    "required": ["operation"],
+    "trace_root": false,
+    "description": "Internal DB read/write request to RepositoryService"
+  },
+  "repo_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "RepositoryService response to a repo_request"
+  },
+
+  // ── Market data queries ───────────────────────────────────────────────────────
+  "candles_request": {
+    "required": ["timeframe"],
+    "trace_root": false,
+    "description": "Request for historical candle data from DataContainer — instrument carries the pair"
+  },
+  "candles_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "DataContainer response with candle data"
+  },
+  "indicator_request": {
+    "required": ["indicator"],
+    "trace_root": false,
+    "description": "Request for a computed indicator value — instrument carries the pair"
+  },
+  "indicator_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Computed indicator response"
+  },
+  "swing_levels_request": {
+    "required": [],
+    "trace_root": false,
+    "description": "Request for swing high/low levels — instrument carries the pair"
+  },
+  "swing_levels_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "Swing level response"
+  },
+
+  // ── Broker execution ──────────────────────────────────────────────────────────
+  "order_request": {
+    "required": ["order"],
+    "trace_root": true,
+    "description": "Broker agent placing an order — instrument carries the pair, payload.order contains the full order object"
+  },
+  "order_result": {
+    "required": [],
+    "trace_root": false,
+    "description": "Broker confirmed order result (filled, rejected, etc.)"
+  },
+  "position_close_request": {
+    "required": [],
+    "trace_root": true,
+    "description": "Broker agent requesting a position close — instrument carries the pair"
+  },
+  "position_close_result": {
+    "required": [],
+    "trace_root": false,
+    "description": "Broker confirmed position close result"
+  },
+  "order_modify_request": {
+    "required": ["entry_id"],
+    "trace_root": false,
+    "description": "Request to modify an existing order (SL/TP)"
+  },
+  "order_modify_result": {
+    "required": ["entry_id"],
+    "trace_root": false,
+    "description": "Broker confirmed order modification result"
+  },
+
+  // ── Candle bulk / LLM ─────────────────────────────────────────────────────────
+  "candle_data_bulk": {
+    "required": [],
+    "trace_root": false,
+    "description": "Bulk candle data delivered (repair or backfill) — instrument carries the pair"
+  },
+  "llm_request": {
+    "required": ["method"],
+    "trace_root": false,
+    "description": "LLM API call — routed via LlmService. complete_with_tools: {method, system_prompt, messages, tools}. complete: {method, system_prompt, user_message}"
+  },
+  "llm_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "LLM API response"
+  },
+
+  // ── Observability lifecycle ───────────────────────────────────────────────────
+  "agent_cycle_start": {
+    "required": ["agent_id", "trigger"],
+    "trace_root": false,
+    "description": "Agent decision cycle started — instrument carries the pair"
+  },
+  "agent_cycle_end": {
+    "required": ["agent_id", "trigger", "success"],
+    "trace_root": false,
+    "description": "Agent decision cycle ended — payload: {agent_id, trigger, success, elapsed_ms, error?}"
+  },
+  "snapshot_start": {
+    "required": ["agent_id"],
+    "trace_root": false,
+    "description": "Market snapshot build started — instrument carries the pair"
+  },
+  "snapshot_end": {
+    "required": ["agent_id", "success"],
+    "trace_root": false,
+    "description": "Market snapshot build finished — instrument carries the pair"
+  },
+  "decision_start": {
+    "required": ["agent_id", "trigger"],
+    "trace_root": false,
+    "description": "Decision-only LLM cycle started"
+  },
+  "decision_end": {
+    "required": ["agent_id", "trigger", "success"],
+    "trace_root": false,
+    "description": "Decision-only LLM cycle finished"
+  },
+  "ec_cycle_start": {
+    "required": ["ec_id", "trigger"],
+    "trace_root": false,
+    "description": "EventComposer script execution started — instrument carries the pair if EC is pair-specific"
+  },
+  "ec_cycle_end": {
+    "required": ["ec_id", "trigger", "success"],
+    "trace_root": false,
+    "description": "EventComposer script execution finished"
+  },
+  "chartshot_start": {
+    "required": ["agent_id", "timeframe"],
+    "trace_root": false,
+    "description": "Chartshot render started — instrument carries the pair"
+  },
+  "chartshot_end": {
+    "required": ["agent_id", "success"],
+    "trace_root": false,
+    "description": "Chartshot render finished — instrument carries the pair"
+  },
+  "bridge_call_start": {
+    "required": ["agent_id", "tool_name", "target_agent_id"],
+    "trace_root": false,
+    "description": "Bridge tool call started"
+  },
+  "bridge_call_end": {
+    "required": ["agent_id", "tool_name", "target_agent_id", "success"],
+    "trace_root": false,
+    "description": "Bridge tool call finished"
+  },
+
+  // ── System ────────────────────────────────────────────────────────────────────
+  "routing_reload_requested": {
+    "required": [],
+    "trace_root": false,
+    "description": "Hot-reload of event routing rules was requested"
+  },
+  "timer": {
+    "required": [],
+    "trace_root": true,
+    "description": "Periodic timer trigger for agents configured with timer_enabled"
+  },
+}

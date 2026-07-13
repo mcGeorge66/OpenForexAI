@@ -1,0 +1,26 @@
+{
+  // MetaTrader 5 broker module configuration
+  // This file is managed by the module owner. The system only loads it by name.
+  "adapter":    "mt5",
+  "short_name": "OXS_T",
+  "account_id": "${OXS_MT5_ID}",
+  "password":   "${OXS_MT5_PASSWORD}",
+  "server":     "${OXS_MT5_SERVER}",
+  // Optional explicit terminal path, e.g. C:/Program Files/MetaTrader 5/terminal64.exe
+  "installation_path": "",
+  "broker_candle_utc_offset_hours": 3,
+  "api_timeout_seconds": 15,  
+  "background_tasks": {
+    "candle_poll_interval_seconds": 30,
+    "candle_poll_lookback_count": 3,
+    "agent_trigger_delay_seconds": 60,
+    "account_poll_interval_seconds": 60,
+    "sync_interval_seconds": 60,
+    "request_agent_reasoning": false
+  }
+}
+
+
+
+
+

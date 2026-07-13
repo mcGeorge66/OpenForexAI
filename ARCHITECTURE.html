@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>OpenForexAI — Architecture</title>
+<style>
+  body { background:#0f172a; margin:0; font-family:'Segoe UI',sans-serif; color:#e2e8f0; }
+  h1   { text-align:center; padding:18px 0 4px; color:#34d399; font-size:20px; letter-spacing:1px; }
+  svg  { display:block; margin:0 auto; }
+  .lbl { font-family:'Segoe UI',sans-serif; }
+</style>
+</head>
+<body>
+<h1>OpenForexAI — Systemarchitektur v0.7</h1>
+
+<svg viewBox="0 0 1640 1320" width="1640" height="1320" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="m-bus"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#34d399"/></marker>
+  <marker id="m-tool" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#fbbf24"/></marker>
+  <marker id="m-ext"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>
+  <marker id="m-http" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#38bdf8"/></marker>
+  <marker id="m-mon"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#fb923c"/></marker>
+  <marker id="m-db"   markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/></marker>
+  <marker id="m-brk"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#4ade80"/></marker>
+  <marker id="m-llm"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f472b6"/></marker>
+  <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+
+<!-- ==========================================================
+  LAYOUT (Zeilen, nicht-überlappend):
+  ROW 0  y=18-100    Physical DB + DB Adapter  (rechts)
+  ROW 0  y=18-105    Config / DataContainer / Repo Service (mitte)
+  ROW 1  y=155-218   EVENT BUS (volle Breite)
+  ROW 2  y=230-490   Agents (links) | Tool Layer (mitte) | Broker Adapters (rechts)
+  ROW 3  y=510-620   EC Composers (links) | Analysis Snapshot (mitte) | External Broker (rechts)
+  ROW 4  y=640-780   LLM Service (links) | Management API + UI (mitte)
+  ROW 5  y=800-900   LLM Adapters (links)
+  ROW 6  y=920-985   LLM Provider extern (links)
+  ROW 7  y=1050-1100 MONITORING BUS (volle Breite)
+  Legende: rechts mitte
+========================================================== -->
+
+<!-- ROW 0 — STORAGE LAYER --------------------------------- -->
+
+<!-- Physical DB  (rechts, außerhalb Event Bus) -->
+<rect x="1420" y="18" width="190" height="65" rx="10" fill="#0a0a0a" stroke="#4a5568" stroke-width="1.5"/>
+<text x="1515" y="39"  text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="bold" class="lbl">SQLite / PostgreSQL</text>
+<text x="1515" y="54"  text-anchor="middle" fill="#64748b" font-size="9"  class="lbl">Kerzen · Orders · Decisions</text>
+<text x="1515" y="68"  text-anchor="middle" fill="#64748b" font-size="9"  class="lbl">Memory · account_status</text>
+
+<!-- Database Adapter  (rechts, außerhalb Event Bus) -->
+<rect x="1390" y="104" width="250" height="105" rx="10" fill="#141414" stroke="#94a3b8" stroke-width="2"/>
+<text x="1515" y="124" text-anchor="middle" fill="#cbd5e1" font-size="12" font-weight="bold" class="lbl">Database Adapter</text>
+<text x="1515" y="140" text-anchor="middle" fill="#94a3b8" font-size="10" class="lbl">SQLiteDataContainer</text>
+<text x="1515" y="155" text-anchor="middle" fill="#94a3b8" font-size="10" class="lbl">PostgreSQLDataContainer</text>
+<line x1="1400" y1="162" x2="1630" y2="162" stroke="#2d3748" stroke-width="1"/>
+<text x="1515" y="175" text-anchor="middle" fill="#64748b" font-size="8"  class="lbl">extends SQLiteRepository</text>
+<text x="1515" y="187" text-anchor="middle" fill="#64748b" font-size="8"  class="lbl">+ AbstractDataContainer</text>
+<text x="1515" y="200" text-anchor="middle" fill="#4a5568" font-size="7"  class="lbl">1 Instanz — DataContainer + RepositoryService</text>
+
+<!-- Physical DB → DB Adapter -->
+<line x1="1515" y1="83" x2="1515" y2="104" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#m-db)"/>
+
+<!-- Config Service -->
+<rect x="240" y="18" width="195" height="85" rx="10" fill="#1e1b3a" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="337" y="39"  text-anchor="middle" fill="#c4b5fd" font-size="12" font-weight="bold" class="lbl">Config Service</text>
+<text x="337" y="55"  text-anchor="middle" fill="#ddd6fe" font-size="10" class="lbl">SYSTM-ALL___-GA-CFGSV</text>
+<text x="337" y="70"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">AGENT_CONFIG · EC_CONFIG</text>
+<text x="337" y="84"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">REQUEST / RESPONSE</text>
+
+<!-- Data Container -->
+<rect x="460" y="18" width="220" height="85" rx="10" fill="#1e1b3a" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="570" y="39"  text-anchor="middle" fill="#c4b5fd" font-size="12" font-weight="bold" class="lbl">Data Container</text>
+<text x="570" y="55"  text-anchor="middle" fill="#ddd6fe" font-size="10" class="lbl">SYSTM-ALL___-GA-DATA</text>
+<text x="570" y="70"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">CANDLES · INDICATOR · SWING_LEVELS</text>
+<text x="570" y="84"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">REQ/RESP · ._store → DB Adapter</text>
+
+<!-- Repository Service -->
+<rect x="706" y="18" width="220" height="85" rx="10" fill="#1e1b3a" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="816" y="39"  text-anchor="middle" fill="#c4b5fd" font-size="12" font-weight="bold" class="lbl">Repository Service</text>
+<text x="816" y="55"  text-anchor="middle" fill="#ddd6fe" font-size="10" class="lbl">SYSTM-ALL___-GA-REPO</text>
+<text x="816" y="70"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">REPO_REQUEST / REPO_RESPONSE</text>
+<text x="816" y="84"  text-anchor="middle" fill="#7c6faa" font-size="9"  class="lbl">._repository → DB Adapter</text>
+
+<!-- DataContainer → DB Adapter -->
+<line x1="680" y1="60" x2="1390" y2="150" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#m-db)"/>
+<text x="1035" y="100" fill="#64748b" font-size="8" class="lbl">._store</text>
+
+<!-- RepositoryService → DB Adapter -->
+<line x1="926" y1="65" x2="1390" y2="140" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#m-db)"/>
+<text x="1165" y="110" fill="#64748b" font-size="8" class="lbl">._repository</text>
+
+<!-- ROW 1 — EVENT BUS ------------------------------------- -->
+<rect x="30" y="155" width="1350" height="63" rx="14"
+      fill="#064e3b" stroke="#34d399" stroke-width="2.5" filter="url(#glow)"/>
+<text x="705" y="178"  text-anchor="middle" fill="#34d399" font-size="15" font-weight="bold" class="lbl">EVENT BUS</text>
+<text x="705" y="196"  text-anchor="middle" fill="#6ee7b7" font-size="11" class="lbl">Async Pub/Sub · Routing Rules · Request/Response (correlation_id) · openforexai/messaging/bus.py · routing.py</text>
+<text x="705" y="211"  text-anchor="middle" fill="#166534" font-size="9"  class="lbl">Alle registrierten Mitglieder kommunizieren ausschliesslich über diesen Kanal</text>
+
+<!-- Services ↔ Bus -->
+<line x1="337" y1="103" x2="355" y2="155" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="355" y1="155" x2="337" y2="103" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="570" y1="103" x2="560" y2="155" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="560" y1="155" x2="570" y2="103" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="816" y1="103" x2="790" y2="155" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="790" y1="155" x2="816" y2="103" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-bus)"/>
+
+<!-- ROW 2 — AGENTS | TOOL LAYER | BROKER ADAPTERS -------- -->
+
+<!-- AGENTS  x=30, y=230..490 -->
+<rect x="30" y="230" width="220" height="260" rx="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+<text x="140" y="252"  text-anchor="middle" fill="#93c5fd" font-size="13" font-weight="bold" class="lbl">Agents</text>
+<text x="140" y="268"  text-anchor="middle" fill="#7dd3fc" font-size="10" class="lbl">AA · BA · GA — gleicher Prozess</text>
+<line x1="42" y1="275" x2="238" y2="275" stroke="#1e3a8a" stroke-width="1"/>
+<text x="140" y="290"  text-anchor="middle" fill="#bfdbfe" font-size="10" class="lbl">OXS_T-EURUSD-AA-ANLYS</text>
+<text x="140" y="305"  text-anchor="middle" fill="#bfdbfe" font-size="10" class="lbl">OXS_T-USDJPY-AA-ANLYS</text>
+<text x="140" y="320"  text-anchor="middle" fill="#bfdbfe" font-size="10" class="lbl">OXS_T-ALL___-BA-ANLYS</text>
+<text x="140" y="335"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">SYSTM-ALL___-GA-*</text>
+<line x1="42" y1="342" x2="238" y2="342" stroke="#1e3a8a" stroke-width="1"/>
+<text x="140" y="357"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Pub: SIGNAL_GENERATED</text>
+<text x="140" y="371"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Sub: M5_AGENT_TRIGGER</text>
+<text x="140" y="385"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Pub: LLM_REQUEST → Bus</text>
+<line x1="42" y1="392" x2="238" y2="392" stroke="#1e3a8a" stroke-width="1"/>
+<text x="140" y="407"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">1. Analysis Snapshot (AA)</text>
+<text x="140" y="421"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">2. LLM_REQUEST via llm_helpers</text>
+<text x="140" y="435"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">3. Tools via ToolDispatcher (BA/GA)</text>
+<text x="140" y="449"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">Config: AGENT_CONFIG event</text>
+
+<!-- Agents ↔ Bus -->
+<line x1="140" y1="230" x2="140" y2="218" stroke="#34d399" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="155" y1="218" x2="155" y2="230" stroke="#34d399" stroke-width="1.5" marker-end="url(#m-bus)"/>
+
+<!-- Agents → Tools (ToolDispatcher, BA/GA path) -->
+<line x1="250" y1="380" x2="285" y2="380" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-tool)"/>
+<text x="251" y="374" fill="#fbbf24" font-size="8" class="lbl">ToolDisp.</text>
+
+<!-- TOOL LAYER  x=285, y=230..495 -->
+<rect x="285" y="230" width="870" height="265" rx="12" fill="#1c1a0e" stroke="#fbbf24" stroke-width="2"/>
+<text x="720" y="251"  text-anchor="middle" fill="#fbbf24" font-size="13" font-weight="bold" class="lbl">TOOL LAYER — openforexai/tools/</text>
+<text x="720" y="266"  text-anchor="middle" fill="#78601e" font-size="9"  class="lbl">Keine Bus-Mitglieder · Aufgerufen durch Agent/EC via ToolDispatcher · Datenzugriff per bus_request() / repo_request()</text>
+
+<!-- Market -->
+<rect x="296" y="277" width="195" height="120" rx="8" fill="#0f1f08" stroke="#84cc16" stroke-width="1"/>
+<text x="393" y="294"  text-anchor="middle" fill="#bef264" font-size="11" font-weight="bold" class="lbl">Market</text>
+<text x="393" y="309"  text-anchor="middle" fill="#d9f99d" font-size="9"  class="lbl">get_candles</text>
+<text x="393" y="323"  text-anchor="middle" fill="#d9f99d" font-size="9"  class="lbl">calculate_indicator</text>
+<text x="393" y="337"  text-anchor="middle" fill="#d9f99d" font-size="9"  class="lbl">get_swing_levels</text>
+<text x="393" y="351"  text-anchor="middle" fill="#d9f99d" font-size="9"  class="lbl">get_session_status</text>
+<line x1="302" y1="358" x2="485" y2="358" stroke="#2d4a10" stroke-width="1"/>
+<text x="393" y="371"  text-anchor="middle" fill="#4a6b1a" font-size="8"  class="lbl">→ CANDLES_REQUEST</text>
+<text x="393" y="382"  text-anchor="middle" fill="#4a6b1a" font-size="8"  class="lbl">→ INDICATOR_REQUEST</text>
+<text x="393" y="393"  text-anchor="middle" fill="#4a6b1a" font-size="8"  class="lbl">→ SWING_LEVELS_REQUEST</text>
+
+<!-- Trading -->
+<rect x="502" y="277" width="195" height="140" rx="8" fill="#180c0c" stroke="#f87171" stroke-width="1"/>
+<text x="599" y="294"  text-anchor="middle" fill="#fca5a5" font-size="11" font-weight="bold" class="lbl">Trading</text>
+<text x="599" y="309"  text-anchor="middle" fill="#fecaca" font-size="9"  class="lbl">place_order · auto_place_order</text>
+<text x="599" y="323"  text-anchor="middle" fill="#fecaca" font-size="9"  class="lbl">close_position</text>
+<text x="599" y="337"  text-anchor="middle" fill="#fecaca" font-size="9"  class="lbl">modify_order</text>
+<text x="599" y="351"  text-anchor="middle" fill="#fecaca" font-size="9"  class="lbl">trigger_sync</text>
+<text x="599" y="365"  text-anchor="middle" fill="#fecaca" font-size="9"  class="lbl">raise_alarm</text>
+<line x1="509" y1="372" x2="691" y2="372" stroke="#4a1010" stroke-width="1"/>
+<text x="599" y="385"  text-anchor="middle" fill="#7a3030" font-size="8"  class="lbl">→ ORDER_REQUEST</text>
+<text x="599" y="396"  text-anchor="middle" fill="#7a3030" font-size="8"  class="lbl">→ POSITION_CLOSE_REQUEST</text>
+<text x="599" y="407"  text-anchor="middle" fill="#7a3030" font-size="8"  class="lbl">→ REPO_REQUEST</text>
+
+<!-- Account / OB -->
+<rect x="710" y="277" width="210" height="120" rx="8" fill="#14101e" stroke="#c084fc" stroke-width="1"/>
+<text x="815" y="294"  text-anchor="middle" fill="#e879f9" font-size="11" font-weight="bold" class="lbl">Account / Orderbook</text>
+<text x="815" y="309"  text-anchor="middle" fill="#f5d0fe" font-size="9"  class="lbl">get_account_status</text>
+<text x="815" y="323"  text-anchor="middle" fill="#f5d0fe" font-size="9"  class="lbl">get_open_positions</text>
+<text x="815" y="337"  text-anchor="middle" fill="#f5d0fe" font-size="9"  class="lbl">get_order_book</text>
+<text x="815" y="351"  text-anchor="middle" fill="#f5d0fe" font-size="9"  class="lbl">ask_ga_market_outlook</text>
+<line x1="717" y1="358" x2="914" y2="358" stroke="#3a1050" stroke-width="1"/>
+<text x="815" y="371"  text-anchor="middle" fill="#6b3a7a" font-size="8"  class="lbl">→ ACCOUNT_STATUS_REQUEST</text>
+<text x="815" y="382"  text-anchor="middle" fill="#6b3a7a" font-size="8"  class="lbl">→ REPO_REQUEST</text>
+<text x="815" y="393"  text-anchor="middle" fill="#6b3a7a" font-size="8"  class="lbl">→ POSITIONS_REQUEST</text>
+
+<!-- System Tools -->
+<rect x="933" y="277" width="210" height="140" rx="8" fill="#0a1616" stroke="#22d3ee" stroke-width="1"/>
+<text x="1038" y="294"  text-anchor="middle" fill="#67e8f9" font-size="11" font-weight="bold" class="lbl">System</text>
+<text x="1038" y="309"  text-anchor="middle" fill="#a5f3fc" font-size="9"  class="lbl">assessment_memory</text>
+<text x="1038" y="323"  text-anchor="middle" fill="#a5f3fc" font-size="9"  class="lbl">get_last_decision</text>
+<text x="1038" y="337"  text-anchor="middle" fill="#a5f3fc" font-size="9"  class="lbl">manage_sub_prompt</text>
+<text x="1038" y="351"  text-anchor="middle" fill="#a5f3fc" font-size="9"  class="lbl">agent_bridge</text>
+<text x="1038" y="365"  text-anchor="middle" fill="#a5f3fc" font-size="9"  class="lbl">ask_ga_market_outlook</text>
+<line x1="940" y1="372" x2="1137" y2="372" stroke="#0e3a3a" stroke-width="1"/>
+<text x="1038" y="385"  text-anchor="middle" fill="#164e63" font-size="8"  class="lbl">→ REPO_REQUEST</text>
+<text x="1038" y="396"  text-anchor="middle" fill="#164e63" font-size="8"  class="lbl">→ AGENT_QUERY (bridge)</text>
+<text x="1038" y="407"  text-anchor="middle" fill="#164e63" font-size="8"  class="lbl">→ CANDLES_REQUEST</text>
+
+<!-- Tools → Bus (bus_request / repo_request) -->
+<line x1="500" y1="230" x2="500" y2="218" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#m-bus)"/>
+<text x="506" y="228" fill="#fbbf24" font-size="8" class="lbl">bus_request()</text>
+<line x1="900" y1="230" x2="900" y2="218" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#m-bus)"/>
+<text x="906" y="228" fill="#fbbf24" font-size="8" class="lbl">repo_request()</text>
+
+<!-- BROKER ADAPTERS  x=1200, y=230..490 -->
+<rect x="1200" y="230" width="280" height="260" rx="12" fill="#1a2e20" stroke="#4ade80" stroke-width="1.5"/>
+<text x="1340" y="251"  text-anchor="middle" fill="#86efac" font-size="12" font-weight="bold" class="lbl">Broker Adapters (AD)</text>
+<text x="1340" y="266"  text-anchor="middle" fill="#bbf7d0" font-size="10" class="lbl">openforexai/adapters/brokers/</text>
+<line x1="1212" y1="273" x2="1468" y2="273" stroke="#166534" stroke-width="1"/>
+<text x="1340" y="288"  text-anchor="middle" fill="#bbf7d0" font-size="10" class="lbl">OXS_T-EURUSD-AD-ADPT</text>
+<text x="1340" y="302"  text-anchor="middle" fill="#bbf7d0" font-size="10" class="lbl">OXS_T-USDJPY-AD-ADPT</text>
+<line x1="1212" y1="309" x2="1468" y2="309" stroke="#166534" stroke-width="1"/>
+<text x="1340" y="323"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Pub: M5_CANDLE_UPDATE</text>
+<text x="1340" y="337"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Pub: M5_AGENT_TRIGGER</text>
+<text x="1340" y="351"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Pub: ACCOUNT_STATUS_UPDATED</text>
+<text x="1340" y="365"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Sub: ORDER_REQUEST → ORDER_RESULT</text>
+<text x="1340" y="379"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Sub: POSITION_CLOSE_REQUEST</text>
+<line x1="1212" y1="386" x2="1468" y2="386" stroke="#166534" stroke-width="1"/>
+<text x="1340" y="400"  text-anchor="middle" fill="#4a9070" font-size="9"  class="lbl">Pub: Monitoring events</text>
+<text x="1340" y="415"  text-anchor="middle" fill="#4a9070" font-size="9"  class="lbl">(candle_fetched, sync_check…)</text>
+
+<!-- Broker Adapters ↔ Bus -->
+<line x1="1340" y1="230" x2="1340" y2="218" stroke="#34d399" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="1355" y1="218" x2="1355" y2="230" stroke="#34d399" stroke-width="1.5" marker-end="url(#m-bus)"/>
+
+<!-- ROW 3 — EC | ANALYSIS SNAPSHOT | EXTERNAL BROKER ------ -->
+
+<!-- EC COMPOSERS  x=30, y=510..625 -->
+<rect x="30" y="510" width="220" height="115" rx="12" fill="#1a2e40" stroke="#67e8f9" stroke-width="1.5"/>
+<text x="140" y="530"  text-anchor="middle" fill="#67e8f9" font-size="12" font-weight="bold" class="lbl">Event Composers (EC)</text>
+<text x="140" y="546"  text-anchor="middle" fill="#a5f3fc" font-size="10" class="lbl">OXS_T-EURUSD-EC-RELAY</text>
+<text x="140" y="561"  text-anchor="middle" fill="#a5f3fc" font-size="10" class="lbl">OXS_T-USDJPY-EC-RELAY</text>
+<line x1="42" y1="568" x2="238" y2="568" stroke="#164e63" stroke-width="1"/>
+<text x="140" y="582"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Python script · kein LLM intern</text>
+<text x="140" y="596"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Pub: EC_OUTPUT</text>
+<text x="140" y="611"  text-anchor="middle" fill="#4e7fa8" font-size="9"  class="lbl">ask_llm() → LLM_REQUEST → Bus</text>
+
+<!-- EC ↔ Bus -->
+<line x1="90" y1="510" x2="90" y2="218" stroke="#67e8f9" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="103" y1="218" x2="103" y2="510" stroke="#67e8f9" stroke-width="1.5" marker-end="url(#m-bus)"/>
+
+<!-- EC → Tools (ToolsProxy wraps ToolDispatcher) -->
+<line x1="250" y1="545" x2="285" y2="420" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-tool)"/>
+<text x="258" y="490" fill="#fbbf24" font-size="8" class="lbl" transform="rotate(-65,258,490)">ToolsProxy</text>
+
+<!-- ANALYSIS SNAPSHOT  x=285, y=510..620 -->
+<rect x="285" y="510" width="870" height="110" rx="10" fill="#0e1a18" stroke="#10b981" stroke-width="1.5" stroke-dasharray="6,3"/>
+<text x="720" y="531"  text-anchor="middle" fill="#34d399" font-size="11" font-weight="bold" class="lbl">Analysis Snapshot — agents/analysis_snapshot.py</text>
+<text x="720" y="548"  text-anchor="middle" fill="#6ee7b7" font-size="9"  class="lbl">Nur AA-Agent: baut Marktkontext-Snapshot VOR dem LLM-Call — ruft Tools über ToolDispatcher auf</text>
+<text x="720" y="563"  text-anchor="middle" fill="#4a9070" font-size="9"  class="lbl">Inputs (Tools):  get_candles · calculate_indicator · get_swing_levels · get_last_decision · get_session_status</text>
+<text x="720" y="578"  text-anchor="middle" fill="#4a9070" font-size="9"  class="lbl">Output: decision_snapshot → user_message für LLM_REQUEST  |  Auch von Management API (execute) genutzt</text>
+<text x="720" y="600"  text-anchor="middle" fill="#2d5a48" font-size="8"  class="lbl">build_analysis_snapshot()  ·  Fehler → snapshot_invalid event auf Monitoring Bus</text>
+
+<!-- Agent → Analysis Snapshot -->
+<line x1="200" y1="490" x2="285" y2="530" stroke="#34d399" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<text x="208" y="514" fill="#34d399" font-size="8" class="lbl">AA-Zyklus</text>
+
+<!-- Analysis Snapshot → Tools -->
+<line x1="500" y1="510" x2="490" y2="495" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#m-tool)"/>
+<text x="492" y="505" fill="#fbbf24" font-size="8" class="lbl">ToolDispatcher</text>
+
+<!-- External Broker  x=1200, y=510..580 -->
+<rect x="1200" y="510" width="280" height="65" rx="10" fill="#0a1208" stroke="#166534" stroke-width="1" stroke-dasharray="5,3"/>
+<text x="1340" y="533"  text-anchor="middle" fill="#4ade80" font-size="12" font-weight="bold" class="lbl">MT5 / OANDA (extern)</text>
+<text x="1340" y="549"  text-anchor="middle" fill="#6ee7b7" font-size="10" class="lbl">Broker API (REST / Socket)</text>
+<text x="1340" y="563"  text-anchor="middle" fill="#166534" font-size="9"  class="lbl">adapters/brokers/mt5.py · oanda.py</text>
+<line x1="1340" y1="490" x2="1340" y2="510" stroke="#4ade80" stroke-width="1.5" marker-end="url(#m-brk)"/>
+
+<!-- ROW 4 — LLM SERVICE | MANAGEMENT API + UI ------------- -->
+
+<!-- LLM SERVICE  x=30, y=645..785 -->
+<rect x="30" y="645" width="220" height="140" rx="12" fill="#1a1228" stroke="#e879f9" stroke-width="2"/>
+<text x="140" y="666"  text-anchor="middle" fill="#f0abfc" font-size="12" font-weight="bold" class="lbl">LLM Service</text>
+<text x="140" y="681"  text-anchor="middle" fill="#e879f9" font-size="10" class="lbl">services/llm_service.py</text>
+<line x1="42" y1="688" x2="238" y2="688" stroke="#4a1042" stroke-width="1"/>
+<text x="140" y="703"  text-anchor="middle" fill="#f5d0fe" font-size="10" class="lbl">llm:azure_azmin</text>
+<text x="140" y="718"  text-anchor="middle" fill="#f5d0fe" font-size="10" class="lbl">llm:azure_gpt4mini  …</text>
+<line x1="42" y1="725" x2="238" y2="725" stroke="#4a1042" stroke-width="1"/>
+<text x="140" y="739"  text-anchor="middle" fill="#d8b4fe" font-size="9"  class="lbl">Sub: LLM_REQUEST</text>
+<text x="140" y="753"  text-anchor="middle" fill="#d8b4fe" font-size="9"  class="lbl">Pub: LLM_RESPONSE</text>
+<text x="140" y="767"  text-anchor="middle" fill="#9a5ab0" font-size="9"  class="lbl">1 Service / LLM-Modul · concurrent</text>
+
+<!-- LLM Service ↔ Bus -->
+<line x1="55" y1="645" x2="55" y2="218" stroke="#e879f9" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<line x1="68" y1="218" x2="68" y2="645" stroke="#e879f9" stroke-width="1.5" marker-end="url(#m-bus)"/>
+<text x="32" y="430"  fill="#e879f9" font-size="8" class="lbl" transform="rotate(-90,32,430)">LLM_REQ/RESP</text>
+
+<!-- MANAGEMENT API  x=285, y=645..785 -->
+<rect x="285" y="645" width="290" height="140" rx="10" fill="#1c1917" stroke="#38bdf8" stroke-width="1.5"/>
+<text x="430" y="666"  text-anchor="middle" fill="#7dd3fc" font-size="12" font-weight="bold" class="lbl">Management API</text>
+<text x="430" y="681"  text-anchor="middle" fill="#bae6fd" font-size="10" class="lbl">FastAPI · localhost:7654</text>
+<line x1="296" y1="688" x2="564" y2="688" stroke="#1e3a5f" stroke-width="1"/>
+<text x="430" y="702"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">REST: /tools /agents /orderbook…</text>
+<text x="430" y="716"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">WS: /ws/monitoring</text>
+<text x="430" y="730"  text-anchor="middle" fill="#fb923c" font-size="9"  class="lbl">⚡ Direct: DataContainer.get_candles()</text>
+<text x="430" y="744"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Pub: AGENT_QUERY / Tool-Execute</text>
+<text x="430" y="758"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Ruft Analysis Snapshot auf (execute)</text>
+<text x="430" y="776"  text-anchor="middle" fill="#4b788a" font-size="8"  class="lbl">management/api.py</text>
+
+<!-- Management API ↔ Bus -->
+<line x1="430" y1="645" x2="550" y2="218" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#m-bus)"/>
+<line x1="550" y1="218" x2="430" y2="645" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#m-bus)"/>
+
+<!-- Management API → DataContainer direct -->
+<line x1="385" y1="645" x2="540" y2="103" stroke="#fb923c" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#m-mon)"/>
+<text x="475" y="380" fill="#f97316" font-size="8" class="lbl" transform="rotate(-68,475,380)">get_candles() direkt</text>
+
+<!-- Management API → Analysis Snapshot -->
+<line x1="430" y1="645" x2="600" y2="620" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#m-http)"/>
+<text x="510" y="636" fill="#38bdf8" font-size="8" class="lbl">execute()</text>
+
+<!-- UI  x=590, y=645..785 -->
+<rect x="590" y="645" width="290" height="140" rx="10" fill="#1c1917" stroke="#38bdf8" stroke-width="1.5"/>
+<text x="735" y="666"  text-anchor="middle" fill="#7dd3fc" font-size="12" font-weight="bold" class="lbl">UI (React / Vite)</text>
+<text x="735" y="681"  text-anchor="middle" fill="#bae6fd" font-size="10" class="lbl">localhost:7654 (proxied)</text>
+<line x1="601" y1="688" x2="869" y2="688" stroke="#1e3a5f" stroke-width="1"/>
+<text x="735" y="702"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Tool Executor · Agent Chat</text>
+<text x="735" y="716"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Orderbook · Chart Analysis</text>
+<text x="735" y="730"  text-anchor="middle" fill="#7dd3fc" font-size="9"  class="lbl">Monitor · Config · LLM Checker</text>
+<text x="735" y="744"  text-anchor="middle" fill="#4b788a" font-size="9"  class="lbl">REST + WebSocket</text>
+<text x="735" y="776"  text-anchor="middle" fill="#4b788a" font-size="8"  class="lbl">ui/src/ · Vite build</text>
+
+<!-- UI ↔ Management API -->
+<line x1="590" y1="712" x2="575" y2="712" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#m-http)"/>
+<line x1="575" y1="724" x2="590" y2="724" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#m-http)"/>
+
+<!-- ROW 5 — LLM ADAPTERS --------------------------------- -->
+<rect x="30" y="805" width="220" height="100" rx="12" fill="#120e1e" stroke="#c084fc" stroke-width="1.5"/>
+<text x="140" y="825"  text-anchor="middle" fill="#f9a8d4" font-size="12" font-weight="bold" class="lbl">LLM Adapters</text>
+<text x="140" y="840"  text-anchor="middle" fill="#fbcfe8" font-size="10" class="lbl">openforexai/adapters/llm/</text>
+<line x1="42" y1="847" x2="238" y2="847" stroke="#4a1942" stroke-width="1"/>
+<text x="140" y="862"  text-anchor="middle" fill="#fbcfe8" font-size="10" class="lbl">AzureOpenAI · Anthropic</text>
+<text x="140" y="877"  text-anchor="middle" fill="#fbcfe8" font-size="10" class="lbl">OpenAI · Ollama · LMStudio</text>
+<text x="140" y="895"  text-anchor="middle" fill="#7d5a8a" font-size="9"  class="lbl">Direkt durch LLMService aufgerufen</text>
+
+<!-- LLM Service → LLM Adapters -->
+<line x1="140" y1="785" x2="140" y2="805" stroke="#f472b6" stroke-width="2" marker-end="url(#m-llm)"/>
+<text x="146" y="798" fill="#f472b6" font-size="9" class="lbl">complete()</text>
+
+<!-- ROW 6 — LLM PROVIDER extern -------------------------- -->
+<rect x="30" y="925" width="220" height="62" rx="10" fill="#0a0614" stroke="#7c3aed" stroke-width="1" stroke-dasharray="5,3"/>
+<text x="140" y="948"  text-anchor="middle" fill="#c084fc" font-size="12" font-weight="bold" class="lbl">LLM Provider (extern)</text>
+<text x="140" y="964"  text-anchor="middle" fill="#a855f7" font-size="10" class="lbl">Azure / OpenAI / Anthropic API</text>
+<text x="140" y="978"  text-anchor="middle" fill="#7c3aed" font-size="9"  class="lbl">HTTPS REST · Timeout 180s</text>
+<line x1="140" y1="905" x2="140" y2="925" stroke="#a855f7" stroke-width="1.5" marker-end="url(#m-ext)"/>
+
+<!-- LEGENDE  x=940, y=645..870 -->
+<rect x="940" y="645" width="240" height="270" rx="8" fill="#0c1220" stroke="#334155" stroke-width="1"/>
+<text x="1060" y="663"  text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="bold" class="lbl">Legende</text>
+<line x1="952" y1="677" x2="988" y2="677" stroke="#34d399" stroke-width="2"   marker-end="url(#m-bus)"/><text x="994" y="681" fill="#34d399" font-size="9" class="lbl">Event Bus (Pub/Sub)</text>
+<line x1="952" y1="694" x2="988" y2="694" stroke="#fbbf24" stroke-width="2"   marker-end="url(#m-tool)"/><text x="994" y="698" fill="#fbbf24" font-size="9" class="lbl">ToolDispatcher / ToolsProxy</text>
+<line x1="952" y1="711" x2="988" y2="711" stroke="#fbbf24" stroke-width="2"   stroke-dasharray="6,3" marker-end="url(#m-bus)"/><text x="994" y="715" fill="#fbbf24" font-size="9" class="lbl">bus_request()</text>
+<line x1="952" y1="728" x2="988" y2="728" stroke="#e879f9" stroke-width="2"   marker-end="url(#m-bus)"/><text x="994" y="732" fill="#e879f9" font-size="9" class="lbl">LLM_REQUEST/RESPONSE</text>
+<line x1="952" y1="745" x2="988" y2="745" stroke="#f472b6" stroke-width="2"   marker-end="url(#m-llm)"/><text x="994" y="749" fill="#f472b6" font-size="9" class="lbl">LLM Adapter (LLMService)</text>
+<line x1="952" y1="762" x2="988" y2="762" stroke="#a855f7" stroke-width="1.5" marker-end="url(#m-ext)"/><text x="994" y="766" fill="#a855f7" font-size="9" class="lbl">HTTPS (extern LLM)</text>
+<line x1="952" y1="779" x2="988" y2="779" stroke="#4ade80" stroke-width="1.5" marker-end="url(#m-brk)"/><text x="994" y="783" fill="#4ade80" font-size="9" class="lbl">Broker API (extern)</text>
+<line x1="952" y1="796" x2="988" y2="796" stroke="#38bdf8" stroke-width="2"   stroke-dasharray="6,3" marker-end="url(#m-http)"/><text x="994" y="800" fill="#38bdf8" font-size="9" class="lbl">REST / WebSocket</text>
+<line x1="952" y1="813" x2="988" y2="813" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#m-db)"/><text x="994" y="817" fill="#94a3b8" font-size="9" class="lbl">._store / ._repository (SQL)</text>
+<line x1="952" y1="830" x2="988" y2="830" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#m-mon)"/><text x="994" y="834" fill="#fb923c" font-size="9" class="lbl">Monitoring emit</text>
+<line x1="952" y1="847" x2="988" y2="847" stroke="#fb923c" stroke-width="1"   stroke-dasharray="3,3" marker-end="url(#m-mon)"/><text x="994" y="851" fill="#f97316" font-size="9" class="lbl">Direct (chart API)</text>
+<rect x="950" y="858" width="222" height="46" rx="4" fill="#0f1629" stroke="#1e3a5f" stroke-width="1"/>
+<text x="1061" y="873" text-anchor="middle" fill="#475569" font-size="8" class="lbl">– – – = dashed: async / optional</text>
+<text x="1061" y="885" text-anchor="middle" fill="#475569" font-size="8" class="lbl">⚡ = einzige direkte Verbindung</text>
+<text x="1061" y="897" text-anchor="middle" fill="#475569" font-size="8" class="lbl">ausserhalb des Event Bus</text>
+
+<!-- MONITORING BUS ---------------------------------------- -->
+<rect x="30" y="1060" width="1555" height="52" rx="10" fill="#431407" stroke="#fb923c" stroke-width="2"/>
+<text x="800" y="1081" text-anchor="middle" fill="#fb923c" font-size="13" font-weight="bold" class="lbl">MONITORING BUS  (fire-and-forget · ring buffer 10 000 · read-only)</text>
+<text x="800" y="1099" text-anchor="middle" fill="#fdba74" font-size="10" class="lbl">openforexai/monitoring/bus.py · GET /monitoring/events · WS /ws/monitoring — alle Bus-Events mit echtem Event-Typ</text>
+
+<!-- Monitoring arrows -->
+<line x1="140" y1="905" x2="200" y2="1060" stroke="#fb923c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#m-mon)"/>
+<line x1="800" y1="218" x2="800" y2="1060" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#m-mon)"/>
+<line x1="1340" y1="490" x2="1280" y2="1060" stroke="#fb923c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#m-mon)"/>
+<line x1="430" y1="785" x2="430" y2="1060" stroke="#fb923c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#m-mon)"/>
+<line x1="735" y1="785" x2="735" y2="1060" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#m-http)"/>
+
+</svg>
+
+<div style="text-align:center;padding:10px;color:#475569;font-size:11px;">
+  Storage Layer (DB Adapter + Physical DB) · System Services am Bus · Event Bus als zentrale Schiene ·
+  Analysis Snapshot (AA-only) · EC + Tools via ToolsProxy · LLM vollständig über Bus
+</div>
+</body>
+</html>
