@@ -727,6 +727,7 @@ export interface LLMAssistantChatRequest {
   question: string
   history: LLMAssistantMessage[]
   context_data?: string
+  include_editing_suffix?: boolean
 }
 
 export interface LLMAssistantChatResponse {

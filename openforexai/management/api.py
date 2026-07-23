@@ -4450,6 +4450,12 @@ class LLMAssistantChatRequest(BaseModel):
         description="Arbitrary context text passed verbatim to the LLM (e.g. JSON config). "
                     "Takes precedence over `script` when both are provided.",
     )
+    include_editing_suffix: bool = Field(
+        default=True,
+        description="Append assistant_system_suffix.md (patch/diff output rules for script or "
+                    "config editing) to the system prompt. Set False for plain conversational "
+                    "contexts that are not editing anything (e.g. the general Chat context).",
+    )
 
 class LLMAssistantChatResponse(BaseModel):
     answer: str
@@ -4552,8 +4558,10 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
     context_text = ctx_path.read_text(encoding="utf-8")
     context_text = _resolve_file_refs(context_text)
 
-    suffix_path = ctx_dir / "assistant_system_suffix.md"
-    suffix_text = suffix_path.read_text(encoding="utf-8").strip() if suffix_path.exists() else ""
+    suffix_text = ""
+    if req.include_editing_suffix:
+        suffix_path = ctx_dir / "assistant_system_suffix.md"
+        suffix_text = suffix_path.read_text(encoding="utf-8").strip() if suffix_path.exists() else ""
 
     system_prompt = context_text.rstrip()
     if suffix_text:

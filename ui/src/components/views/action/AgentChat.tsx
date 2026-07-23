@@ -394,7 +394,7 @@ export function AgentChat() {
   const runtimeEvents = selectedRun?.events ?? []
 
   const send = async () => {
-    if (!selectedAgent || !input.trim() || sending) return
+    if (!input.trim() || sending) return
 
     const question = input.trim()
     setInput('')
@@ -412,6 +412,25 @@ export function AgentChat() {
       const history = messages
         .filter(m => selectedForHistory.has(m.id))
         .map(m => ({ role: m.role, content: m.content }))
+
+      if (!selectedAgent) {
+        const resp = await api.llmAssistantChat({
+          context_file: 'chat_default.md',
+          question,
+          history,
+          include_editing_suffix: false,
+        })
+        const assistantMsg: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'),
+          rawJson: resp.answer || '',
+          timestamp: now(),
+        }
+        setMessages(prev => [...prev, assistantMsg])
+        return
+      }
+
       const resp = await api.askAgent(selectedAgent, question, timeout, history.length ? history : undefined)
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
@@ -562,11 +581,14 @@ export function AgentChat() {
                 onChange={e => {
                   setSelectedAgent(e.target.value)
                   setSelectedRunId(null)
+                  setMessages([])
+                  setRunDetails({})
+                  setSelectedForHistory(new Set())
                 }}
                 disabled={agentsLoading}
                 className="flex-1 max-w-xs bg-gray-800 text-gray-200 text-sm rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-emerald-500"
               >
-                <option value="">— select agent —</option>
+                <option value="">Chat</option>
                 {agents.map(a => (
                   <option key={a.agent_id} value={a.agent_id}>{a.agent_id}</option>
                 ))}
@@ -613,7 +635,7 @@ export function AgentChat() {
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 && (
                 <div className="text-center text-gray-600 mt-16 text-sm">
-                  Select an agent and send a question.<br />
+                  {selectedAgent ? 'Send a question to the selected agent.' : 'Ask anything — or select an agent above to talk to it directly.'}<br />
                   <span className="text-xs text-white">Enter to send, Shift+Enter for newline</span>
                 </div>
             )}
@@ -708,7 +730,7 @@ export function AgentChat() {
                   <Bot className="w-4 h-4 text-blue-300" />
                 </div>
                 <div className="bg-gray-800 rounded-lg px-3 py-2 text-sm text-gray-400 animate-pulse">
-                  Waiting for {selectedAgent}…
+                  Waiting for {selectedAgent || 'Chat'}…
                 </div>
               </div>
             )}
@@ -726,16 +748,15 @@ export function AgentChat() {
                     ? (selectedAgent.includes('-BA-')
                       ? `Paste analysis JSON for ${selectedAgent} and click Execute…`
                       : `Ask ${selectedAgent}…`)
-                    : 'Select an agent first'
+                    : 'Ask anything…'
                 }
-                disabled={!selectedAgent}
                 rows={3}
                 className="flex-1 resize-none bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-600 focus:outline-none focus:border-emerald-500 placeholder-gray-600"
               />
               <div className="flex flex-col gap-2 flex-shrink-0">
                 <button
                   onClick={send}
-                  disabled={!selectedAgent || !input.trim() || sending}
+                  disabled={!input.trim() || sending}
                   className="flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors"
                 >
                   <Send className="w-4 h-4" />
