@@ -319,11 +319,11 @@ export function EventRoutingEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Event Routing Rules</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{root ? joinPath(root, 'config', 'RunTime', 'event_routing.json5') : 'config/RunTime/event_routing.json5'}</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'RunTime', 'event_routing.json5') : 'config/RunTime/event_routing.json5'}</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -523,7 +523,7 @@ export function EventRoutingEditor() {
 
                 {/* Event details */}
                 <div className="space-y-1.5 text-xs">
-                  <p className="text-gray-500 uppercase tracking-wide text-[10px] font-semibold">Event</p>
+                  <p className="text-white uppercase tracking-wide text-[10px] font-semibold">Event</p>
                   <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-0.5">
                     <span className="text-gray-500">Type</span>
                     <span className="text-emerald-300 font-mono">{form.event || '—'}</span>
@@ -546,12 +546,12 @@ export function EventRoutingEditor() {
                 {/* From / To details */}
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="space-y-1">
-                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-semibold">From</p>
+                    <p className="text-white uppercase tracking-wide text-[10px] font-semibold">From</p>
                     <p className="font-mono text-sky-300">{form.from || '—'}</p>
                     <p className="text-gray-400">{classifyFrom(form.from)}</p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-gray-500 uppercase tracking-wide text-[10px] font-semibold">To</p>
+                    <p className="text-white uppercase tracking-wide text-[10px] font-semibold">To</p>
                     <p className="font-mono text-amber-300">{form.to || '—'}</p>
                     <p className="text-gray-400">{classifyTarget(form.to)}</p>
                   </div>
@@ -559,7 +559,7 @@ export function EventRoutingEditor() {
 
                 {/* Validation */}
                 <div className="border-t border-gray-700 pt-2">
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-1">Validation</p>
+                  <p className="text-[10px] text-white uppercase tracking-wide font-semibold mb-1">Validation</p>
                   {issues.length === 0 ? (
                     <p className="text-xs text-emerald-400">No issues detected.</p>
                   ) : (

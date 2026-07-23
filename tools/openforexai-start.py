@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / '.env'
 WRAPPER = ROOT / 'tools' / 'openforexai-wrapper.py'
+VENV_PYTHON = ROOT / '.venv' / 'Scripts' / 'python.exe'
 
 
 def _load_env(path: Path) -> None:
@@ -24,8 +25,11 @@ def _load_env(path: Path) -> None:
 def main() -> int:
     os.chdir(ROOT)
     _load_env(ENV_FILE)
+    if not VENV_PYTHON.exists():
+        print(f'Missing .venv ({VENV_PYTHON}). Run scripts/setup_windows.ps1 first.', file=sys.stderr)
+        return 1
     try:
-        return subprocess.call([sys.executable, str(WRAPPER)], cwd=ROOT, env=os.environ.copy())
+        return subprocess.call([str(VENV_PYTHON), str(WRAPPER)], cwd=ROOT, env=os.environ.copy())
     except KeyboardInterrupt:
         return 0
 

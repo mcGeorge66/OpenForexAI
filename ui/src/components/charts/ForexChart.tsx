@@ -711,7 +711,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
 
   return (
     <div className="w-full h-full min-h-[260px] flex flex-col gap-2">
-      <div className="flex items-center justify-between text-xs text-gray-400 gap-3">
+      <div className="flex items-center justify-between text-xs text-white gap-3">
         <div className="min-w-0 truncate flex items-center gap-2">
           {hovered ? (
             <span>
@@ -753,7 +753,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
                 'px-2 py-0.5 rounded border text-xs',
                 range === n
                   ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
-                  : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-gray-200',
+                  : 'bg-gray-900 border-gray-700 text-white hover:text-gray-200',
               ].join(' ')}
             >
               {n}
@@ -762,7 +762,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         </div>
       </div>
       {indicatorControls && (
-        <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+        <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-white">
           {indicatorControls}
         </div>
       )}

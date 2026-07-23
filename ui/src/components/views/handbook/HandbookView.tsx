@@ -167,7 +167,7 @@ export function HandbookView() {
       <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 flex-wrap">
         <button
           onClick={() => loadFile(initialFile, false)}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors"
           title="Go to start"
         >
           <Home className="w-3.5 h-3.5" />
@@ -229,7 +229,7 @@ export function HandbookView() {
               <button
                 onClick={() => loadFile(current, false)}
                 disabled={loading}
-                className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+                className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
                 title="Reload file"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -314,8 +314,8 @@ function ImageWithFallback({ src }: { src: string }) {
       <div className="flex flex-col items-center gap-2 px-8 py-6 rounded border border-gray-700 bg-gray-900 text-gray-500 text-sm">
         <span className="text-2xl">🖼️</span>
         <span>Image not found</span>
-        <span className="text-xs text-gray-600 font-mono break-all max-w-sm text-center">{src}</span>
-        <span className="text-xs text-gray-600 mt-1">Place the file in <code className="text-gray-400">ui/public/{src}</code> and rebuild.</span>
+        <span className="text-xs text-white font-mono break-all max-w-sm text-center">{src}</span>
+        <span className="text-xs text-white mt-1">Place the file in <code className="text-gray-400">ui/public/{src}</code> and rebuild.</span>
       </div>
     )
   }

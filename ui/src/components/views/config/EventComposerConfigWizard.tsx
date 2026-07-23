@@ -7,13 +7,15 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, MessageSquare, Save, Trash2, Plus, Play } from 'lucide-react'
+import { ChevronDown, ChevronRight, Clock, Copy, Download, MessageSquare, Save, Trash2, Plus, Play } from 'lucide-react'
 import { api, type ToolInfo, type ECExecuteResponse } from '@/api/client'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
 import { Json5MonacoEditor } from '@/components/common/Json5MonacoEditor'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { EntityAssistantPanel } from '@/components/common/EntityAssistantPanel'
+import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
+import { useMonitoringStream } from '@/hooks/useMonitoringStream'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -191,8 +193,30 @@ export function EventComposerConfigWizard() {
   const [testRunning, setTestRunning] = useState(false)
   const [testResult, setTestResult] = useState<ECExecuteResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [exampleLoading, setExampleLoading] = useState<string | null>(null)
+  const [exampleError, setExampleError] = useState<string | null>(null)
+  const debugStream = useMonitoringStream({ filter: ['ec_debug_log'] })
+  const debugEntries = debugStream.events.filter(e => e.payload.ec_id === editForm?.ec_id)
+
+  async function loadRealExample(eventType: string) {
+    setExampleLoading(eventType)
+    setExampleError(null)
+    try {
+      const events = await api.getEvents({ event_type: eventType, limit: 1 })
+      if (events.length === 0) {
+        setExampleError(`No real "${eventType}" event found in the event log yet.`)
+        return
+      }
+      setTestInput(JSON.stringify(events[0].payload, null, 2))
+    } catch (e) {
+      setExampleError(String(e))
+    } finally {
+      setExampleLoading(null)
+    }
+  }
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false)
   const [testModalOpen, setTestModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -281,6 +305,7 @@ export function EventComposerConfigWizard() {
     setTestRunning(true)
     setTestResult(null)
     setTestError(null)
+    debugStream.clear()
     try {
       const result = await api.executeComposer(editForm.ec_id, input)
       setTestResult(result)
@@ -388,7 +413,7 @@ export function EventComposerConfigWizard() {
       {/* ── Left panel: EC list ── */}
       <aside className="w-56 flex-shrink-0 bg-gray-900 border-r border-gray-700 flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">EventComposers</span>
+          <span className="text-xs font-semibold text-white uppercase tracking-wide">EventComposers</span>
           <button
             onClick={startNew}
             title="New EventComposer"
@@ -406,7 +431,7 @@ export function EventComposerConfigWizard() {
                   'w-full text-left px-3 py-2 text-xs transition-colors border-l-2',
                   selectedId === row.form.ec_id && !isNew
                     ? 'bg-emerald-900/40 text-emerald-300 border-emerald-400'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800 border-transparent',
+                    : 'text-white hover:text-gray-200 hover:bg-gray-800 border-transparent',
                 ].join(' ')}
               >
                 <div className="font-mono">{row.form.ec_id}</div>
@@ -440,11 +465,21 @@ export function EventComposerConfigWizard() {
                 <h2 className="text-sm font-semibold text-gray-200">
                   {isNew ? 'New EventComposer' : editForm.ec_id}
                 </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-xs text-white mt-0.5">
                   Script-based entity — peer to LLM agents
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {!isNew && (
+                  <button
+                    onClick={() => setHistoryOpen(true)}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors border border-gray-500/40"
+                    title="History"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    History
+                  </button>
+                )}
                 <button
                   onClick={() => setTestModalOpen(true)}
                   className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white transition-colors border border-emerald-500/40"
@@ -487,10 +522,10 @@ export function EventComposerConfigWizard() {
 
             {/* Identity */}
             <section className="space-y-3">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Identity</h3>
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wide">Identity</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">EC ID *</label>
+                  <label className="block text-xs text-white mb-1">EC ID *</label>
                   <input
                     value={editForm.ec_id}
                     onChange={e => setField('ec_id', e.target.value.toUpperCase())}
@@ -498,10 +533,10 @@ export function EventComposerConfigWizard() {
                     placeholder="GLOBL-ALL___-EC-ECHO"
                     className="w-full bg-gray-800 text-gray-200 text-xs font-mono px-2 py-1.5 rounded border border-gray-600 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                   />
-                  <p className="text-xs text-gray-600 mt-1">BROKER(5)-PAIR(6)-EC-NAME(1-5)</p>
+                  <p className="text-xs text-white mt-1">BROKER(5)-PAIR(6)-EC-NAME(1-5)</p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Comment</label>
+                  <label className="block text-xs text-white mb-1">Comment</label>
                   <input
                     value={editForm.comment}
                     onChange={e => setField('comment', e.target.value)}
@@ -511,7 +546,7 @@ export function EventComposerConfigWizard() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Broker module</label>
+                  <label className="block text-xs text-white mb-1">Broker module</label>
                   <select
                     value={editForm.broker}
                     onChange={e => setField('broker', e.target.value)}
@@ -520,10 +555,10 @@ export function EventComposerConfigWizard() {
                     <option value="">— optional —</option>
                     {brokerNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
-                  <p className="text-xs text-gray-600 mt-1">Resolves broker_name for tools</p>
+                  <p className="text-xs text-white mt-1">Resolves broker_name for tools</p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Pair</label>
+                  <label className="block text-xs text-white mb-1">Pair</label>
                   <select
                     value={editForm.pair}
                     onChange={e => setField('pair', e.target.value)}
@@ -532,10 +567,10 @@ export function EventComposerConfigWizard() {
                     <option value="">— optional —</option>
                     {pairNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
-                  <p className="text-xs text-gray-600 mt-1">Fallback when not in input JSON</p>
+                  <p className="text-xs text-white mt-1">Fallback when not in input JSON</p>
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
                 <input
                   type="checkbox"
                   checked={editForm.enable}
@@ -551,7 +586,7 @@ export function EventComposerConfigWizard() {
               <button
                 type="button"
                 onClick={() => setTriggersOpen(v => !v)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 transition-colors select-none"
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-white hover:text-gray-200 hover:bg-gray-800/60 transition-colors select-none"
               >
                 {triggersOpen
                   ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
@@ -571,7 +606,7 @@ export function EventComposerConfigWizard() {
 
                   {/* Triggers */}
                   <div className="space-y-3 pt-3">
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Triggers</h4>
+                    <h4 className="text-xs font-semibold text-white uppercase tracking-wide">Triggers</h4>
                     <div className="flex flex-wrap gap-2">
                       {[TIMER_TRIGGER, ...DEFAULT_EVENT_TRIGGERS].map(t => (
                         <button
@@ -582,7 +617,7 @@ export function EventComposerConfigWizard() {
                             'px-2 py-1 text-xs rounded border transition-colors',
                             editForm.event_triggers.includes(t)
                               ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
-                              : 'text-gray-500 border-gray-700 hover:text-gray-300',
+                              : 'text-white border-gray-700 hover:text-gray-300',
                           ].join(' ')}
                         >
                           {t}
@@ -591,7 +626,7 @@ export function EventComposerConfigWizard() {
                     </div>
                     {editForm.timer_enabled && (
                       <div className="flex items-center gap-3">
-                        <label className="text-xs text-gray-500">Interval (s)</label>
+                        <label className="text-xs text-white">Interval (s)</label>
                         <input
                           type="number"
                           min={1}
@@ -603,7 +638,7 @@ export function EventComposerConfigWizard() {
                     )}
                     {editForm.event_triggers.includes('m5_candle_trigger') && (
                       <div className="flex items-center gap-3">
-                        <label className="text-xs text-gray-500">AnyCandle (run every Nth M5)</label>
+                        <label className="text-xs text-white">AnyCandle (run every Nth M5)</label>
                         <input
                           type="number"
                           min={1}
@@ -621,17 +656,17 @@ export function EventComposerConfigWizard() {
                   {/* Session Filter */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Session Filter</h4>
+                      <h4 className="text-xs font-semibold text-white uppercase tracking-wide">Session Filter</h4>
                       <button
                         type="button"
                         onClick={() => setField('session_filter', [...editForm.session_filter, { session: 'london', pre: 0, post: 0 }])}
-                        className="text-xs text-gray-500 hover:text-emerald-400 transition-colors"
+                        className="text-xs text-white hover:text-emerald-400 transition-colors"
                       >
                         + Add
                       </button>
                     </div>
                     {editForm.session_filter.length === 0 && (
-                      <p className="text-xs text-gray-600">No filter — triggers fire in any session.</p>
+                      <p className="text-xs text-white">No filter — triggers fire in any session.</p>
                     )}
                     {editForm.session_filter.map((sf, idx) => (
                       <div key={idx} className="flex items-center gap-2">
@@ -645,7 +680,7 @@ export function EventComposerConfigWizard() {
                           placeholder="london"
                           className="w-28 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
                         />
-                        <span className="text-xs text-gray-500">pre</span>
+                        <span className="text-xs text-white">pre</span>
                         <input
                           type="number"
                           value={sf.pre}
@@ -656,7 +691,7 @@ export function EventComposerConfigWizard() {
                           }}
                           className="w-16 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
                         />
-                        <span className="text-xs text-gray-500">post</span>
+                        <span className="text-xs text-white">post</span>
                         <input
                           type="number"
                           value={sf.post}
@@ -683,7 +718,7 @@ export function EventComposerConfigWizard() {
 
             {/* Tools */}
             <section className="space-y-3">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Allowed Tools</h3>
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wide">Allowed Tools</h3>
               <div className="flex flex-wrap gap-2">
                 {allTools.map(t => (
                   <button
@@ -695,7 +730,7 @@ export function EventComposerConfigWizard() {
                       'px-2 py-1 text-xs rounded border transition-colors',
                       editForm.allowed_tools.includes(t.name)
                         ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
-                        : 'text-gray-500 border-gray-700 hover:text-gray-300',
+                        : 'text-white border-gray-700 hover:text-gray-300',
                     ].join(' ')}
                   >
                     {t.name}
@@ -704,7 +739,7 @@ export function EventComposerConfigWizard() {
               </div>
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-500">Max tool turns</label>
+                  <label className="text-xs text-white">Max tool turns</label>
                   <input
                     type="number"
                     min={1}
@@ -714,7 +749,7 @@ export function EventComposerConfigWizard() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-500">Script timeout (s)</label>
+                  <label className="text-xs text-white">Script timeout (s)</label>
                   <input
                     type="number"
                     min={0}
@@ -722,7 +757,7 @@ export function EventComposerConfigWizard() {
                     onChange={e => setField('script_timeout_seconds', Number(e.target.value))}
                     className="w-20 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
                   />
-                  <span className="text-xs text-gray-600">0 = no timeout</span>
+                  <span className="text-xs text-white">0 = no timeout</span>
                 </div>
               </div>
             </section>
@@ -749,7 +784,7 @@ export function EventComposerConfigWizard() {
                     'px-3 py-1.5 text-xs transition-colors',
                     activeTab === 'script'
                       ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
-                      : 'text-gray-500 hover:text-gray-300',
+                      : 'text-white hover:text-gray-300',
                   ].join(' ')}
                 >
                   Script
@@ -760,7 +795,7 @@ export function EventComposerConfigWizard() {
                     'px-3 py-1.5 text-xs transition-colors',
                     activeTab === 'config'
                       ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
-                      : 'text-gray-500 hover:text-gray-300',
+                      : 'text-white hover:text-gray-300',
                   ].join(' ')}
                 >
                   Config (JSON)
@@ -772,7 +807,7 @@ export function EventComposerConfigWizard() {
                       'px-3 py-1.5 text-xs transition-colors flex items-center gap-1',
                       activeTab === 'test'
                         ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
-                        : 'text-gray-500 hover:text-gray-300',
+                        : 'text-white hover:text-gray-300',
                     ].join(' ')}
                   >
                     <Play className="w-3 h-3" />
@@ -783,7 +818,7 @@ export function EventComposerConfigWizard() {
 
               {activeTab === 'script' && (
                 <div>
-                  <p className="text-xs text-gray-500 mb-1">
+                  <p className="text-xs text-white mb-1">
                     Define <code className="text-gray-300">async def main(input, config, tools)</code>.
                     Return <code className="text-gray-300">dict</code> to emit output, <code className="text-gray-300">None</code> to skip.
                   </p>
@@ -799,7 +834,7 @@ export function EventComposerConfigWizard() {
 
               {activeTab === 'config' && (
                 <div>
-                  <p className="text-xs text-gray-500 mb-1">
+                  <p className="text-xs text-white mb-1">
                     Passed as <code className="text-gray-300">config</code> to the script. Must be valid JSON.
                   </p>
                   <div style={{ height: 400 }} className="border border-gray-600 rounded overflow-hidden">
@@ -819,10 +854,30 @@ export function EventComposerConfigWizard() {
 
               {activeTab === 'test' && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-white">
                     Passes the JSON below as <code className="text-gray-300">input</code> to the script.
                     The currently saved <code className="text-gray-300">config_json</code> is used as <code className="text-gray-300">config</code>.
                   </p>
+                  {editForm.event_triggers.filter(t => t !== TIMER_TRIGGER).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-white">Load real example:</span>
+                      {editForm.event_triggers.filter(t => t !== TIMER_TRIGGER).map(t => (
+                        <button
+                          key={t}
+                          onClick={() => void loadRealExample(t)}
+                          disabled={exampleLoading !== null}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-800 text-gray-300 border border-gray-700 rounded hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-40"
+                          title={`Load the most recent real "${t}" event from the event log`}
+                        >
+                          <Download className="w-3 h-3" />
+                          {exampleLoading === t ? 'Loading…' : t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {exampleError && (
+                    <div className="text-xs text-amber-400 bg-amber-900/20 rounded p-2">{exampleError}</div>
+                  )}
                   <div style={{ height: 200 }} className="border border-gray-600 rounded overflow-hidden">
                     <Json5MonacoEditor
                       value={testInput}
@@ -837,6 +892,38 @@ export function EventComposerConfigWizard() {
                     <Play className="w-3 h-3" />
                     {testRunning ? 'Running…' : 'Run'}
                   </button>
+                  {(debugEntries.length > 0 || testRunning) && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-white">
+                          Debug output {testRunning && <span className="text-emerald-400">(live)</span>}
+                        </span>
+                        <span className="text-xs text-white">
+                          via <code className="text-gray-400">debug(message)</code> — test runs only
+                        </span>
+                      </div>
+                      <div className="text-xs font-mono bg-gray-900 rounded p-2 overflow-auto max-h-64 space-y-1">
+                        {debugEntries.length === 0 && testRunning && (
+                          <span className="text-gray-600 italic">Waiting for debug() calls…</span>
+                        )}
+                        {debugEntries.map(e => {
+                          const line = e.payload.line
+                          const elapsed = e.payload.elapsed_seconds
+                          const msg = e.payload.message
+                          const text = typeof msg === 'object' && msg !== null
+                            ? JSON.stringify(msg, null, 2)
+                            : String(msg)
+                          return (
+                            <div key={e.id} className="border-b border-gray-800 pb-1 last:border-0">
+                              <span className="text-indigo-400">L{String(line ?? '?')}</span>
+                              <span className="text-gray-600"> [{typeof elapsed === 'number' ? elapsed.toFixed(2) : '?'}s]: </span>
+                              <span className="text-gray-300 whitespace-pre-wrap break-all">{text}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                   {testError && (
                     <div className="text-xs text-red-400 bg-red-900/20 rounded p-2">{testError}</div>
                   )}
@@ -855,7 +942,7 @@ export function EventComposerConfigWizard() {
                       )}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-gray-500">Output</span>
+                          <span className="text-xs text-white">Output</span>
                           <button
                             onClick={() => {
                               const text = testResult.output !== null
@@ -863,7 +950,7 @@ export function EventComposerConfigWizard() {
                                 : '(no output)'
                               void navigator.clipboard.writeText(text)
                             }}
-                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-200 transition-colors"
+                            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors"
                             title="Copy output"
                           >
                             <Copy className="w-3 h-3" />
@@ -897,6 +984,14 @@ export function EventComposerConfigWizard() {
         defaultSourceAgentId={editForm?.ec_id ?? 'management_api'}
         defaultEventType={editForm?.event_triggers?.[0] ?? ''}
         onClose={() => setTestModalOpen(false)}
+      />
+    )}
+
+    {historyOpen && editForm && (
+      <EntityHistoryModal
+        entityType="event_composer"
+        entityId={editForm.ec_id}
+        onClose={() => setHistoryOpen(false)}
       />
     )}
 

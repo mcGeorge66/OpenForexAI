@@ -10,19 +10,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = ROOT / ".runtime"
 RESTART_FLAG = RUNTIME_DIR / "restart.requested"
+VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 
 
 def _spawn_app() -> subprocess.Popen:
     env = dict(os.environ)
     env["OPENFOREXAI_WRAPPED"] = "1"
     env["OPENFOREXAI_RESTART_SIGNAL_PATH"] = str(RESTART_FLAG)
-    return subprocess.Popen([sys.executable, "-m", "openforexai.main"], cwd=ROOT, env=env)
+    python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
+    return subprocess.Popen([python, "-m", "openforexai.main"], cwd=ROOT, env=env)
 
 
 def main() -> int:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[wrapper] root={ROOT}")
     print(f"[wrapper] restart flag={RESTART_FLAG}")
+    if not VENV_PYTHON.exists():
+        print(f"[wrapper] WARNING: .venv not found at {VENV_PYTHON}, falling back to {sys.executable}")
 
     while True:
         if RESTART_FLAG.exists():

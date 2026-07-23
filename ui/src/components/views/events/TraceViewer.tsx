@@ -106,14 +106,14 @@ export function TraceViewer({ eventId, onClose, embedded }: Props) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Event Trace</span>
           {!loading && events.length > 0 && (
-            <span className="text-xs text-gray-500">{events.length} event{events.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-white">{events.length} event{events.length !== 1 ? 's' : ''}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {!loading && events.length > 0 && (
             <button
               onClick={exportTrace}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-white hover:text-gray-200 hover:bg-gray-800"
               title="Export trace as JSON5"
             >
               <Download className="w-3 h-3" /> Export
@@ -171,9 +171,9 @@ export function TraceViewer({ eventId, onClose, embedded }: Props) {
                     <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${colorCls}`}>
                       {ev.event_type}
                     </span>
-                    <span className="text-xs text-gray-500 font-mono">{formatTs(ev.created_at)}</span>
+                    <span className="text-xs text-white font-mono">{formatTs(ev.created_at)}</span>
                     {rootTs && ev.created_at !== rootTs && (
-                      <span className="text-[10px] text-gray-600 font-mono">{relativeMs(rootTs, ev.created_at)}</span>
+                      <span className="text-[10px] text-white font-mono">{relativeMs(rootTs, ev.created_at)}</span>
                     )}
                     {isTarget && <span className="text-[10px] text-emerald-400 ml-auto">← target</span>}
                     <span className="ml-auto text-gray-600">
@@ -181,7 +181,7 @@ export function TraceViewer({ eventId, onClose, embedded }: Props) {
                     </span>
                   </div>
 
-                  <div className="px-3 pb-1 flex items-center gap-3 text-[10px] text-gray-600 font-mono">
+                  <div className="px-3 pb-1 flex items-center gap-3 text-[10px] text-white font-mono">
                     <span>{ev.source_agent}</span>
                     {ev.target_agent && <><span>→</span><span>{ev.target_agent}</span></>}
                     {ev.correlation && <span className="text-gray-700 truncate max-w-[120px]" title={ev.correlation}>corr:{ev.correlation.slice(0, 8)}</span>}
@@ -189,9 +189,9 @@ export function TraceViewer({ eventId, onClose, embedded }: Props) {
 
                   {isExpanded && (
                     <div className="px-3 pb-3 border-t border-gray-800 mt-1 pt-2">
-                      <div className="text-[10px] text-gray-600 font-mono mb-1">id: {ev.id}</div>
+                      <div className="text-[10px] text-white font-mono mb-1">id: {ev.id}</div>
                       {ev.chain.length > 0 && (
-                        <div className="text-[10px] text-gray-600 font-mono mb-1">
+                        <div className="text-[10px] text-white font-mono mb-1">
                           chain: [{ev.chain.map(c => c.slice(0, 8)).join(', ')}]
                         </div>
                       )}

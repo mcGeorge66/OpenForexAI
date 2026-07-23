@@ -131,12 +131,12 @@ export function Header({ lastUpdate, connected }: HeaderProps) {
         <span className="font-semibold text-white text-base tracking-wide">
           OpenForexAI
         </span>
-        <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded">
+        <span className="text-xs text-white bg-gray-800 px-2 py-0.5 rounded">
           v{version}
         </span>
       </div>
 
-      <div className="flex items-center gap-6 text-xs text-gray-400">
+      <div className="flex items-center gap-6 text-xs text-white">
         {/* WebSocket connection indicator */}
         <div className="flex items-center gap-1.5">
           {connected

@@ -31,8 +31,6 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'entity',       label: 'Entity Events' },
   ],
   config: [
-    { id: 'information',     label: 'Information'      },
-    { id: '__div0',          label: '', divider: true   },
     { id: 'agent_wizard',    label: 'Agent Config'     },
     { id: 'ec_wizard',       label: 'Entity Config'    },
     { id: 'snapshot_config', label: 'Snapshot Config'  },
@@ -70,7 +68,7 @@ export function SubMenu({ section, active, onSelect, itemsOverride, emptyLabel }
   if (items.length === 0) {
     return (
       <aside className="w-44 flex-shrink-0 bg-gray-900 border-r border-gray-700 overflow-y-auto">
-        <div className="px-4 py-3 text-xs text-gray-500">
+        <div className="px-4 py-3 text-xs text-white">
           {emptyLabel ?? 'No items'}
         </div>
       </aside>

@@ -145,7 +145,7 @@ export function AiAssistantModal({
           <Bot className="w-4 h-4 text-blue-400 flex-shrink-0" />
           <span className="text-sm font-medium text-gray-200 flex-1">{title}</span>
           {contextDataLabel && (
-            <span className="text-xs text-gray-500 truncate max-w-[200px]" title={contextDataLabel}>
+            <span className="text-xs text-white truncate max-w-[200px]" title={contextDataLabel}>
               {contextDataLabel}
             </span>
           )}
@@ -168,7 +168,7 @@ export function AiAssistantModal({
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
           {history.length === 0 && !loading && (
-            <p className="text-xs text-gray-600 italic mt-8 text-center">
+            <p className="text-xs text-white italic mt-8 text-center">
               Ask a question about the current configuration…
               <br />
               <span className="text-gray-700">Enter to send · Shift+Enter for newline · Esc to close</span>
@@ -190,7 +190,7 @@ export function AiAssistantModal({
                   onClick={() => copyMessage(msg.content, i)}
                   className={`flex items-center gap-1 text-[11px] transition-colors ${
                     msg.role === 'user' ? 'self-end' : 'self-start'
-                  } text-gray-600 hover:text-gray-400`}
+                  } text-white hover:text-white`}
                 >
                   {copiedIdx === i
                     ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Copied</span></>
@@ -202,7 +202,7 @@ export function AiAssistantModal({
           ))}
           {loading && (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs bg-gray-800 text-gray-400">
+              <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs bg-gray-800 text-white">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Thinking…
               </div>

@@ -533,7 +533,7 @@ export function ChartAnalysis() {
         color: ind.color,
         lineWidth: ind.lineWidth,
         lineStyle: ind.lineStyle,
-        precision: ind.name === 'RSI' ? 2 : (['SLOPE_E', 'SLOPE_S'] as string[]).includes(ind.name) ? 2 : 5,
+        precision: ind.name === 'RSI' ? 4 : (['SLOPE_E', 'SLOPE_S'] as string[]).includes(ind.name) ? 4 : 5,
         values: ind.data,
         zeroline: (['SLOPE_E', 'SLOPE_S'] as string[]).includes(ind.name),
       })),
@@ -830,7 +830,7 @@ ${analysisSection}`
             ))}
           </select>
         ) : brokers.length === 1 ? (
-          <span className="text-xs text-gray-400 border border-gray-700 rounded px-2 py-0.5 bg-gray-800">
+          <span className="text-xs text-white border border-gray-700 rounded px-2 py-0.5 bg-gray-800">
             {brokers[0].short_name ?? brokers[0].name}
           </span>
         ) : null}
@@ -845,14 +845,14 @@ ${analysisSection}`
                 'px-2 py-0.5 rounded border text-xs',
                 timeframe === tf
                   ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
-                  : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-gray-200',
+                  : 'bg-gray-900 border-gray-700 text-white hover:text-gray-200',
               ].join(' ')}
             >{tf}</button>
           ))}
         </div>
 
         {/* Candle count */}
-        <div className="flex items-center gap-1 text-xs text-gray-400">
+        <div className="flex items-center gap-1 text-xs text-white">
           <span>Candles</span>
           <input
             type="number"
@@ -900,12 +900,12 @@ ${analysisSection}`
             className={`px-2 py-1 rounded border text-xs flex items-center gap-1 ${
               panMode
                 ? 'border-blue-500 bg-blue-900/40 text-blue-300'
-                : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-white'
+                : 'border-gray-700 bg-gray-900 text-white hover:text-white'
             }`}
           >
             {panMode ? '✋ Pan' : '🔍 Zoom'}
           </button>
-          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-gray-400 hover:text-gray-200">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-white hover:text-gray-200">
             <input
               type="checkbox"
               checked={showSessionBands}
@@ -914,7 +914,7 @@ ${analysisSection}`
             />
             Sessions
           </label>
-          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-gray-400 hover:text-gray-200">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-white hover:text-gray-200">
             <input
               type="checkbox"
               checked={showAnalyses}
@@ -1096,7 +1096,7 @@ ${analysisSection}`
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Decision JSON</span>
+                  <span className="text-xs text-white">Decision JSON</span>
                   <CopyButton getText={() => selectedAnalysis.analysis_text ?? JSON.stringify(selectedAnalysis.analysis ?? selectedAnalysis.output, null, 2)} />
                 </div>
                 <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
@@ -1199,7 +1199,7 @@ function IndicatorsPanel({
             ))}
           </div>
           {/* Instance list */}
-          {indicators.length === 0 && <p className="text-gray-500 text-xs">No indicators added.</p>}
+          {indicators.length === 0 && <p className="text-white text-xs">No indicators added.</p>}
           {indicators.map(ind => (
             <div key={ind.id} className="flex items-center gap-1.5 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
               <button onClick={() => onUpdate(ind.id, { visible: !ind.visible })} className="text-gray-400 hover:text-white">
@@ -1329,7 +1329,7 @@ function DrawingToolsPanel({
         <div className="space-y-3">
           {/* Style controls */}
           <div className="flex items-center gap-2 flex-wrap">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-gray-400 hover:text-gray-200">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-white hover:text-gray-200">
               <input
                 type="checkbox"
                 checked={multiUse}
@@ -1394,7 +1394,7 @@ function DrawingToolsPanel({
           {/* Tool buttons */}
           {TOOL_GROUPS.map(group => (
             <div key={group.label} className="space-y-1">
-              <div className="text-gray-500 text-xs">{group.label}</div>
+              <div className="text-white text-xs">{group.label}</div>
               <div className="flex flex-wrap gap-1">
                 {group.tools.map(tool => (
                   <button
@@ -1428,11 +1428,11 @@ function DrawingToolsPanel({
               />
               <button
                 onClick={() => onElliottModeChange('impulse')}
-                className={`text-xs px-2 py-0.5 rounded border ${elliottMode === 'impulse' ? 'border-emerald-500 text-emerald-300' : 'border-gray-700 text-gray-400'}`}
+                className={`text-xs px-2 py-0.5 rounded border ${elliottMode === 'impulse' ? 'border-emerald-500 text-emerald-300' : 'border-gray-700 text-white'}`}
               >1-2-3-4-5</button>
               <button
                 onClick={() => onElliottModeChange('corrective')}
-                className={`text-xs px-2 py-0.5 rounded border ${elliottMode === 'corrective' ? 'border-emerald-500 text-emerald-300' : 'border-gray-700 text-gray-400'}`}
+                className={`text-xs px-2 py-0.5 rounded border ${elliottMode === 'corrective' ? 'border-emerald-500 text-emerald-300' : 'border-gray-700 text-white'}`}
               >A-B-C</button>
             </div>
           )}
@@ -1440,7 +1440,7 @@ function DrawingToolsPanel({
           {/* Active drawings list */}
           {drawings.length > 0 && (
             <div className="space-y-1 pt-1 border-t border-gray-800">
-              <div className="text-gray-500 text-xs mb-1">Active drawings</div>
+              <div className="text-white text-xs mb-1">Active drawings</div>
               {[...drawings].reverse().map(d => {
                 const isExp = expandedDrawingId === d.id
                 return (
@@ -1525,7 +1525,7 @@ function DrawingToolsPanel({
                             <button
                               key={pos}
                               onClick={() => onUpdateLabel(d.id, pos)}
-                              className={`px-1.5 py-0.5 rounded border text-xs ${(d.label ?? 'top') === pos ? 'border-emerald-500 bg-emerald-900/40 text-emerald-300' : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white'}`}
+                              className={`px-1.5 py-0.5 rounded border text-xs ${(d.label ?? 'top') === pos ? 'border-emerald-500 bg-emerald-900/40 text-emerald-300' : 'border-gray-700 bg-gray-800 text-white hover:text-white'}`}
                             >{pos}</button>
                           ))}
                         </div>
@@ -1799,7 +1799,7 @@ function SwingLevelsPanel({
           />
           <span className="font-semibold text-gray-300 text-xs uppercase tracking-wide">Swing Levels</span>
         </label>
-        {enabled && loading && <span className="text-gray-500 text-xs">Loading…</span>}
+        {enabled && loading && <span className="text-white text-xs">Loading…</span>}
       </div>
       {enabled && (
         <div className="space-y-2">
@@ -1905,7 +1905,7 @@ function SwingLevelsPanel({
             </div>
           )}
           {lines.length === 0 && !loading && (
-            <p className="text-gray-500 text-xs">No swing levels found.</p>
+            <p className="text-white text-xs">No swing levels found.</p>
           )}
         </div>
       )}

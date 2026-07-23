@@ -151,6 +151,62 @@ def _make_log_fn(monitoring_bus: Any, ec_id: str, broker_name: str | None, pair:
     return log
 
 
+def _make_debug_fn(
+    monitoring_bus: Any,
+    ec_id: str,
+    broker_name: str | None,
+    pair: str | None,
+    is_test: bool,
+    start_monotonic: float,
+):
+    """Return a ``debug(message)`` function for EC scripts — test runs only.
+
+    Active only when the current run was started via the Test button
+    (``trigger == "test"``); a true no-op otherwise, so ``debug()`` calls have
+    zero effect and zero cost in live/production runs. Reports the exact
+    source line of the call (matches the line numbers shown everywhere else
+    in the editor/LLM tooling) and elapsed seconds since the script started,
+    so slow sections are visible without print()-style trial and error, and
+    partial output survives even if the script later times out.
+
+    Usage in EC scripts::
+
+        resp = await tools.call("get_open_positions", pair=pair)
+        debug(resp)  # streamed live to the Test tab, JSON-formatted if applicable
+
+    Filter in the monitoring stream via event_type ``ec_debug_log``.
+    """
+    if not is_test or monitoring_bus is None:
+        def debug_noop(message: Any) -> None:
+            return None
+        return debug_noop
+
+    def debug(message: Any) -> None:
+        import inspect as _inspect
+        from datetime import UTC, datetime as _dt
+        from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+
+        caller = _inspect.currentframe()
+        line = caller.f_back.f_lineno if caller is not None and caller.f_back is not None else None
+        elapsed = asyncio.get_event_loop().time() - start_monotonic
+        safe_message = message if isinstance(message, (dict, list, str, int, float, bool, type(None))) else str(message)
+
+        monitoring_bus.emit(MonitoringEvent(
+            timestamp=_dt.now(UTC),
+            source_module=f"ec:{ec_id}",
+            event_type=MonitoringEventType.EC_DEBUG_LOG,
+            broker_name=broker_name,
+            pair=pair,
+            payload={
+                "ec_id": ec_id,
+                "line": line,
+                "message": safe_message,
+                "elapsed_seconds": round(elapsed, 3),
+            },
+        ))
+    return debug
+
+
 class EventComposer:
     """Container for an EC entity.
 
@@ -390,6 +446,10 @@ class EventComposer:
         ask_llm_fn = make_ask_llm(event_bus=self._bus, source_id=self.ec_id)
         log_fn = _make_log_fn(self._monitoring_bus, self.ec_id, self._broker_name, self._pair)
         emit_fn = _make_emit_fn(self._bus, self.ec_id)
+        debug_fn = _make_debug_fn(
+            self._monitoring_bus, self.ec_id, self._broker_name, self._pair,
+            is_test=(trigger == "test"), start_monotonic=start_monotonic,
+        )
 
         # Build message context dict for scripts
         message_ctx: dict = {
@@ -407,6 +467,7 @@ class EventComposer:
                 "ask_llm": ask_llm_fn,
                 "log": log_fn,
                 "emit": emit_fn,
+                "debug": debug_fn,
                 "message": message_ctx,
             }
             exec(self._compiled, ns)  # noqa: S102

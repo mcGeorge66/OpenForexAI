@@ -95,9 +95,9 @@ export function EventTestModal({ defaultEventType = '', defaultSourceAgentId = '
         <div className="p-4 space-y-4">
           {/* Event type selector */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Event Type</label>
+            <label className="block text-xs text-white mb-1">Event Type</label>
             {loadingSchemas ? (
-              <div className="flex items-center gap-2 text-gray-500 text-xs">
+              <div className="flex items-center gap-2 text-white text-xs">
                 <Loader2 className="w-3 h-3 animate-spin" /> Loading schemas…
               </div>
             ) : (
@@ -119,18 +119,18 @@ export function EventTestModal({ defaultEventType = '', defaultSourceAgentId = '
 
           {/* Required fields hint */}
           {eventType && requiredFields.length > 0 && (
-            <div className="text-xs text-gray-500 bg-gray-900 rounded px-3 py-2">
+            <div className="text-xs text-white bg-gray-900 rounded px-3 py-2">
               Required payload fields:&nbsp;
               <span className="text-orange-400 font-mono">{requiredFields.join(', ')}</span>
             </div>
           )}
           {eventType && requiredFields.length === 0 && (
-            <div className="text-xs text-gray-600">No required payload fields for this event type.</div>
+            <div className="text-xs text-white">No required payload fields for this event type.</div>
           )}
 
           {/* Source agent */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Source Agent ID</label>
+            <label className="block text-xs text-white mb-1">Source Agent ID</label>
             <input
               type="text"
               value={sourceAgentId}
@@ -141,7 +141,7 @@ export function EventTestModal({ defaultEventType = '', defaultSourceAgentId = '
 
           {/* Payload */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Payload (JSON)</label>
+            <label className="block text-xs text-white mb-1">Payload (JSON)</label>
             <textarea
               rows={6}
               value={payloadText}

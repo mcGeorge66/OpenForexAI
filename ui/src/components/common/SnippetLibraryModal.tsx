@@ -338,7 +338,7 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                 </div>
               </div>
               {filter.trim() && (
-                <p className="text-[9px] text-gray-600 px-1 leading-tight">
+                <p className="text-[9px] text-white px-1 leading-tight">
                   Suche in Name · Beschreibung · Tags &nbsp;|&nbsp; Operatoren: AND &nbsp;OR &nbsp;NOT &nbsp;- &nbsp;* &nbsp;( )
                 </p>
               )}
@@ -346,16 +346,16 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
 
             <div className="flex-1 overflow-y-auto">
               {loading && (
-                <p className="px-3 py-3 text-xs text-gray-500 animate-pulse">Loading…</p>
+                <p className="px-3 py-3 text-xs text-white animate-pulse">Loading…</p>
               )}
               {!loading && entries.length === 0 && (
-                <p className="px-3 py-3 text-xs text-gray-500">No snippets yet. Click "New" to start.</p>
+                <p className="px-3 py-3 text-xs text-white">No snippets yet. Click "New" to start.</p>
               )}
               {(() => {
                 const pred = buildFilter(filter)
                 const visible = sortedEntries(entries).filter(pred)
                 if (!loading && entries.length > 0 && visible.length === 0) {
-                  return <p className="px-3 py-3 text-xs text-gray-500">Keine Treffer für „{filter.trim()}"</p>
+                  return <p className="px-3 py-3 text-xs text-white">Keine Treffer für „{filter.trim()}"</p>
                 }
                 return visible.map(entry => (
                   <button
@@ -374,12 +374,12 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                       )}
                     </div>
                     {entry.description && (
-                      <div className="text-[11px] text-gray-500 mt-0.5 truncate">{entry.description}</div>
+                      <div className="text-[11px] text-white mt-0.5 truncate">{entry.description}</div>
                     )}
                     {entry.tags && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {entry.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => (
-                          <span key={t} className="text-[9px] px-1 py-px rounded bg-gray-700 text-gray-400 font-mono">{t}</span>
+                          <span key={t} className="text-[9px] px-1 py-px rounded bg-gray-700 text-white font-mono">{t}</span>
                         ))}
                       </div>
                     )}
@@ -392,14 +392,14 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
           {/* Right — editor */}
           <div className="flex-1 min-h-0 flex flex-col p-4 gap-3 overflow-y-auto">
             {!draft && (
-              <p className="text-xs text-gray-500 mt-6 text-center">Select a snippet from the list or create a new one.</p>
+              <p className="text-xs text-white mt-6 text-center">Select a snippet from the list or create a new one.</p>
             )}
 
             {draft && (
               <>
                 {/* Row: Name + Version + actions */}
                 <div className="flex items-end gap-2 flex-shrink-0">
-                  <label className="flex-1 text-xs text-gray-400">
+                  <label className="flex-1 text-xs text-white">
                     Name
                     <input
                       value={draft.name}
@@ -408,7 +408,7 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                       placeholder="E.g. Normalize candles"
                     />
                   </label>
-                  <label className="w-20 text-xs text-gray-400 flex-shrink-0">
+                  <label className="w-20 text-xs text-white flex-shrink-0">
                     Version
                     <input
                       value={draft.version}
@@ -447,7 +447,7 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                 </div>
 
                 {/* Description */}
-                <label className="block text-xs text-gray-400 flex-shrink-0">
+                <label className="block text-xs text-white flex-shrink-0">
                   Description
                   <textarea
                     rows={3}
@@ -459,7 +459,7 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                 </label>
 
                 {/* Tags */}
-                <label className="block text-xs text-gray-400 flex-shrink-0">
+                <label className="block text-xs text-white flex-shrink-0">
                   Tags
                   <input
                     type="text"
@@ -468,13 +468,13 @@ export function SnippetLibraryModal({ scope, onInsert, onClose }: SnippetLibrary
                     className="mt-0.5 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
                     placeholder="E.g. SnapshotCalc, Indicator"
                   />
-                  <span className="text-[10px] text-gray-600">Comma-separated keywords. Used for filtering (e.g. SnapshotCalc).</span>
+                  <span className="text-[10px] text-white">Comma-separated keywords. Used for filtering (e.g. SnapshotCalc).</span>
                 </label>
 
                 {/* Code — Monaco Editor */}
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex items-center justify-between mb-1 flex-shrink-0">
-                    <span className="text-xs text-gray-400">Code</span>
+                    <span className="text-xs text-white">Code</span>
                     <CopyButton getText={() => draft.code} />
                   </div>
                   <div className="flex-1 min-h-[280px] rounded border border-gray-600 overflow-hidden">

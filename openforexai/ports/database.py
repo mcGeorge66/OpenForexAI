@@ -139,8 +139,19 @@ class AbstractRepository(ABC):
         self,
         agent_id: str | None = None,
         pair: str | None = None,
+        snapshot_profile: str | None = None,
+        decision_prompt_profile: str | None = None,
         limit: int = 200,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]]:
+        """Return agent_decisions rows (newest first), optionally filtered.
+
+        *snapshot_profile* / *decision_prompt_profile* filter on the profile
+        name recorded in ``output`` at decision time (see agent.py
+        ``_persist_analysis_result``) — used by the config-editor "history"
+        views for Snapshot/Decision-Prompt profiles, which have no dedicated
+        run log of their own.
+        """
+        ...
 
     @abstractmethod
     async def get_analysis_record(self, record_id: str) -> dict[str, Any] | None: ...
@@ -206,6 +217,11 @@ class AbstractRepository(ABC):
     @abstractmethod
     async def save_ec_run(self, run: ECRun) -> str:
         """Persist a completed EC run.  Returns the run UUID as string."""
+        ...
+
+    @abstractmethod
+    async def get_ec_runs(self, ec_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Return ec_runs rows for *ec_id* (newest first)."""
         ...
 
     # ── Knowledge base ────────────────────────────────────────────────────────

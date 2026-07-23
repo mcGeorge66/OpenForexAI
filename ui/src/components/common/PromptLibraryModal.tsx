@@ -216,10 +216,10 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
 
             <div className="flex-1 overflow-y-auto">
               {loading && (
-                <p className="px-3 py-3 text-xs text-gray-500 animate-pulse">Loading…</p>
+                <p className="px-3 py-3 text-xs text-white animate-pulse">Loading…</p>
               )}
               {!loading && entries.length === 0 && (
-                <p className="px-3 py-3 text-xs text-gray-500">No entries yet. Click "New Entry" to start.</p>
+                <p className="px-3 py-3 text-xs text-white">No entries yet. Click "New Entry" to start.</p>
               )}
               {sortedEntries(entries).map(entry => (
                 <button
@@ -238,7 +238,7 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
                     )}
                   </div>
                   {entry.description && (
-                    <div className="text-[11px] text-gray-500 mt-0.5 truncate">{entry.description}</div>
+                    <div className="text-[11px] text-white mt-0.5 truncate">{entry.description}</div>
                   )}
                 </button>
               ))}
@@ -248,14 +248,14 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
           {/* Right — editor */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {!draft && (
-              <p className="text-xs text-gray-500 mt-6 text-center">Select an entry from the list or create a new one.</p>
+              <p className="text-xs text-white mt-6 text-center">Select an entry from the list or create a new one.</p>
             )}
 
             {draft && (
               <>
                 {/* Row: Name + Version + actions */}
                 <div className="flex items-end gap-2">
-                  <label className="flex-1 text-xs text-gray-400">
+                  <label className="flex-1 text-xs text-white">
                     Name
                     <input
                       value={draft.name}
@@ -264,7 +264,7 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
                       placeholder="E.g. Scalping Analyst"
                     />
                   </label>
-                  <label className="w-20 text-xs text-gray-400 flex-shrink-0">
+                  <label className="w-20 text-xs text-white flex-shrink-0">
                     Version
                     <input
                       value={draft.version}
@@ -303,7 +303,7 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
                 </div>
 
                 {/* Description — multiline */}
-                <label className="block text-xs text-gray-400">
+                <label className="block text-xs text-white">
                   Description
                   <textarea
                     rows={3}
@@ -317,7 +317,7 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
                 {/* Prompt text */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-400">Prompt</span>
+                    <span className="text-xs text-white">Prompt</span>
                     <div className="flex items-center gap-1.5">
                       <CopyButton getText={() => draft.text} />
                       <button
@@ -358,7 +358,7 @@ export function PromptLibraryModal({ scope, onClose, onInsert, onReplace }: Prom
             Close
           </button>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 mr-1">Apply to prompt:</span>
+            <span className="text-xs text-white mr-1">Apply to prompt:</span>
             <button
               onClick={() => { if (draft?.text) { onInsert(draft.text); onClose() } }}
               disabled={!draft?.text}

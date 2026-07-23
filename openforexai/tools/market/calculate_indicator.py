@@ -44,9 +44,37 @@ class CalculateIndicatorTool(BaseTool):
                 "description": "Apply EMA smoothing to the indicator output (period of the smoothing EMA). 1 = no smoothing (default). Useful for slope indicators to reduce noise.",
                 "minimum": 1, "maximum": 50, "default": 1,
             },
+            "warmup_candles": {
+                "type": "integer",
+                "description": (
+                    "Extra candles fetched before the returned series, so recursive/EMA-style "
+                    "smoothing (RSI, ATR, EMA, and SLOPE_E/SLOPE_S when smooth_period > 1) has "
+                    "converged by the time it reaches the values actually returned. Leave empty "
+                    "to auto-calculate from `period` (targets ~0.1% residual error). Set explicitly "
+                    "to override — e.g. to match a specific chart's lookback, or to save DB reads "
+                    "when a lower precision is acceptable."
+                ),
+                "minimum": 0, "maximum": 2000,
+            },
         },
         "required": ["indicator", "period", "timeframe"],
     }
+
+    # Warm-up sizing for recursive smoothing (RSI/ATR use Wilder's alpha=1/period, the
+    # slower-converging case; EMA proper uses alpha=2/(period+1)). Wilder's is used as the
+    # sizing basis since it's the conservative (larger) requirement of the two, so one
+    # multiplier safely covers every indicator that has this dependency at all.
+    # k_min = ln(epsilon) / ln(1 - 1/period) ≈ period * ln(1/epsilon) for epsilon=0.001 → ×~6.9,
+    # rounded up for margin.
+    _WARMUP_MULTIPLIER = 10
+    _MIN_WARMUP = 50
+
+    @classmethod
+    def _resolve_warmup(cls, arguments: dict[str, Any], period: int) -> int:
+        raw = arguments.get("warmup_candles")
+        if raw is not None and str(raw).strip() != "":
+            return max(0, int(raw))
+        return max(period * cls._WARMUP_MULTIPLIER, cls._MIN_WARMUP)
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
         from openforexai.data.indicator_plugins import DEFAULT_REGISTRY
@@ -65,16 +93,18 @@ class CalculateIndicatorTool(BaseTool):
         if plugin is None:
             raise ValueError(f"Unknown indicator {indicator!r}. Available: {', '.join(DEFAULT_REGISTRY.registered_names())}")
 
+        warmup = self._resolve_warmup(arguments, period)
+
         # DXY needs component pair candles
         if getattr(plugin, "requires_component_pairs", False):
-            return await self._compute_dxy(context, plugin, period, timeframe, history)
+            return await self._compute_dxy(context, plugin, period, timeframe, history, warmup)
 
         # Get candles via DataContainer bus request
         # For VWAP period=0 (daily reset), fetch extra candles to cover from midnight
         if indicator == "VWAP" and period == 0:
             candle_limit = history + 300
         else:
-            candle_limit = period * 3 + history + 10
+            candle_limit = warmup + history
         response = await bus_request(
             context=context,
             event_type=EventType.CANDLES_REQUEST,
@@ -131,7 +161,7 @@ class CalculateIndicatorTool(BaseTool):
             "values": timestamped,
         }
 
-    async def _compute_dxy(self, context: ToolContext, plugin: Any, period: int, timeframe: str, history: int) -> Any:
+    async def _compute_dxy(self, context: ToolContext, plugin: Any, period: int, timeframe: str, history: int, warmup: int) -> Any:
         from openforexai.data.indicators import synthetic_dxy
 
         component_candles: dict[str, list] = {}
@@ -142,7 +172,7 @@ class CalculateIndicatorTool(BaseTool):
                 target_id=DATA_CONTAINER_ID,
                 instrument=comp_pair,
                 payload={"broker_name": context.broker_name,
-                         "timeframe": timeframe, "limit": period * 3 + history + 10},
+                         "timeframe": timeframe, "limit": warmup + history},
             )
             candles = candle_dicts_to_objects(resp.get("candles", []))
             if candles:

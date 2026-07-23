@@ -281,7 +281,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
           )}
 
           <div className="flex items-center justify-between gap-2 px-4 py-2 bg-gray-800/80 border-t border-gray-700">
-            <span className="text-[10px] text-gray-500 font-mono select-none">
+            <span className="text-[10px] text-white font-mono select-none">
               Ln {cursorPos.line}, Col {cursorPos.col}
             </span>
             <div className="flex items-center gap-2">

@@ -42,14 +42,14 @@ function SchemaForm({
   const entries = Object.entries(props) as [string, JsonSchemaProperty][]
 
   if (entries.length === 0) {
-    return <p className="text-gray-500 text-xs italic">No arguments required.</p>
+    return <p className="text-white text-xs italic">No arguments required.</p>
   }
 
   return (
     <div className="space-y-3">
       {entries.map(([key, prop]) => (
         <div key={key}>
-          <label className="block text-xs text-gray-400 mb-1">
+          <label className="block text-xs text-white mb-1">
             <span className="text-blue-300">{key}</span>
             {required.has(key) && <span className="text-red-400 ml-1">*</span>}
             {prop.type && (
@@ -57,7 +57,7 @@ function SchemaForm({
             )}
           </label>
           {prop.description && (
-            <p className="text-xs text-gray-600 mb-1">{prop.description}</p>
+            <p className="text-xs text-white mb-1">{prop.description}</p>
           )}
           {prop.enum ? (
             <select
@@ -376,7 +376,7 @@ export function ToolExecutor() {
       <div className="flex-1 min-h-0 p-4 flex flex-col gap-4 overflow-hidden">
         {/* Tool selector */}
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Tool</label>
+          <label className="block text-xs text-white mb-1">Tool</label>
           <select
             value={selectedTool}
             onChange={e => handleToolChange(e.target.value)}
@@ -393,7 +393,7 @@ export function ToolExecutor() {
         {/* Context: agent + broker + llm + pair */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="flex-1">
-            <label className="block text-xs text-gray-400 mb-1">
+            <label className="block text-xs text-white mb-1">
               Agent
               <span className="text-gray-600 ml-1">(optional)</span>
             </label>
@@ -409,7 +409,7 @@ export function ToolExecutor() {
             </select>
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-gray-400 mb-1">
+            <label className="block text-xs text-white mb-1">
               Broker
               <span className="text-gray-600 ml-1">(optional)</span>
             </label>
@@ -425,7 +425,7 @@ export function ToolExecutor() {
             </select>
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-gray-400 mb-1">
+            <label className="block text-xs text-white mb-1">
               LLM
               <span className="text-gray-600 ml-1">(optional)</span>
             </label>
@@ -441,7 +441,7 @@ export function ToolExecutor() {
             </select>
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-gray-400 mb-1">
+            <label className="block text-xs text-white mb-1">
               Pair
               <span className="text-gray-600 ml-1">(optional)</span>
             </label>
@@ -475,7 +475,7 @@ export function ToolExecutor() {
             <div>
               <button
                 onClick={() => setSchemaOpen(v => !v)}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                className="flex items-center gap-1 text-xs text-white hover:text-gray-300 transition-colors"
               >
                 {schemaOpen
                   ? <ChevronDown className="w-3 h-3" />
@@ -504,7 +504,7 @@ export function ToolExecutor() {
                   <button
                     onClick={execute}
                     disabled={running}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs rounded transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-white text-white text-xs rounded transition-colors"
                   >
                     <Play className="w-3.5 h-3.5" />
                     {running ? 'Executing…' : 'Execute'}
@@ -515,7 +515,7 @@ export function ToolExecutor() {
                     <div className="mb-3 p-2 border border-gray-700 rounded bg-gray-900/50 space-y-2">
                       {isOrderPlacementTool && (
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[11px] text-gray-400 uppercase tracking-wide">Quick presets:</span>
+                          <span className="text-[11px] text-white uppercase tracking-wide">Quick presets:</span>
                           <button onClick={() => applyPlaceOrderPreset('MARKET')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Market</button>
                           <button onClick={() => applyPlaceOrderPreset('LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Limit</button>
                           <button onClick={() => applyPlaceOrderPreset('STOP')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop</button>
@@ -530,7 +530,7 @@ export function ToolExecutor() {
                   {validationIssues.length === 0 && isOrderPlacementTool && (
                     <div className="mb-3 p-2 border border-gray-700 rounded bg-gray-900/50 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] text-gray-400 uppercase tracking-wide">Quick presets:</span>
+                        <span className="text-[11px] text-white uppercase tracking-wide">Quick presets:</span>
                         <button onClick={() => applyPlaceOrderPreset('MARKET')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Market</button>
                         <button onClick={() => applyPlaceOrderPreset('LIMIT')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Limit</button>
                         <button onClick={() => applyPlaceOrderPreset('STOP')} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Stop</button>
@@ -564,7 +564,7 @@ export function ToolExecutor() {
                           onChange={e => setWrapLines(e.target.checked)}
                           className="accent-emerald-500 w-3 h-3"
                         />
-                        <span className="text-xs text-gray-400">Wrap</span>
+                        <span className="text-xs text-white">Wrap</span>
                       </label>
                     )}
                     {!renderMarkdown && (
@@ -575,7 +575,7 @@ export function ToolExecutor() {
                           onChange={e => setReplaceNewlines(e.target.checked)}
                           className="accent-emerald-500 w-3 h-3"
                         />
-                        <span className="text-xs text-gray-400">\n→↵</span>
+                        <span className="text-xs text-white">\n→↵</span>
                       </label>
                     )}
                     <label className="flex items-center gap-1 cursor-pointer select-none">
@@ -592,7 +592,7 @@ export function ToolExecutor() {
                         }}
                         className="accent-emerald-500 w-3 h-3"
                       />
-                      <span className="text-xs text-gray-400">MD</span>
+                      <span className="text-xs text-white">MD</span>
                     </label>
                     <button
                       disabled={resultJson === null}
@@ -603,7 +603,7 @@ export function ToolExecutor() {
                           setTimeout(() => setCopied(false), 1500)
                         })
                       }}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-white hover:text-white hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       title="Copy result"
                     >
                       {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -611,7 +611,7 @@ export function ToolExecutor() {
                   </div>
                 </div>
                 {resultJson === null ? (
-                  <div className="text-xs text-gray-500 border border-gray-700 rounded p-3 bg-gray-900 flex-1 overflow-auto">
+                  <div className="text-xs text-white border border-gray-700 rounded p-3 bg-gray-900 flex-1 overflow-auto">
                     No result yet.
                   </div>
                 ) : (() => {
@@ -634,7 +634,7 @@ export function ToolExecutor() {
                         '[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2',
                         '[&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2',
                         '[&_li]:my-0.5 [&_li]:text-gray-300',
-                        '[&_blockquote]:border-l-4 [&_blockquote]:border-gray-600 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-gray-400 [&_blockquote]:my-3',
+                        '[&_blockquote]:border-l-4 [&_blockquote]:border-gray-600 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-white [&_blockquote]:my-3',
                         '[&_code]:font-mono [&_code]:text-emerald-300 [&_code]:bg-gray-800 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded',
                         '[&_pre]:bg-gray-800 [&_pre]:border [&_pre]:border-gray-700 [&_pre]:rounded [&_pre]:p-3 [&_pre]:overflow-auto [&_pre]:my-3',
                         '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:rounded-none',

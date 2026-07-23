@@ -36,19 +36,19 @@ export function TableOfContents({ content }: Props) {
   if (headings.length === 0) {
     return (
       <div className="p-3">
-        <p className="text-xs text-gray-600">Keine Überschriften</p>
+        <p className="text-xs text-white">Keine Überschriften</p>
       </div>
     )
   }
 
   return (
     <div className="p-3">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Inhalt</p>
+      <p className="text-xs font-semibold text-white uppercase tracking-wider mb-2">Inhalt</p>
       <nav className="space-y-0.5">
         {headings.map((h, i) => (
           <button
             key={i}
-            className="block w-full text-left text-xs text-gray-400 hover:text-gray-200 transition-colors py-0.5 truncate"
+            className="block w-full text-left text-xs text-white hover:text-gray-200 transition-colors py-0.5 truncate"
             style={{ paddingLeft: `${(h.level - 1) * 10}px` }}
             onClick={() => {
               const el = document.getElementById(`heading-${h.slug}`)

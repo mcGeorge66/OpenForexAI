@@ -232,6 +232,8 @@ class SQLiteRepository(AbstractRepository):
         self,
         agent_id: str | None = None,
         pair: str | None = None,
+        snapshot_profile: str | None = None,
+        decision_prompt_profile: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
         clauses = ["COALESCE(decision_type_new, decision_type) = ?"]
@@ -242,6 +244,12 @@ class SQLiteRepository(AbstractRepository):
         if pair:
             clauses.append("pair = ?")
             params.append(pair)
+        if snapshot_profile:
+            clauses.append("json_extract(output, '$.snapshot_profile') = ?")
+            params.append(snapshot_profile)
+        if decision_prompt_profile:
+            clauses.append("json_extract(output, '$.decision_prompt_profile') = ?")
+            params.append(decision_prompt_profile)
         params.append(limit)
         cursor = await self._db().execute(
             f"""
@@ -1001,6 +1009,37 @@ class SQLiteRepository(AbstractRepository):
         )
         await self._db().commit()
         return run_id
+
+    def _row_to_ec_run_record(self, row: aiosqlite.Row) -> dict[str, Any]:
+        raw = dict(row)
+        return {
+            "id": raw["id"],
+            "ec_id": raw["ec_id"],
+            "trigger": raw.get("trigger"),
+            "input_json": self._deserialize_json_field(raw.get("input_json"), {}),
+            "config_snapshot": self._deserialize_json_field(raw.get("config_snapshot"), {}),
+            "tool_calls": self._deserialize_json_field(raw.get("tool_calls"), []),
+            "output_json": self._deserialize_json_field(raw.get("output_json"), None),
+            "success": bool(raw.get("success")),
+            "error": raw.get("error"),
+            "latency_ms": raw.get("latency_ms"),
+            "run_at": raw.get("run_at"),
+            "correlation_id": raw.get("correlation_id"),
+        }
+
+    async def get_ec_runs(self, ec_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        cursor = await self._db().execute(
+            """
+            SELECT *
+            FROM ec_runs
+            WHERE ec_id = ?
+            ORDER BY run_at DESC
+            LIMIT ?
+            """,
+            (ec_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_ec_run_record(row) for row in rows]
 
     # ── Knowledge base ────────────────────────────────────────────────────────
 

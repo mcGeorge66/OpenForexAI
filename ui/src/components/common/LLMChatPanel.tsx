@@ -110,7 +110,7 @@ export function LLMChatPanel({ code, contextFile, height = 280, initialOpen = fa
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-900/60 transition-colors select-none"
+        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-white hover:text-gray-200 hover:bg-gray-900/60 transition-colors select-none"
       >
         <Bot className="w-3.5 h-3.5 flex-shrink-0" />
         <span className="flex-1 text-left font-medium">Script Assistant</span>
@@ -125,7 +125,7 @@ export function LLMChatPanel({ code, contextFile, height = 280, initialOpen = fa
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3 min-h-0">
             {history.length === 0 && !loading && (
-              <p className="text-xs text-gray-600 italic">
+              <p className="text-xs text-white italic">
                 Ask a question about the script — what variables are available, how to access indicator data, etc.
               </p>
             )}
@@ -144,7 +144,7 @@ export function LLMChatPanel({ code, contextFile, height = 280, initialOpen = fa
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-gray-400">
+                <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-white">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   Thinking…
                 </div>

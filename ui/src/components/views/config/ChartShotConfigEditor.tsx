@@ -370,7 +370,7 @@ export function ChartShotConfigEditor() {
       <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-700 bg-gray-900">
         <div>
           <h2 className="text-base font-semibold text-gray-100">Chartshot Config</h2>
-          <p className="text-xs text-gray-500 mt-0.5">config/system.json5 → chartshot</p>
+          <p className="text-xs text-white mt-0.5">config/system.json5 → chartshot</p>
         </div>
         <div className="flex items-center gap-2">
           {message && (
@@ -406,7 +406,7 @@ export function ChartShotConfigEditor() {
         {/* Left — config list */}
         <div className="w-52 flex-shrink-0 flex flex-col border-r border-gray-700 bg-gray-900">
           <div className="px-3 py-3 border-b border-gray-700/60">
-            <label className="block text-xs text-gray-400 mb-1">Output directory</label>
+            <label className="block text-xs text-white mb-1">Output directory</label>
             <input
               type="text" value={root.output_dir} onChange={e => updateOutputDir(e.target.value)}
               className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
@@ -421,7 +421,7 @@ export function ChartShotConfigEditor() {
                 }`}
               >
                 {name}
-                {name === 'default' && <span className="ml-1.5 text-[10px] text-gray-600">(default)</span>}
+                {name === 'default' && <span className="ml-1.5 text-[10px] text-white">(default)</span>}
               </button>
             ))}
           </div>
@@ -462,7 +462,7 @@ export function ChartShotConfigEditor() {
                 {/* Controls */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2">
-                    <label className="block text-xs text-gray-400 mb-1">Agent</label>
+                    <label className="block text-xs text-white mb-1">Agent</label>
                     <select
                       value={selAgent} onChange={e => onSelectAgent(e.target.value)}
                       className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
@@ -472,21 +472,21 @@ export function ChartShotConfigEditor() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Broker</label>
+                    <label className="block text-xs text-white mb-1">Broker</label>
                     <input
                       type="text" value={broker} onChange={e => setBroker(e.target.value)} placeholder="broker name"
                       className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Pair</label>
+                    <label className="block text-xs text-white mb-1">Pair</label>
                     <input
                       type="text" value={pair} onChange={e => setPair(e.target.value.toUpperCase())} placeholder="EURUSD"
                       className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Timeframe</label>
+                    <label className="block text-xs text-white mb-1">Timeframe</label>
                     <select
                       value={timeframe} onChange={e => setTimeframe(e.target.value)}
                       className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
@@ -495,7 +495,7 @@ export function ChartShotConfigEditor() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Candles</label>
+                    <label className="block text-xs text-white mb-1">Candles</label>
                     <input
                       type="number" value={candles} min={10} max={500}
                       onChange={e => setCandles(Math.max(10, Math.min(500, Number(e.target.value))))}
@@ -547,7 +547,7 @@ export function ChartShotConfigEditor() {
 
           {/* output_mode */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">Output mode</label>
+            <label className="block text-xs text-white mb-1.5">Output mode</label>
             <div className="flex gap-3">
               {(['temp','keep'] as OutputMode[]).map(m => (
                 <label key={m} className="flex items-center gap-1.5 cursor-pointer">
@@ -560,7 +560,7 @@ export function ChartShotConfigEditor() {
                 </label>
               ))}
             </div>
-            <p className="mt-1.5 text-xs text-gray-600">
+            <p className="mt-1.5 text-xs text-white">
               {current.output_mode === 'temp' && 'File is deleted after the LLM has processed the image.'}
               {current.output_mode === 'keep' && 'File is kept on disk after the LLM call.'}
             </p>
@@ -568,7 +568,7 @@ export function ChartShotConfigEditor() {
 
           {/* style */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">Chart style</label>
+            <label className="block text-xs text-white mb-1.5">Chart style</label>
             <div className="flex gap-3">
               {(['dark','light'] as ChartStyle[]).map(s => (
                 <label key={s} className="flex items-center gap-1.5 cursor-pointer">
@@ -585,7 +585,7 @@ export function ChartShotConfigEditor() {
 
           {/* ── Description ─────────────────────────────────────────────── */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">
+            <label className="block text-xs text-white mb-1.5">
               Description
               <span className="ml-1.5 text-gray-600 font-normal normal-case">
                 — appended to the LLM prompt when this chart is used in a snapshot
@@ -616,8 +616,8 @@ export function ChartShotConfigEditor() {
 
           {/* JSON preview */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">Preview (system.json5 entry)</label>
-            <pre className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-[11px] font-mono text-gray-400 overflow-x-auto whitespace-pre">
+            <label className="block text-xs text-white mb-1.5">Preview (system.json5 entry)</label>
+            <pre className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-[11px] font-mono text-white overflow-x-auto whitespace-pre">
               {JSON.stringify({ [selected]: current }, null, 2)}
             </pre>
           </div>
@@ -677,7 +677,7 @@ function IndicatorsPanel({
             ))}
           </div>
           {/* Instance list */}
-          {indicators.length === 0 && <p className="text-gray-500 text-xs">No indicators configured.</p>}
+          {indicators.length === 0 && <p className="text-white text-xs">No indicators configured.</p>}
           {indicators.map(ind => (
             <div key={ind.id} className="flex items-center gap-1.5 bg-gray-900 rounded px-2 py-1.5 border border-gray-800 flex-wrap">
               {/* Color */}

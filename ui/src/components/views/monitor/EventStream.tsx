@@ -592,7 +592,7 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
 
       {/* Resize hint */}
       <div className="flex-shrink-0 flex justify-end px-2 py-0.5 bg-gray-900 border-t border-gray-800 rounded-b-lg">
-        <span className="text-gray-700 text-xs select-none">⇲</span>
+        <span className="text-white text-xs select-none">⇲</span>
       </div>
     </div>
   )
@@ -810,7 +810,7 @@ export function EventStream({
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0">
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2 text-xs text-white">
           <span className={connected ? 'text-emerald-400' : 'text-red-400'}>
             {connected ? '● Live' : '○ Disconnected'}
           </span>
@@ -827,7 +827,7 @@ export function EventStream({
               'flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors',
               autoScroll
                 ? 'bg-emerald-900/40 text-emerald-300'
-                : 'bg-gray-800 text-gray-400 hover:text-gray-200',
+                : 'bg-gray-800 text-white hover:text-gray-200',
             ].join(' ')}
           >
             <ArrowUp className="w-3 h-3" />
@@ -836,7 +836,7 @@ export function EventStream({
           <button
             onClick={onClear}
             title="Clear events"
-            className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 hover:text-red-300 transition-colors"
+            className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-800 text-white hover:text-red-300 transition-colors"
           >
             <Trash2 className="w-3 h-3" />
             Clear
@@ -845,7 +845,7 @@ export function EventStream({
       </div>
 
       <div className="px-3 py-2 bg-gray-900/70 border-b border-gray-800 space-y-2 flex-shrink-0">
-        <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+        <div className="flex items-center justify-between gap-3 text-xs text-white">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span className="text-gray-300">Filter Builder</span>
           <span>·</span>
@@ -860,15 +860,15 @@ export function EventStream({
           <button
             type="button"
             onClick={resetFilter}
-            className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-white"
+            className="text-xs px-2 py-1 rounded bg-gray-800 text-white hover:text-white"
           >
             New
           </button>
-          <label className="inline-flex items-center gap-2 text-xs text-gray-400">
+          <label className="inline-flex items-center gap-2 text-xs text-white">
             <input type="checkbox" checked={includeResponses} onChange={event => setIncludeResponses(event.target.checked)} />
             Include responses
           </label>
-          <label className="inline-flex items-center gap-2 text-xs text-gray-400">
+          <label className="inline-flex items-center gap-2 text-xs text-white">
             <input type="checkbox" checked={showOrphans} onChange={event => setShowOrphans(event.target.checked)} />
             Show orphans
           </label>
@@ -909,7 +909,7 @@ export function EventStream({
 
         <div className="space-y-2">
           {filterGroup.rules.length === 0 && (
-            <div className="text-xs text-gray-600">No rules. All primary events are shown.</div>
+            <div className="text-xs text-white">No rules. All primary events are shown.</div>
           )}
           {filterGroup.rules.map((rule, index) => (
             <div key={rule.id} className="flex items-center gap-2">
@@ -956,7 +956,7 @@ export function EventStream({
               <button
                 type="button"
                 onClick={() => removeRule(rule.id)}
-                className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-red-300"
+                className="text-xs px-2 py-1 rounded bg-gray-800 text-white hover:text-red-300"
               >
                 Remove
               </button>

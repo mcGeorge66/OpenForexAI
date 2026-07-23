@@ -168,12 +168,12 @@ export function KnowledgebaseApp() {
 
         <div className="flex items-center gap-1 ml-2">
           <button onClick={() => createDoc(null, false)}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
             title="Neues Dokument">
             <Plus className="w-3.5 h-3.5" /> Dokument
           </button>
           <button onClick={() => createDoc(null, true)}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
             title="Neuer Ordner">
             <FolderPlus className="w-3.5 h-3.5" /> Ordner
           </button>
@@ -184,12 +184,12 @@ export function KnowledgebaseApp() {
         {activeDoc && !activeDoc.is_folder && (
           <>
             <button onClick={exportMarkdown}
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
               title="Als Markdown exportieren">
               <Download className="w-3.5 h-3.5" /> MD
             </button>
             <button onClick={() => window.print()}
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
               title="Drucken / Als PDF">
               <Printer className="w-3.5 h-3.5" /> PDF
             </button>
@@ -197,7 +197,7 @@ export function KnowledgebaseApp() {
         )}
 
         <button onClick={() => setSearchOpen(o => !o)}
-          className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${searchOpen ? 'bg-emerald-900/40 text-emerald-300' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
+          className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${searchOpen ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800'}`}
           title="Suche (Ctrl+K)">
           <Search className="w-3.5 h-3.5" />
         </button>

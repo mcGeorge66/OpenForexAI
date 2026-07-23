@@ -218,7 +218,7 @@ export function PackageManager() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Package Manager</span>
-        <span className="text-xs text-gray-500">Selective config export/import for agents, profiles, bridge tools, routing, and system sections</span>
+        <span className="text-xs text-white">Selective config export/import for agents, profiles, bridge tools, routing, and system sections</span>
       </div>
 
       <div className="flex-1 min-h-0 p-4 bg-gray-950 overflow-auto space-y-4">
@@ -252,7 +252,7 @@ export function PackageManager() {
                 >
                   Clear
                 </button>
-                <span className="text-xs text-gray-500">{allSelected ? 'All agents selected' : `${selected.size}/${agents.length} selected`}</span>
+                <span className="text-xs text-white">{allSelected ? 'All agents selected' : `${selected.size}/${agents.length} selected`}</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
                 {agents.map(id => (
@@ -342,7 +342,7 @@ export function PackageManager() {
               'border rounded p-2 text-xs transition-colors',
               dragOver
                 ? 'border-emerald-500 bg-emerald-900/10 text-emerald-300'
-                : 'border-gray-700 bg-gray-950/40 text-gray-400',
+                : 'border-gray-700 bg-gray-950/40 text-white',
             ].join(' ')}
           >
             Drag & drop a package file here or
@@ -373,7 +373,7 @@ export function PackageManager() {
 
         <section className="border border-gray-700 rounded p-3 bg-gray-900/40 space-y-2">
           <h3 className="text-sm text-gray-200 font-medium">Validation Report</h3>
-          {!validation && <p className="text-xs text-gray-500">Run validation to see issues.</p>}
+          {!validation && <p className="text-xs text-white">Run validation to see issues.</p>}
           {validation && (
             <>
               <p className={validation.ok ? 'text-xs text-emerald-400' : 'text-xs text-amber-300'}>

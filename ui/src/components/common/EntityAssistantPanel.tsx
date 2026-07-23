@@ -173,7 +173,7 @@ export function EntityAssistantPanel({
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-3 py-2 select-none">
         <button type="button" onClick={() => setOpen(v => !v)}
-          className="flex items-center gap-2 flex-1 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+          className="flex items-center gap-2 flex-1 text-xs text-white hover:text-gray-200 transition-colors">
           <Bot className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" />
           <span className="font-medium text-left flex-1">Entity Assistant</span>
           {open ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" /> : <ChevronUp className="w-3.5 h-3.5 flex-shrink-0" />}
@@ -214,7 +214,7 @@ export function EntityAssistantPanel({
         <div className="flex flex-col border-t border-gray-700" style={{ height: 380 }}>
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2.5 min-h-0">
             {history.length === 0 && !loading && (
-              <p className="text-xs text-gray-600 italic mt-4 text-center">
+              <p className="text-xs text-white italic mt-4 text-center">
                 Fragen, Änderungen, Patches — alles möglich.<br />
                 <span className="text-gray-700">Auto-Write: sofort anwenden · Kann testen: LLM debuggt selbst</span>
               </p>
@@ -226,7 +226,7 @@ export function EntityAssistantPanel({
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-gray-400">
+                <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-white">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   {canTest ? 'Denkt / testet…' : 'Denkt…'}
                 </div>

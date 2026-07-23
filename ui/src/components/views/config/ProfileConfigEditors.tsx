@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import JSON5 from 'json5'
-import { BookOpen, Bot, Check, ChevronRight, Copy, MessageSquare, Play, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { BookOpen, Bot, Check, ChevronRight, Clock, Copy, MessageSquare, Play, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { api, type AgentInfo, type CalculationBlock, type CalculationBlockType, type DecisionPromptScriptTestResponse, type JsonSchemaProperty, type SnippetLibraryEntry, type SnapshotCalculationPreviewResponse, type SnapshotPreviewResponse, type SnapshotToolPreviewResponse, type ToolInfo } from '@/api/client'
 import { useProjectRoot, joinPath } from '@/api/useProjectRoot'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
@@ -8,6 +8,7 @@ import { Json5MonacoEditor } from '@/components/common/Json5MonacoEditor'
 import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
 import { LLMChatPanel } from '@/components/common/LLMChatPanel'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
+import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
 
 function CopyButton({ getText }: { getText: () => string }) {
   const [copied, setCopied] = useState(false)
@@ -406,6 +407,7 @@ export function SnapshotConfigEditor() {
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [form, setForm] = useState<SnapshotProfileForm>(createSnapshotForm({ includeDefaultToolBlocks: false, blank: true }))
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -824,11 +826,11 @@ export function SnapshotConfigEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Snapshot Config</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (snapshot_profiles)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (snapshot_profiles)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -885,6 +887,16 @@ export function SnapshotConfigEditor() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm text-gray-200 font-medium">Snapshot Profile Editor</h3>
                   <div className="flex items-center gap-2">
+                    {selectedName && (
+                      <button
+                        onClick={() => setHistoryOpen(true)}
+                        className="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 flex items-center gap-1"
+                        title="History"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        History
+                      </button>
+                    )}
                     <button
                       onClick={() => setAiAssistantOpen(true)}
                       className="text-xs px-3 py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white flex items-center gap-1"
@@ -998,7 +1010,7 @@ export function SnapshotConfigEditor() {
                       {VALID_TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
                     </select>
                   </label>
-                  <p className="text-[11px] text-gray-500 pb-1">
+                  <p className="text-[11px] text-white pb-1">
                     The selected timeframes define the basis for candle data, indicator calculations, and all subsequent labels below.
                   </p>
                 </div>
@@ -1013,10 +1025,10 @@ export function SnapshotConfigEditor() {
                       <h4 className="text-sm text-gray-200 font-medium">
                         Snapshot Tool Blocks
                         {form.tool_blocks.length > 0 && (
-                          <span className="ml-1.5 text-[11px] text-gray-500 font-normal">({form.tool_blocks.length})</span>
+                          <span className="ml-1.5 text-[11px] text-white font-normal">({form.tool_blocks.length})</span>
                         )}
                       </h4>
-                      {!toolBlocksOpen && <p className="text-[11px] text-gray-500">These registered runtime tools build the snapshot deterministically, without LLM tool-use.</p>}
+                      {!toolBlocksOpen && <p className="text-[11px] text-white">These registered runtime tools build the snapshot deterministically, without LLM tool-use.</p>}
                     </div>
                     {toolBlocksOpen && (
                       <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
@@ -1066,10 +1078,10 @@ export function SnapshotConfigEditor() {
                             >
                               <ChevronRight className={`w-3.5 h-3.5 text-gray-500 flex-shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`} />
                               <span className="font-mono text-xs text-gray-200 w-28 flex-shrink-0 truncate" title={block.id}>{block.id || '—'}</span>
-                              <span className="text-[11px] text-gray-400 w-36 flex-shrink-0 truncate" title={block.tool_name}>{block.tool_name}</span>
-                              <span className="text-[11px] text-gray-500 flex-1 truncate" title={block.output_key}>{block.output_key}</span>
+                              <span className="text-[11px] text-white w-36 flex-shrink-0 truncate" title={block.tool_name}>{block.tool_name}</span>
+                              <span className="text-[11px] text-white flex-1 truncate" title={block.output_key}>{block.output_key}</span>
                               <label
-                                className="inline-flex items-center gap-1.5 text-xs text-gray-400 flex-shrink-0"
+                                className="inline-flex items-center gap-1.5 text-xs text-white flex-shrink-0"
                                 onClick={e => e.stopPropagation()}
                               >
                                 <input
@@ -1137,7 +1149,7 @@ export function SnapshotConfigEditor() {
                                 </div>
 
                                 {properties.length === 0 ? (
-                                  <div className="text-[11px] text-gray-500">This tool has no configurable arguments.</div>
+                                  <div className="text-[11px] text-white">This tool has no configurable arguments.</div>
                                 ) : (
                                   <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
                                     {properties.map(([argName, prop]) => {
@@ -1147,7 +1159,7 @@ export function SnapshotConfigEditor() {
                                         <label key={`${block._reactKey}-${argName}`} className="col-span-4 text-xs text-gray-300 flex h-full flex-col justify-end">
                                           <span className="font-mono text-gray-200">{argName}</span>
                                           <span className="ml-1 text-gray-600">({prop.type ?? 'any'})</span>
-                                          {prop.description && <span className="mt-0.5 block text-[11px] text-gray-500">{prop.description}</span>}
+                                          {prop.description && <span className="mt-0.5 block text-[11px] text-white">{prop.description}</span>}
                                           {block.tool_name === 'chartshot' && argName === 'pair' ? (
                                             <select
                                               value={value}
@@ -1249,11 +1261,11 @@ export function SnapshotConfigEditor() {
                       <h4 className="text-sm text-gray-200 font-medium">
                         Calculations
                         {form.calculation_blocks.length > 0 && (
-                          <span className="ml-1.5 text-[11px] text-gray-500 font-normal">({form.calculation_blocks.length})</span>
+                          <span className="ml-1.5 text-[11px] text-white font-normal">({form.calculation_blocks.length})</span>
                         )}
                       </h4>
                       {!calculationsOpen && (
-                        <p className="text-[11px] text-gray-500">
+                        <p className="text-[11px] text-white">
                           Optional configurable calculations using tool block outputs as data sources. Results appear in <code className="font-mono">snapshot.calculations</code>.
                         </p>
                       )}
@@ -1303,9 +1315,9 @@ export function SnapshotConfigEditor() {
                                 >
                                   <ChevronRight className={`w-3.5 h-3.5 text-gray-500 flex-shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`} />
                                   <span className="font-mono text-xs text-gray-200 w-28 flex-shrink-0 truncate" title={block.id}>{block.id || '—'}</span>
-                                  <span className="text-[11px] text-gray-400 flex-1 truncate">script</span>
+                                  <span className="text-[11px] text-white flex-1 truncate">script</span>
                                   <label
-                                    className="inline-flex items-center gap-1.5 text-xs text-gray-400 flex-shrink-0"
+                                    className="inline-flex items-center gap-1.5 text-xs text-white flex-shrink-0"
                                     onClick={e => e.stopPropagation()}
                                   >
                                     <input
@@ -1363,7 +1375,7 @@ export function SnapshotConfigEditor() {
                                     </div>
 
                                     {/* Output location info */}
-                                    <div className="text-[11px] text-gray-600 bg-gray-950/60 rounded px-2 py-1.5">
+                                    <div className="text-[11px] text-white bg-gray-950/60 rounded px-2 py-1.5">
                                       Result saved in <code className="font-mono">snapshot.calculations.global.{block.id || 'script'}</code>
                                     </div>
 
@@ -1390,7 +1402,7 @@ export function SnapshotConfigEditor() {
                 <div className="rounded border border-gray-700 bg-gray-950/40 p-3 space-y-3">
                   <div>
                     <h4 className="text-sm text-gray-200 font-medium">Assembly Transform</h4>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-[11px] text-white">
                       Combines transformed tool outputs into the final snapshot shape. Leave empty to use the current compatibility/default builder.
                     </p>
                   </div>
@@ -1456,12 +1468,12 @@ export function SnapshotConfigEditor() {
               {previewData && (
                 previewData.validation_errors.length ? (
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-xs text-gray-400">Validation</span>
+                    <span className="text-xs text-white">Validation</span>
                     <span className="text-xs text-amber-300">{previewData.validation_errors.join(' · ')}</span>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-xs text-gray-400">Validation</span>
+                    <span className="text-xs text-white">Validation</span>
                     <span className="text-xs text-emerald-400">passed</span>
                   </div>
                 )
@@ -1476,7 +1488,7 @@ export function SnapshotConfigEditor() {
                     Snapshot Output
                   </span>
                   {previewData && (
-                    <span className="text-xs text-gray-500 ml-1">
+                    <span className="text-xs text-white ml-1">
                       {previewData.broker_name} · {previewData.pair}
                     </span>
                   )}
@@ -1501,13 +1513,13 @@ export function SnapshotConfigEditor() {
                 <div className="flex items-center gap-1 border-b border-gray-700 pb-2">
                   <button
                     onClick={() => setPreviewRightTab('decision')}
-                    className={`text-xs px-3 py-1 rounded-t border-b-2 transition-colors ${previewRightTab === 'decision' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+                    className={`text-xs px-3 py-1 rounded-t border-b-2 transition-colors ${previewRightTab === 'decision' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-white hover:text-gray-200'}`}
                   >
                     Decision Input
                   </button>
                   <button
                     onClick={() => setPreviewRightTab('trigger')}
-                    className={`text-xs px-3 py-1 rounded-t border-b-2 transition-colors ${previewRightTab === 'trigger' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+                    className={`text-xs px-3 py-1 rounded-t border-b-2 transition-colors ${previewRightTab === 'trigger' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-white hover:text-gray-200'}`}
                   >
                     Trigger Payload
                   </button>
@@ -1604,7 +1616,7 @@ export function SnapshotConfigEditor() {
               )}
               {calcPreviewData && (
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-gray-400">Errors</span>
+                  <span className="text-xs text-white">Errors</span>
                   {calcPreviewData.errors.length
                     ? <span className="text-xs text-amber-300">{calcPreviewData.errors.join(' · ')}</span>
                     : <span className="text-xs text-emerald-400">none</span>}
@@ -1612,7 +1624,7 @@ export function SnapshotConfigEditor() {
               )}
               {toolPreviewData && (
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-gray-400">Errors</span>
+                  <span className="text-xs text-white">Errors</span>
                   {toolPreviewData.errors.length
                     ? <span className="text-xs text-amber-300">{toolPreviewData.errors.join(' · ')}</span>
                     : <span className="text-xs text-emerald-400">none</span>}
@@ -1678,13 +1690,13 @@ export function SnapshotConfigEditor() {
                     <div className="flex items-center gap-1 border-b border-gray-700 pb-2">
                       <button
                         onClick={() => setToolRightTab('transformed')}
-                        className={`text-xs px-3 py-1 border-b-2 transition-colors ${toolRightTab === 'transformed' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+                        className={`text-xs px-3 py-1 border-b-2 transition-colors ${toolRightTab === 'transformed' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-white hover:text-gray-200'}`}
                       >
                         Transformed
                       </button>
                       <button
                         onClick={() => setToolRightTab('arguments')}
-                        className={`text-xs px-3 py-1 border-b-2 transition-colors ${toolRightTab === 'arguments' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+                        className={`text-xs px-3 py-1 border-b-2 transition-colors ${toolRightTab === 'arguments' ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-white hover:text-gray-200'}`}
                       >
                         Arguments
                       </button>
@@ -1720,6 +1732,13 @@ export function SnapshotConfigEditor() {
           contextData={JSON.stringify(serializeSnapshotProfile(form), null, 2)}
           contextDataLabel={selectedName ? `Profile: ${selectedName}` : 'New profile (unsaved)'}
           onClose={() => setAiAssistantOpen(false)}
+        />
+      )}
+      {historyOpen && selectedName && (
+        <EntityHistoryModal
+          entityType="snapshot_profile"
+          entityId={selectedName}
+          onClose={() => setHistoryOpen(false)}
         />
       )}
     </div>
@@ -1795,7 +1814,7 @@ function DecisionPromptTestWindow({
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-0 divide-x divide-gray-700">
           <div className="flex flex-col p-3 gap-2 overflow-hidden">
             <div className="flex items-center justify-between flex-shrink-0">
-              <span className="text-xs text-gray-400 font-medium">Snapshot Input (editable JSON)</span>
+              <span className="text-xs text-white font-medium">Snapshot Input (editable JSON)</span>
               <CopyButton getText={() => snapshotText} />
             </div>
             <textarea
@@ -1807,7 +1826,7 @@ function DecisionPromptTestWindow({
           </div>
           <div className="flex flex-col p-3 gap-3 overflow-auto">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400 font-medium">Script Result</span>
+              <span className="text-xs text-white font-medium">Script Result</span>
               {result && !result.error && matchedPromptText && (
                 <CopyButton getText={() => matchedPromptText} />
               )}
@@ -1821,7 +1840,7 @@ function DecisionPromptTestWindow({
                   <span className="text-emerald-400 font-semibold">{result.result ?? '(none)'}</span>
                 </div>
                 <div className="space-y-0.5">
-                  <div className="text-xs text-gray-500">placeholders</div>
+                  <div className="text-xs text-white">placeholders</div>
                   <pre className="text-xs text-cyan-300 font-mono bg-gray-900 rounded px-2 py-1 whitespace-pre-wrap">
                     {Object.keys(result.placeholders ?? {}).length > 0
                       ? JSON.stringify(result.placeholders, null, 2)
@@ -1831,7 +1850,7 @@ function DecisionPromptTestWindow({
                 {matched ? (
                   <div className="border border-gray-700 rounded p-2 space-y-1">
                     <div className="text-xs text-gray-300 font-medium">Matched prompt</div>
-                    <div className="text-xs text-gray-400">
+                    <div className="text-xs text-white">
                       id: <span className="text-gray-200">{String(matched.id)}</span>
                       {' · '}description: <span className="text-gray-200">{String(matched.description || '—')}</span>
                       {' · '}mode: <span className="text-gray-200">{String(matched.mode)}</span>
@@ -1857,7 +1876,7 @@ function DecisionPromptTestWindow({
               </>
             )}
             {!result && !runError && (
-              <p className="text-xs text-gray-600">Click Run to execute the selector script.</p>
+              <p className="text-xs text-white">Click Run to execute the selector script.</p>
             )}
           </div>
         </div>
@@ -1886,6 +1905,7 @@ export function DecisionPromptConfigEditor() {
   const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null)
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
   const [aiDecisionOpen, setAiDecisionOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // Test window
   const [testOpen, setTestOpen] = useState(false)
@@ -2087,14 +2107,14 @@ export function DecisionPromptConfigEditor() {
                 </span>
                 <button
                   onClick={() => setLlmPromptOpenForIdx(null)}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-white text-xs"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-700 text-white hover:text-white text-xs"
                 >
                   <X className="w-3.5 h-3.5" /> Close
                 </button>
               </div>
               <div className="flex flex-1 overflow-hidden gap-0">
                 <div className="flex flex-col w-1/2 border-r border-gray-800 p-3">
-                  <span className="text-xs text-gray-400 mb-1">Prompt Text</span>
+                  <span className="text-xs text-white mb-1">Prompt Text</span>
                   <textarea
                     className="flex-1 w-full bg-gray-900 border border-gray-700 rounded px-2 py-2 text-xs text-gray-200 font-mono resize-none"
                     spellCheck={false}
@@ -2117,11 +2137,11 @@ export function DecisionPromptConfigEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Decision Prompt</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (decision_prompt_profiles)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (decision_prompt_profiles)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -2168,6 +2188,16 @@ export function DecisionPromptConfigEditor() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm text-gray-200 font-medium">Decision Prompt Editor</h3>
                   <div className="flex items-center gap-2">
+                    {selectedName && (
+                      <button
+                        onClick={() => setHistoryOpen(true)}
+                        className="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 flex items-center gap-1"
+                        title="History"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        History
+                      </button>
+                    )}
                     <button
                       onClick={() => setAiDecisionOpen(true)}
                       className="text-xs px-3 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white border border-indigo-500/40 flex items-center gap-1"
@@ -2226,7 +2256,7 @@ export function DecisionPromptConfigEditor() {
                   />
                 </label>
 
-                <label className="text-xs text-gray-400">
+                <label className="text-xs text-white">
                   Fallback Snapshot Profile
                   <select
                     value={form.fallback_snapshot_profile}
@@ -2238,7 +2268,7 @@ export function DecisionPromptConfigEditor() {
                       <option key={n} value={n}>{n}</option>
                     ))}
                   </select>
-                  <span className="text-xs text-gray-600 mt-0.5 block">
+                  <span className="text-xs text-white mt-0.5 block">
                     Executed for selector script data when agent has no snapshot profile assigned. Not forwarded to LLM.
                   </span>
                 </label>
@@ -2282,7 +2312,7 @@ export function DecisionPromptConfigEditor() {
                     {form.prompts.map((entry, idx) => (
                       <div key={idx} className="border border-gray-700 rounded p-2 bg-gray-900 space-y-2">
                         <div className="grid grid-cols-4 gap-2">
-                          <label className="text-xs text-gray-400">
+                          <label className="text-xs text-white">
                             ID
                             <input
                               type="number"
@@ -2291,7 +2321,7 @@ export function DecisionPromptConfigEditor() {
                               className="mt-0.5 w-full bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-200"
                             />
                           </label>
-                          <label className="text-xs text-gray-400 col-span-1">
+                          <label className="text-xs text-white col-span-1">
                             Description
                             <input
                               value={entry.description}
@@ -2299,7 +2329,7 @@ export function DecisionPromptConfigEditor() {
                               className="mt-0.5 w-full bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-200"
                             />
                           </label>
-                          <label className="text-xs text-gray-400">
+                          <label className="text-xs text-white">
                             Mode
                             <select
                               value={entry.mode}
@@ -2310,7 +2340,7 @@ export function DecisionPromptConfigEditor() {
                               <option value="append">append</option>
                             </select>
                           </label>
-                          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer self-end pb-0.5">
+                          <label className="flex items-center gap-1.5 text-xs text-white cursor-pointer self-end pb-0.5">
                             <input
                               type="checkbox"
                               checked={entry.use_placeholders}
@@ -2366,7 +2396,7 @@ export function DecisionPromptConfigEditor() {
                       </div>
                     ))}
                     {form.prompts.length === 0 && (
-                      <p className="text-xs text-gray-600 italic">No prompts yet. Click "+ New Prompt" to add one.</p>
+                      <p className="text-xs text-white italic">No prompts yet. Click "+ New Prompt" to add one.</p>
                     )}
                   </div>
                 </div>
@@ -2382,7 +2412,7 @@ export function DecisionPromptConfigEditor() {
               <aside className="border border-gray-700 rounded p-3 bg-gray-900/30 space-y-3">
                 <h3 className="text-sm text-gray-200 font-medium">Test Snapshot</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  <label className="text-xs text-gray-400">
+                  <label className="text-xs text-white">
                     Agent
                     <select
                       value={selectedAgentId}
@@ -2395,7 +2425,7 @@ export function DecisionPromptConfigEditor() {
                       ))}
                     </select>
                   </label>
-                  <label className="text-xs text-gray-400">
+                  <label className="text-xs text-white">
                     Snapshot Profile
                     <select
                       value={selectedSnapshotProfile}
@@ -2421,17 +2451,17 @@ export function DecisionPromptConfigEditor() {
                 {loadedSnapshot && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-500">Snapshot JSON</span>
+                      <span className="text-xs text-white">Snapshot JSON</span>
                       <CopyButton getText={() => JSON.stringify(loadedSnapshot, null, 2)} />
                     </div>
-                    <pre className="text-xs text-gray-400 bg-gray-800 rounded p-2 max-h-64 overflow-auto whitespace-pre-wrap">
+                    <pre className="text-xs text-white bg-gray-800 rounded p-2 max-h-64 overflow-auto whitespace-pre-wrap">
                       {JSON.stringify(loadedSnapshot, null, 2).slice(0, 2000)}
                       {JSON.stringify(loadedSnapshot, null, 2).length > 2000 ? '\n…[truncated]' : ''}
                     </pre>
                   </div>
                 )}
                 {!loadedSnapshot && !snapshotError && (
-                  <p className="text-xs text-gray-600 italic">Select an agent and click "Load Snapshot" to load a live snapshot for testing. The loaded snapshot will be pre-filled in the test window.</p>
+                  <p className="text-xs text-white italic">Select an agent and click "Load Snapshot" to load a live snapshot for testing. The loaded snapshot will be pre-filled in the test window.</p>
                 )}
               </aside>
             </div>
@@ -2447,6 +2477,13 @@ export function DecisionPromptConfigEditor() {
         contextData={JSON.stringify(form, null, 2)}
         contextDataLabel={form.name || 'new prompt'}
         onClose={() => setAiDecisionOpen(false)}
+      />
+    )}
+    {historyOpen && selectedName && (
+      <EntityHistoryModal
+        entityType="decision_prompt_profile"
+        entityId={selectedName}
+        onClose={() => setHistoryOpen(false)}
       />
     )}
     </>

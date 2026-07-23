@@ -36,7 +36,6 @@ import { HelperConfigViewer } from '@/components/views/config/HelperConfigViewer
 import { DecisionPromptConfigEditor, SnapshotConfigEditor } from '@/components/views/config/ProfileConfigEditors'
 import { PackageManager } from '@/components/views/config/PackageManager'
 import { LlmContextEditor } from '@/components/views/config/LlmContextEditor'
-import { InformationView } from '@/components/views/config/InformationView'
 import { ToolExecutor } from '@/components/views/test/ToolExecutor'
 import { LlmChecker } from '@/components/views/test/LlmChecker'
 import { HandbookView } from '@/components/views/handbook/HandbookView'
@@ -86,7 +85,6 @@ const HANDBOOK_FILE: Record<string, string> = {
   'monitor:core':      'ui.monitor',
   'monitor:agent':     'ui.monitor',
   // config
-  'config:information':    'ui.config.information',
   'config:agent_wizard':   'ui.config.agent_config',
   'config:snapshot_config':'ui.config.snapshot_config',
   'config:decision_prompt':'ui.config.decision_prompt',
@@ -110,7 +108,7 @@ function resolveHandbookFile(section: TopSection, sub: string, lang: 'en' | 'de'
 const DEFAULT_SUB: Record<TopSection, string> = {
   action:        'initial',
   monitor:       '__none__',
-  config:        'information',
+  config:        'agent_wizard',
   test:          'llm_checker',  // kept for type completeness, tab is hidden
 }
 
@@ -283,7 +281,6 @@ export default function App() {
         )
 
       case 'config': {
-        if (activeSub === 'information') return <InformationView key="information" />
         if (activeSub === 'agent_wizard') return <AgentConfigWizard key="agent-wizard" />
         if (activeSub === 'ec_wizard') return <EventComposerConfigWizard key="ec-wizard" />
         if (activeSub === 'snapshot_config') return <SnapshotConfigEditor key="snapshot-config" />

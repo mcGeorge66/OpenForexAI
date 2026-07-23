@@ -461,7 +461,7 @@ export function LlmChecker() {
         <section className="flex flex-col min-h-0 border-r border-gray-700">
           <div className="px-4 py-2 bg-gray-900 border-b border-gray-700 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-gray-200 font-medium">LLM Checker</span>
-            <span className="text-xs text-gray-500">LLM: {selectedLlm || '— none —'}</span>
+            <span className="text-xs text-white">LLM: {selectedLlm || '— none —'}</span>
             <div className="ml-auto flex items-center gap-2">
               {kbStatus === 'ok' && (
                 <span className="text-xs text-emerald-400">In KB gespeichert</span>
@@ -502,7 +502,7 @@ export function LlmChecker() {
               <div className="text-center text-gray-600 mt-16 text-sm">
                 Select an LLM, enable tools, and start a test dialog.
                 <br />
-                <span className="text-xs text-gray-700">Enter to send, Shift+Enter for newline</span>
+                <span className="text-xs text-white">Enter to send, Shift+Enter for newline</span>
               </div>
             )}
             {messages.map(msg => (
@@ -519,11 +519,11 @@ export function LlmChecker() {
                 </div>
                 <div className={`max-w-2xl ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                   <div className="flex items-center gap-2">
-                    <div className="text-xs text-gray-500">{msg.timestamp}</div>
+                    <div className="text-xs text-white">{msg.timestamp}</div>
                     <button
                       onClick={() => copyMessage(msg)}
                       title="Copy"
-                      className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                      className="flex items-center gap-1 text-xs text-white hover:text-white transition-colors"
                     >
                       {copiedId === msg.id
                         ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Copied</span></>
@@ -574,7 +574,7 @@ export function LlmChecker() {
                 Send
               </button>
             </div>
-            <p className="text-xs text-gray-600 mt-1">Enter to send, Shift+Enter for newline</p>
+            <p className="text-xs text-white mt-1">Enter to send, Shift+Enter for newline</p>
           </div>
         </section>
 
@@ -586,7 +586,7 @@ export function LlmChecker() {
           <div className="flex-1 min-h-0 p-4 overflow-auto space-y-4">
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">LLM</label>
+                <label className="block text-xs text-white mb-1">LLM</label>
                 <select
                   value={selectedLlm}
                   onChange={e => setSelectedLlm(e.target.value)}
@@ -601,7 +601,7 @@ export function LlmChecker() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Agent (optional)</label>
+                  <label className="block text-xs text-white mb-1">Agent (optional)</label>
                   <select
                     value={agentId}
                     onChange={e => setAgentId(e.target.value)}
@@ -614,7 +614,7 @@ export function LlmChecker() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Broker (optional)</label>
+                  <label className="block text-xs text-white mb-1">Broker (optional)</label>
                   <select
                     value={brokerName}
                     onChange={e => setBrokerName(e.target.value)}
@@ -627,7 +627,7 @@ export function LlmChecker() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Pair (optional)</label>
+                  <label className="block text-xs text-white mb-1">Pair (optional)</label>
                   <input
                     value={pair}
                     onChange={e => setPair(e.target.value)}
@@ -645,7 +645,7 @@ export function LlmChecker() {
                 </div>
               )}
               <div>
-                <label className="block text-xs text-gray-400 mb-1">System Prompt</label>
+                <label className="block text-xs text-white mb-1">System Prompt</label>
                 <textarea
                   value={systemPrompt}
                   onChange={e => setSystemPrompt(e.target.value)}
@@ -656,12 +656,12 @@ export function LlmChecker() {
                   rows={4}
                   className="w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500"
                 />
-                <p className="text-[11px] text-gray-600 mt-1">Double-click to open large editor window.</p>
+                <p className="text-[11px] text-white mt-1">Double-click to open large editor window.</p>
               </div>
 
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Temperature</label>
+                  <label className="block text-xs text-white mb-1">Temperature</label>
                   <input
                     value={temperature}
                     onChange={e => setTemperature(e.target.value)}
@@ -669,7 +669,7 @@ export function LlmChecker() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Max Tokens</label>
+                  <label className="block text-xs text-white mb-1">Max Tokens</label>
                   <input
                     value={maxTokens}
                     onChange={e => setMaxTokens(e.target.value)}
@@ -677,7 +677,7 @@ export function LlmChecker() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Max Tool Turns</label>
+                  <label className="block text-xs text-white mb-1">Max Tool Turns</label>
                   <input
                     value={maxToolTurns}
                     onChange={e => setMaxToolTurns(e.target.value)}
@@ -685,7 +685,7 @@ export function LlmChecker() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Reasoning</label>
+                  <label className="block text-xs text-white mb-1">Reasoning</label>
                   <select
                     value={reasoningEffort}
                     onChange={e => setReasoningEffort(e.target.value)}
@@ -701,7 +701,7 @@ export function LlmChecker() {
 
               <div className="border border-gray-700 rounded p-3 bg-gray-900/30 space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-400">Tools</label>
+                  <label className="text-xs text-white">Tools</label>
                   <input
                     value={toolFilter}
                     onChange={e => setToolFilter(e.target.value)}
@@ -712,10 +712,10 @@ export function LlmChecker() {
                 <div className="flex items-center gap-2">
                   <button onClick={selectAllVisible} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Select visible</button>
                   <button onClick={clearVisible} className="text-xs px-2 py-1 rounded bg-gray-800 border border-gray-600 text-gray-200 hover:bg-gray-700">Clear visible</button>
-                  <span className="text-xs text-gray-500 ml-auto">Enabled: {enabledTools.length}</span>
+                  <span className="text-xs text-white ml-auto">Enabled: {enabledTools.length}</span>
                 </div>
                 <div className="max-h-52 overflow-auto space-y-1 pr-1">
-                  {toolsLoading && <p className="text-xs text-gray-500 animate-pulse">Loading tools...</p>}
+                  {toolsLoading && <p className="text-xs text-white animate-pulse">Loading tools...</p>}
                   {toolsError && <p className="text-xs text-red-400">Error: {toolsError}</p>}
                   {!toolsLoading && filteredTools.map(t => {
                     const checked = enabledTools.includes(t.name)
@@ -744,14 +744,14 @@ export function LlmChecker() {
 
             <div className="border border-gray-700 rounded p-3 bg-gray-900/40">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-xs uppercase tracking-wider text-gray-400">LLM ↔ Tool Trace</h4>
+                <h4 className="text-xs uppercase tracking-wider text-white">LLM ↔ Tool Trace</h4>
                 {lastMeta && (
-                  <span className="text-xs text-gray-500">tokens: {lastMeta.tokens} | stop: {lastMeta.stop}</span>
+                  <span className="text-xs text-white">tokens: {lastMeta.tokens} | stop: {lastMeta.stop}</span>
                 )}
               </div>
               <div className="max-h-80 overflow-auto space-y-2">
                 {trace.length === 0 && (
-                  <p className="text-xs text-gray-500">No trace yet. Send a message to run a test cycle.</p>
+                  <p className="text-xs text-white">No trace yet. Send a message to run a test cycle.</p>
                 )}
                 {trace.map((item, idx) => {
                   const type = String(item.type ?? 'event')

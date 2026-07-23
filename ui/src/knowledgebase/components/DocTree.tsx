@@ -45,7 +45,7 @@ function MovePicker({ doc, docs, onMove, onClose }: {
             </button>
           ))}
           {folders.length === 0 && (
-            <p className="px-3 py-2 text-xs text-gray-600">Keine Ordner vorhanden</p>
+            <p className="px-3 py-2 text-xs text-white">Keine Ordner vorhanden</p>
           )}
         </div>
       </div>
@@ -207,7 +207,7 @@ export function DocTree({ docs, activeId, onSelect, onCreate, onDelete, onRename
   return (
     <div className="py-2">
       {roots.length === 0 && (
-        <p className="px-4 py-2 text-xs text-gray-600">Keine Dokumente</p>
+        <p className="px-4 py-2 text-xs text-white">Keine Dokumente</p>
       )}
       {roots.map(doc => (
         <TreeNode

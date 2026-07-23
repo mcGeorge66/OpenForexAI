@@ -458,7 +458,7 @@ export function Orderbook() {
   const timeframeControls = useMemo(
     () => (
       <>
-        <label className="inline-flex items-center gap-1 text-xs text-gray-400 mr-2">
+        <label className="inline-flex items-center gap-1 text-xs text-white mr-2">
           <input
             type="checkbox"
             checked={showAnalyses}
@@ -475,7 +475,7 @@ export function Orderbook() {
               'px-2 py-0.5 rounded border text-xs',
               chartTimeframe === tf
                 ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+                : 'border-gray-700 bg-gray-900 text-white hover:text-gray-200',
             ].join(' ')}
           >
             {tf}
@@ -708,7 +708,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
               {filter}
             </button>
           ))}
-          <label className="flex items-center gap-1 text-xs text-gray-400">
+          <label className="flex items-center gap-1 text-xs text-white">
             Max
             <input
               type="number"
@@ -795,7 +795,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-500">{entry.direction} · {entry.status}</div>
+                      <div className="text-xs text-white">{entry.direction} · {entry.status}</div>
                     </td>
                     <td className={[
                       'px-3 py-2',
@@ -810,7 +810,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                       {formatTs(getTradeEndDisplay(entry))}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-400 tabular-nums">{tradeDuration(entry)}</td>
-                    <td className="px-3 py-2 text-gray-400 text-xs font-mono">{entry.broker_order_id ?? '-'}</td>
+                    <td className="px-3 py-2 text-white text-xs font-mono">{entry.broker_order_id ?? '-'}</td>
                     <td className="px-3 py-2 text-right text-gray-200">{entry.units.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right text-gray-200">{formatStake(entry.stake_estimate)}</td>
                     <td className={[
@@ -821,7 +821,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                     </td>
                     <td className="px-3 py-2 text-gray-300">
                       <div>{getCloseDisplay(entry)}</div>
-                      <div className="text-xs text-gray-500 truncate max-w-[260px]">
+                      <div className="text-xs text-white truncate max-w-[260px]">
                         {entry.close_reasoning || entry.status}
                       </div>
                     </td>
@@ -879,7 +879,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
               <div className="text-sm font-semibold text-gray-100 leading-tight">
                 {selectedSummary ? `${selectedSummary.pair} · ${selectedSummary.direction}` : 'Select an order'}
               </div>
-              <div className="text-[11px] text-gray-400 leading-tight mt-0.5">
+              <div className="text-[11px] text-white leading-tight mt-0.5">
                 {selectedEntry?.decision_context?.decision ?? '-'} · {selectedEntry?.signal_confidence?.toFixed(2) ?? '-'} · {selectedEntry?.decision_context?.setup_type ?? '-'}
               </div>
             </div>
@@ -1021,7 +1021,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Decision JSON</span>
+                  <span className="text-xs text-white">Decision JSON</span>
                   <CopyButton getText={() => selectedAnalysis.analysis_text || JSON.stringify(selectedAnalysis.analysis ?? selectedAnalysis.output, null, 2)} />
                 </div>
                 <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
@@ -1033,7 +1033,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-medium text-gray-200">Decision Snapshot</h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-white">
                         {typeof selectedAnalysis.market_snapshot?.snapshot_schema_version === 'string'
                           ? `schema ${String(selectedAnalysis.market_snapshot.snapshot_schema_version)}`
                           : 'no schema'}

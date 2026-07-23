@@ -130,15 +130,15 @@ export function ModuleConfigViewer({ moduleType }: ModuleConfigViewerProps) {
         <span className="text-sm text-gray-300 font-medium">{title}</span>
         <div className="flex items-center gap-3">
           {selectedName && pathLabel && (
-            <span className="text-xs text-gray-500">{pathLabel}</span>
+            <span className="text-xs text-white">{pathLabel}</span>
           )}
           {selectedName && (
-            <span className="text-xs text-gray-500">Position {cursor.line}:{cursor.column}</span>
+            <span className="text-xs text-white">Position {cursor.line}:{cursor.column}</span>
           )}
           <button
             onClick={saveConfig}
             disabled={!selectedName || configLoading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <Save className="w-3.5 h-3.5" />
             {saving ? 'Saving…' : 'Save'}
@@ -146,7 +146,7 @@ export function ModuleConfigViewer({ moduleType }: ModuleConfigViewerProps) {
           <button
             onClick={loadConfig}
             disabled={!selectedName || configLoading}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${configLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -155,7 +155,7 @@ export function ModuleConfigViewer({ moduleType }: ModuleConfigViewerProps) {
       </div>
 
       <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex-shrink-0">
-        <label className="block text-xs text-gray-400 mb-1">
+        <label className="block text-xs text-white mb-1">
           Select {moduleType === 'llm' ? 'LLM module' : 'broker module'}
         </label>
         {namesError ? (

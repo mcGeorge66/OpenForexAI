@@ -80,15 +80,15 @@ export function ConfigViewer({ pathLabel, title, loadConfig, saveConfig }: Confi
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">{title}</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{pathLabel}</span>
+          <span className="text-xs text-white">{pathLabel}</span>
           {saveConfig && (
-            <span className="text-xs text-gray-500">Position {cursor.line}:{cursor.column}</span>
+            <span className="text-xs text-white">Position {cursor.line}:{cursor.column}</span>
           )}
           {saveConfig && (
             <button
               onClick={handleSave}
               disabled={!canSave}
-              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+              className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
             >
               <Save className="w-3.5 h-3.5" />
               {saving ? 'Saving…' : 'Save'}
@@ -97,7 +97,7 @@ export function ConfigViewer({ pathLabel, title, loadConfig, saveConfig }: Confi
           <button
             onClick={load}
             disabled={loading}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh

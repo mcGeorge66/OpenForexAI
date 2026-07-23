@@ -556,7 +556,7 @@ export function AgentChat() {
         <section style={{ width: `${leftWidthPct}%` }} className="flex flex-col min-h-0 flex-shrink-0 border-r border-gray-700">
           <div className="px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 space-y-2">
             <div className="flex items-center gap-3">
-              <label className="text-xs text-gray-400 flex-shrink-0">Agent:</label>
+              <label className="text-xs text-white flex-shrink-0">Agent:</label>
               <select
                 value={selectedAgent}
                 onChange={e => {
@@ -572,7 +572,7 @@ export function AgentChat() {
                 ))}
               </select>
 
-              <label className="text-xs text-gray-400 flex-shrink-0 ml-4">Timeout (s):</label>
+              <label className="text-xs text-white flex-shrink-0 ml-4">Timeout (s):</label>
               <input
                 type="number"
                 min={5}
@@ -602,7 +602,7 @@ export function AgentChat() {
               <button
                 onClick={() => setRawJsonMode(v => !v)}
                 title={rawJsonMode ? 'Switch to formatted view' : 'Switch to raw JSON view'}
-                className={`text-xs px-2.5 py-1 rounded border transition-colors ${rawJsonMode ? 'border-amber-500 bg-amber-900/40 text-amber-300 hover:bg-amber-900/60' : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                className={`text-xs px-2.5 py-1 rounded border transition-colors ${rawJsonMode ? 'border-amber-500 bg-amber-900/40 text-amber-300 hover:bg-amber-900/60' : 'border-gray-700 bg-gray-800 text-white hover:text-gray-200'}`}
               >
                 {rawJsonMode ? 'Raw JSON' : 'Formatted'}
               </button>
@@ -614,7 +614,7 @@ export function AgentChat() {
             {messages.length === 0 && (
                 <div className="text-center text-gray-600 mt-16 text-sm">
                   Select an agent and send a question.<br />
-                  <span className="text-xs text-gray-700">Enter to send, Shift+Enter for newline</span>
+                  <span className="text-xs text-white">Enter to send, Shift+Enter for newline</span>
                 </div>
             )}
             {messages.map(msg => {
@@ -632,7 +632,7 @@ export function AgentChat() {
                   <div className={`max-w-2xl min-w-0 flex-1 ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                     {/* Header row */}
                     <div
-                      className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none"
+                      className="flex items-center gap-2 text-xs text-white cursor-pointer select-none"
                       onClick={() => setCollapsedMessages(prev => {
                         const next = new Set(prev)
                         next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id)
@@ -690,7 +690,7 @@ export function AgentChat() {
                         msg.runId && selectedRunId === msg.runId ? 'ring-1 ring-emerald-500/70' : ''
                       }`}>
                         {msg.title && (
-                          <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">
+                          <div className="text-[11px] uppercase tracking-wide text-white mb-1">
                             {msg.title}
                           </div>
                         )}
@@ -751,7 +751,7 @@ export function AgentChat() {
                 </button>
               </div>
             </div>
-            <p className="text-xs text-gray-600 mt-1">
+            <p className="text-xs text-white mt-1">
               Enter sends chat. Execute runs the selected agent in inspect mode.
             </p>
           </div>
@@ -779,7 +779,7 @@ export function AgentChat() {
                       <button
                         onClick={() => void refreshCandles()}
                         disabled={candlesLoading}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-gray-400 hover:text-white text-xs flex-shrink-0"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white hover:text-white text-xs flex-shrink-0"
                         title="Refresh candles"
                       >
                         <RefreshCcw className={`w-3 h-3 ${candlesLoading ? 'animate-spin' : ''}`} />
@@ -787,7 +787,7 @@ export function AgentChat() {
                       </button>
                       <button
                         onClick={() => chartRef.current?.resetView()}
-                        className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200 text-xs flex-shrink-0"
+                        className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs flex-shrink-0"
                       >
                         Reset
                       </button>
@@ -799,7 +799,7 @@ export function AgentChat() {
                             'px-2 py-0.5 rounded border text-xs',
                             chartTimeframe === tf
                               ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                              : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+                              : 'border-gray-700 bg-gray-900 text-white hover:text-gray-200',
                           ].join(' ')}
                         >
                           {tf}
@@ -813,13 +813,13 @@ export function AgentChat() {
                             'px-2 py-0.5 rounded border text-xs',
                             chartRange === n
                               ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                              : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+                              : 'border-gray-700 bg-gray-900 text-white hover:text-gray-200',
                           ].join(' ')}
                         >
                           {n}
                         </button>
                       ))}
-                      <label className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400 cursor-pointer select-none">
+                      <label className="ml-auto inline-flex items-center gap-1 text-xs text-white cursor-pointer select-none">
                         <input
                           type="checkbox"
                           checked={showAnalyses}
@@ -846,7 +846,7 @@ export function AgentChat() {
                           }}
                         />
                       ) : (
-                        <div className="text-xs text-gray-500 border border-gray-700 rounded p-3 bg-gray-900">
+                        <div className="text-xs text-white border border-gray-700 rounded p-3 bg-gray-900">
                           No candle data available.
                         </div>
                       )}
@@ -873,14 +873,14 @@ export function AgentChat() {
                           'px-2.5 py-1 rounded border text-xs',
                           inspectorTab === key
                             ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
-                            : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+                            : 'border-gray-700 bg-gray-900 text-white hover:text-gray-200',
                         ].join(' ')}
                       >
                         {label}
                       </button>
                     ))}
                     {selectedRun && (
-                      <span className="ml-auto text-xs text-gray-500">
+                      <span className="ml-auto text-xs text-white">
                         {selectedRun.agent_id} · {selectedRun.trigger} · {selectedRun.elapsed_ms.toFixed(1)} ms
                       </span>
                     )}
@@ -1032,7 +1032,7 @@ export function AgentChat() {
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Decision JSON</span>
+                  <span className="text-xs text-white">Decision JSON</span>
                   <CopyButton getText={() => selectedAnalysis.analysis_text || JSON.stringify(selectedAnalysis.analysis ?? selectedAnalysis.output, null, 2)} />
                 </div>
                 <pre className="whitespace-pre-wrap break-words text-sm text-gray-200 leading-6">
@@ -1043,7 +1043,7 @@ export function AgentChat() {
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-medium text-gray-200">Decision Snapshot</h4>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-white">
                       {typeof selectedAnalysis.market_snapshot?.snapshot_schema_version === 'string'
                         ? `schema ${String(selectedAnalysis.market_snapshot.snapshot_schema_version)}`
                         : 'no schema'}

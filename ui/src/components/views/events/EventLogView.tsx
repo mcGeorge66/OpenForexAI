@@ -122,20 +122,20 @@ export function EventLogView() {
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm font-semibold text-emerald-400">Event Log</span>
-        {!loading && <span className="text-xs text-gray-500">{events.length} loaded</span>}
+        {!loading && <span className="text-xs text-white">{events.length} loaded</span>}
 
         {/* Roots / All toggle */}
         <div className="flex items-center gap-1 ml-2 bg-gray-800 rounded p-0.5">
           <button
             onClick={() => setRootsOnly(true)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${rootsOnly ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${rootsOnly ? 'bg-emerald-700 text-white' : 'text-white hover:text-gray-200'}`}
             title="Show only trace-root events (m5_candle_trigger, order_request, …)"
           >
             <GitBranch className="w-3 h-3" /> Roots
           </button>
           <button
             onClick={() => setRootsOnly(false)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${!rootsOnly ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${!rootsOnly ? 'bg-gray-600 text-white' : 'text-white hover:text-gray-200'}`}
             title="Show all persisted events"
           >
             <Layers className="w-3 h-3" /> All
@@ -198,7 +198,7 @@ export function EventLogView() {
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-600 w-14 text-center"
             title="Min events in chain"
           />
-          <span className="text-gray-600 text-xs">–</span>
+          <span className="text-white text-xs">–</span>
           <input
             type="number"
             min={0}

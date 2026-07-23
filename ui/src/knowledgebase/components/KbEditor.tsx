@@ -148,7 +148,7 @@ export function KbEditor({ docId, title, initialContent, onTitleChange, onSave, 
       onClick={() => setViewMode(mode)}
       className={[
         'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
-        viewMode === mode ? 'bg-emerald-900/40 text-emerald-300' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800',
+        viewMode === mode ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800',
       ].join(' ')}
       title={label}
     >
@@ -212,7 +212,7 @@ export function KbEditor({ docId, title, initialContent, onTitleChange, onSave, 
               'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors mr-2',
               saved
                 ? 'bg-emerald-600 text-white'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700 border border-gray-600',
+                : 'text-white hover:text-gray-200 hover:bg-gray-700 border border-gray-600',
               saving ? 'opacity-50 cursor-not-allowed' : '',
             ].join(' ')}
             title="Speichern (Ctrl+S)"

@@ -93,6 +93,9 @@ class MonitoringEventType(StrEnum):
     # ── EC script log (emitted by log() helper inside EC scripts) ─────────────
     EC_SCRIPT_LOG = "ec_script_log"
 
+    # ── EC script debug (emitted by debug() helper, test runs only) ───────────
+    EC_DEBUG_LOG = "ec_debug_log"
+
 
 class MonitoringEvent(BaseModel):
     """Universal event envelope for the monitoring bus.

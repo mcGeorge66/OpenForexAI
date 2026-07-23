@@ -110,7 +110,7 @@ export function LlmContextEditor() {
                   className={`flex items-center gap-1 px-2 py-1 rounded border text-xs ${
                     viewMode === mode
                       ? 'border-emerald-500 bg-emerald-900/40 text-emerald-300'
-                      : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white'
+                      : 'border-gray-700 bg-gray-800 text-white hover:text-white'
                   }`}
                 >
                   {icon}

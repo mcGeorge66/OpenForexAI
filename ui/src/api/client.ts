@@ -95,6 +95,14 @@ export const api = {
   getComposers:   () => get<{ ec_id: string }[]>('/composers'),
   executeComposer: (ecId: string, input: Record<string, unknown>) =>
                     post<ECExecuteResponse>(`/composers/${encodeURIComponent(ecId)}/execute`, { input }),
+  getEntityHistory: (entityType: EntityHistoryType, entityId: string, limit = 50) =>
+                    get<EntityHistoryEntry[]>(
+                      `/entity-history/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}?limit=${limit}`,
+                    ),
+  getAgentContext: (agentId: string) =>
+                    get<AgentContextTextResponse>(`/llm-contexts/agent/${encodeURIComponent(agentId)}`),
+  saveAgentContext: (agentId: string, text: string) =>
+                    put<{ status: string; file: string }>(`/llm-contexts/agent/${encodeURIComponent(agentId)}`, text),
   askAgent:       (agentId: string, question: string, timeout = 120, history?: Array<{role: string, content: string}>) =>
                     post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout, ...(history?.length ? { history } : {}) }),
   executeAgent:   (agentId: string, body: AgentExecuteRequest) =>
@@ -344,6 +352,27 @@ export interface ECExecuteResponse {
   success: boolean
   error: string | null
   latency_ms: number
+}
+
+export interface AgentContextTextResponse {
+  exists: boolean
+  text: string
+}
+
+export type EntityHistoryType = 'agent' | 'event_composer' | 'snapshot_profile' | 'decision_prompt_profile'
+
+export interface EntityHistoryEntry {
+  id: string
+  timestamp: string | null
+  trigger: string | null
+  success: boolean
+  error: string | null
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  tool_calls: Record<string, unknown>[] | null
+  latency_ms: number | null
+  correlation_id: string | null
+  emitted_events: EventLogEntry[]
 }
 
 export interface AgentInfo {

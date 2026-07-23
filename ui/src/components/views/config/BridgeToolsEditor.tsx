@@ -303,11 +303,11 @@ export function BridgeToolsEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Bridge Tools</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{root ? joinPath(root, 'config', 'RunTime', 'agent_tools.json5') : 'config/RunTime/agent_tools.json5'} (bridge_tools)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'RunTime', 'agent_tools.json5') : 'config/RunTime/agent_tools.json5'} (bridge_tools)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -461,7 +461,7 @@ export function BridgeToolsEditor() {
                     {form.targets.map((t, idx) => (
                       <div key={idx} className="border border-gray-700 rounded p-2 bg-gray-950/60 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-400">Target {idx + 1}</span>
+                          <span className="text-xs text-white">Target {idx + 1}</span>
                           <button
                             onClick={() => removeTarget(idx)}
                             className="text-xs px-2 py-0.5 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"

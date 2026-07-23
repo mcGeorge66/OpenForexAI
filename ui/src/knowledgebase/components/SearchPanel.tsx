@@ -56,7 +56,7 @@ export function SearchPanel({ query, results, onQuery, onNavigate, onClose }: Pr
               </div>
               {r.snippet && (
                 <p
-                  className="text-xs text-gray-500 line-clamp-2 pl-5 [&_mark]:bg-emerald-900/60 [&_mark]:text-emerald-300 [&_mark]:rounded"
+                  className="text-xs text-white line-clamp-2 pl-5 [&_mark]:bg-emerald-900/60 [&_mark]:text-emerald-300 [&_mark]:rounded"
                   dangerouslySetInnerHTML={{ __html: r.snippet }}
                 />
               )}

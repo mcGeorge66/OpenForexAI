@@ -4302,6 +4302,138 @@ async def execute_composer(ec_id: str, req: ECExecuteRequest) -> ECExecuteRespon
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# ── Entity history (generic "last runs" viewer for config editors) ───────────
+
+_ENTITY_HISTORY_TYPES = {"agent", "event_composer", "snapshot_profile", "decision_prompt_profile"}
+_ENTITY_HISTORY_NOISE_EVENTS = {"ec_cycle_start", "ec_cycle_end"}
+
+
+class EntityHistoryEntry(BaseModel):
+    id: str
+    timestamp: str | None
+    trigger: str | None
+    success: bool
+    error: str | None
+    input: dict[str, Any] | None
+    output: dict[str, Any] | None
+    tool_calls: list[dict[str, Any]] | None = None
+    latency_ms: float | None = None
+    correlation_id: str | None = None
+    emitted_events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _emitted_events_for_ec(ec_id: str, run_at: str | None, latency_ms: float | None) -> list[dict[str, Any]]:
+    """Side-channel events an EC script sent via emit() during one run.
+
+    EC scripts use await emit(...) for signals like ec_guard_block instead of
+    (or in addition to) returning a value — those never show up in
+    output_json, only on the general event log. emit() does not propagate a
+    correlation_id (see composer.py _make_emit_fn), so runs are matched by
+    time window + exact source agent instead.
+    """
+    if not run_at:
+        return []
+    from openforexai.messaging.event_log import read_events
+    try:
+        start = datetime.fromisoformat(run_at) - timedelta(seconds=2)
+        end = datetime.fromisoformat(run_at) + timedelta(milliseconds=latency_ms or 0) + timedelta(seconds=2)
+    except ValueError:
+        return []
+    try:
+        candidates = read_events(source_agent=ec_id, limit=200)
+    except Exception:
+        return []
+    matched = []
+    for ev in candidates:
+        if ev.get("event_type") in _ENTITY_HISTORY_NOISE_EVENTS:
+            continue
+        try:
+            ev_time = datetime.fromisoformat(ev["created_at"])
+        except (KeyError, ValueError):
+            continue
+        if start <= ev_time <= end:
+            matched.append(ev)
+    matched.sort(key=lambda e: e.get("created_at") or "")
+    return matched
+
+
+def _emitted_events_for_correlation(correlation_id: str | None) -> list[dict[str, Any]]:
+    if not correlation_id:
+        return []
+    from openforexai.messaging.event_log import read_events
+    try:
+        return read_events(correlation=correlation_id, limit=50)
+    except Exception:
+        return []
+
+
+def _ec_run_to_history_entry(run: dict[str, Any]) -> EntityHistoryEntry:
+    return EntityHistoryEntry(
+        id=run["id"],
+        timestamp=run.get("run_at"),
+        trigger=run.get("trigger"),
+        success=bool(run.get("success")),
+        error=run.get("error"),
+        input=run.get("input_json") if isinstance(run.get("input_json"), dict) else None,
+        output=run.get("output_json") if isinstance(run.get("output_json"), dict) else None,
+        tool_calls=run.get("tool_calls") if isinstance(run.get("tool_calls"), list) else None,
+        latency_ms=run.get("latency_ms"),
+        correlation_id=run.get("correlation_id"),
+        emitted_events=_emitted_events_for_ec(run["ec_id"], run.get("run_at"), run.get("latency_ms")),
+    )
+
+
+def _analysis_record_to_history_entry(record: dict[str, Any]) -> EntityHistoryEntry:
+    input_context = record.get("input_context") if isinstance(record.get("input_context"), dict) else {}
+    correlation_id = input_context.get("correlation_id") if isinstance(input_context, dict) else None
+    trigger = input_context.get("trigger") if isinstance(input_context, dict) else None
+    return EntityHistoryEntry(
+        id=record["id"],
+        timestamp=record.get("decided_at"),
+        trigger=trigger or record.get("decision_type"),
+        success=True,
+        error=None,
+        input=input_context or None,
+        output=record.get("output") if isinstance(record.get("output"), dict) else None,
+        tool_calls=None,
+        latency_ms=record.get("latency_ms"),
+        correlation_id=correlation_id,
+        emitted_events=_emitted_events_for_correlation(correlation_id),
+    )
+
+
+@router.get("/entity-history/{entity_type}/{entity_id}")
+async def get_entity_history(entity_type: str, entity_id: str, limit: int = 50) -> list[EntityHistoryEntry]:
+    """Last runs/decisions for one config entity — used by the "History" button
+    in the Agent/EventComposer/Snapshot-Profile/Decision-Prompt-Profile editors.
+
+    Snapshot- and Decision-Prompt profiles have no run log of their own: they
+    are matched via the profile name recorded on each agent decision that used
+    them (see agent.py _persist_analysis_result), so "history" for a profile
+    means "decisions made by agents while that profile was active".
+    """
+    if entity_type not in _ENTITY_HISTORY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown entity_type {entity_type!r}. Expected one of {sorted(_ENTITY_HISTORY_TYPES)}.",
+        )
+    if _repository is None:
+        raise HTTPException(status_code=503, detail="Repository not available")
+
+    limit = max(1, min(limit, 200))
+    if entity_type == "event_composer":
+        runs = await _repository.get_ec_runs(entity_id, limit=limit)
+        return [_ec_run_to_history_entry(r) for r in runs]
+
+    if entity_type == "agent":
+        records = await _repository.get_analysis_records(agent_id=entity_id, limit=limit)
+    elif entity_type == "snapshot_profile":
+        records = await _repository.get_analysis_records(snapshot_profile=entity_id, limit=limit)
+    else:  # decision_prompt_profile
+        records = await _repository.get_analysis_records(decision_prompt_profile=entity_id, limit=limit)
+    return [_analysis_record_to_history_entry(r) for r in records]
+
+
 # ── LLM Assistant ─────────────────────────────────────────────────────────────
 
 class LLMAssistantMessage(BaseModel):
@@ -4348,6 +4480,9 @@ def _resolve_file_refs(text: str) -> str:
     return re.sub(r"\[\[([^\]]+)\]\]", _replace, text)
 
 
+_ASSISTANT_DEFAULT_REASONING_EFFORT = "low"
+
+
 def _resolve_assistant_llm():
     """Return (llm_instance, call_kwargs) for the assistant.
 
@@ -4355,7 +4490,11 @@ def _resolve_assistant_llm():
     parameter overrides (temperature, reasoning_effort, max_tokens).
     Falls back to first registered LLM when provider is not set or not found.
     Only non-None config values are forwarded to llm.complete() so the
-    provider's own defaults remain in effect for anything not configured here.
+    provider's own defaults remain in effect for anything not configured here —
+    except reasoning_effort, which defaults to "low" for the assistant
+    specifically: without this, an unset value would silently fall through to
+    the shared trading-LLM module's own reasoning_effort (e.g. "medium" for
+    azure_azmin), making every chat assistant slower for no reason.
     """
     from openforexai.registry.runtime_registry import RuntimeRegistry
     assistant_cfg: dict = {}
@@ -4385,6 +4524,7 @@ def _resolve_assistant_llm():
         val = assistant_cfg.get(param)
         if val is not None:
             call_kwargs[param] = val
+    call_kwargs.setdefault("reasoning_effort", _ASSISTANT_DEFAULT_REASONING_EFFORT)
 
     return llm, call_kwargs
 
@@ -4445,6 +4585,44 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
         raise
     except Exception as exc:  # noqa: BLE001
         return LLMAssistantChatResponse(answer="", error=str(exc))
+
+
+# ── Per-agent LLM context notes ───────────────────────────────────────────────
+#
+# Freeform notes file per agent, named after the agent_id, used as default
+# background context for the Prompt Assistant chat (see PromptAssistantPanel).
+# Separate from sub_prompts/assessment_memory (DB-backed, runtime-injected) —
+# this is an editorial notes file the user curates by hand or via chat.
+
+_AGENT_CONTEXT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class AgentContextTextResponse(BaseModel):
+    exists: bool
+    text: str
+
+
+def _agent_context_path(agent_id: str) -> Path:
+    if not _AGENT_CONTEXT_ID_RE.match(agent_id):
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id {agent_id!r}")
+    ctx_dir = _project_root() / "config" / "llm_contexts"
+    return ctx_dir / f"{agent_id}.md"
+
+
+@router.get("/llm-contexts/agent/{agent_id}")
+async def get_agent_context(agent_id: str) -> AgentContextTextResponse:
+    path = _agent_context_path(agent_id)
+    if not path.exists():
+        return AgentContextTextResponse(exists=False, text="")
+    return AgentContextTextResponse(exists=True, text=path.read_text(encoding="utf-8"))
+
+
+@router.put("/llm-contexts/agent/{agent_id}")
+async def save_agent_context(agent_id: str, text: str = Body(..., embed=False)) -> dict:
+    path = _agent_context_path(agent_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return {"status": "saved", "file": f"config/llm_contexts/{agent_id}.md"}
 
 
 # ── Script validation ─────────────────────────────────────────────────────────

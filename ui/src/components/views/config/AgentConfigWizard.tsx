@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import JSON5 from 'json5'
-import { BookOpen, Check, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
+import { BookOpen, Check, Clock, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
 import { api, type ToolInfo } from '@/api/client'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
+import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
+import { SystemPromptEditorModal } from '@/components/views/config/SystemPromptEditorModal'
 import { useProjectRoot, joinPath } from '@/api/useProjectRoot'
 
 function CopyButton({ getText }: { getText: () => string }) {
@@ -465,6 +467,7 @@ export function AgentConfigWizard() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [testModalOpen, setTestModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [brokerShortNames, setBrokerShortNames] = useState<Record<string, string>>({})
   const [triggerCandidate, setTriggerCandidate] = useState('')
@@ -765,11 +768,11 @@ export function AgentConfigWizard() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Agent Config Wizard</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (agents)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (agents)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-40"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -804,7 +807,7 @@ export function AgentConfigWizard() {
                     )}
                   </select>
                 </label>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
+                <div className="flex items-center gap-2 text-xs text-white">
                   <span>{rows.length} agents</span>
                   {selectedAgentId && (
                     <span className="rounded border border-emerald-700/50 bg-emerald-900/20 px-2 py-1 text-emerald-300 font-mono">
@@ -835,6 +838,9 @@ export function AgentConfigWizard() {
                       <Plus className="w-3.5 h-3.5" />
                       New Empty Agent
                     </button>
+                    {selectedIndex !== null && (
+                      <button onClick={() => setHistoryOpen(true)} className="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 flex items-center gap-1"><Clock className="w-3.5 h-3.5" />History</button>
+                    )}
                     <button onClick={() => setTestModalOpen(true)} className="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 flex items-center gap-1"><Play className="w-3.5 h-3.5" />Test Event</button>
                     <button onClick={() => void handleUpdate()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 flex items-center gap-1"><Save className="w-3.5 h-3.5" />Update</button>
                     <button onClick={() => void handleSaveAsNew()} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50">Save As New</button>
@@ -889,7 +895,7 @@ export function AgentConfigWizard() {
                         <option key={v} value={v}>{v.toFixed(1)}</option>
                       ))}
                     </select>
-                    <span className="text-[10px] text-gray-500 leading-tight block mt-0.5">0.1 = deterministisch · 1.0 = kreativ</span>
+                    <span className="text-[10px] text-white leading-tight block mt-0.5">0.1 = deterministisch · 1.0 = kreativ</span>
                   </label>
 
                   <label title={TIPS.snapshot_profile} className="text-xs text-gray-300 col-span-4">
@@ -940,7 +946,7 @@ export function AgentConfigWizard() {
                       <option value="medium">medium</option>
                       <option value="high">high</option>
                     </select>
-                    <span className="text-[10px] text-gray-500 leading-tight block mt-0.5">none = kein Reasoning · high = gründlich (mehr Tokens)</span>
+                    <span className="text-[10px] text-white leading-tight block mt-0.5">none = no reasoning · high = thorough (more tokens)</span>
                   </label>
 
                   <div className="col-span-full">
@@ -1041,7 +1047,7 @@ export function AgentConfigWizard() {
                   <div title={TIPS.forced_arguments} className="col-span-full text-xs text-gray-300">
                     <div className="flex items-center justify-between">
                       <span>tool_config.forced_arguments</span>
-                      <span className="text-[11px] text-gray-500">LLM cannot override these values</span>
+                      <span className="text-[11px] text-white">LLM cannot override these values</span>
                     </div>
                     <div className="mt-2 space-y-3">
                       {form.allowed_tools.length === 0 ? (
@@ -1057,10 +1063,10 @@ export function AgentConfigWizard() {
                               <div className="mb-2 flex items-center justify-between gap-3">
                                 <div>
                                   <div className="font-mono text-sm text-emerald-300">{toolName}</div>
-                                  <div className="text-[11px] text-gray-500">
+                                  <div className="text-[11px] text-white">
                                     {tool?.description ?? 'Tool schema unavailable.'}
                                   </div>
-                                  <div className="text-[11px] text-gray-600">
+                                  <div className="text-[11px] text-white">
                                     Placeholders: {'{llm}'}, {'{broker}'}, {'{pair}'}, {'{type}'}, {'{name}'}, {'{agent_id}'}
                                   </div>
                                 </div>
@@ -1073,7 +1079,7 @@ export function AgentConfigWizard() {
                                 </button>
                               </div>
                               {props.length === 0 ? (
-                                <div className="text-[11px] text-gray-500">This tool has no configurable arguments.</div>
+                                <div className="text-[11px] text-white">This tool has no configurable arguments.</div>
                               ) : (
                                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
                                   {props.map(([argName, prop]) => {
@@ -1086,7 +1092,7 @@ export function AgentConfigWizard() {
                                         {required && <span className="ml-1 text-gray-500">*</span>}
                                         <span className="ml-1 text-gray-600">({prop.type ?? 'any'})</span>
                                         {prop.description && (
-                                          <span className="mt-0.5 block text-[11px] text-gray-500">{prop.description}</span>
+                                          <span className="mt-0.5 block text-[11px] text-white">{prop.description}</span>
                                         )}
                                         {prop.enum ? (
                                           <select
@@ -1166,33 +1172,20 @@ export function AgentConfigWizard() {
       )}
 
       {systemPromptModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
-          <div className="w-full max-w-4xl max-h-[85vh] bg-gray-950 border border-gray-700 rounded-xl overflow-hidden flex flex-col">
-            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-gray-100">
-                System Prompt
-                <span className="text-gray-500 text-xs font-normal ml-2">({'{pair}'}, {'{comment}'})</span>
-              </h3>
-              <div className="flex items-center gap-2">
-                <CopyButton getText={() => form.system_prompt} />
-                <button
-                  onClick={() => setSystemPromptModalOpen(false)}
-                  className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-sm"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto p-5">
-              <textarea
-                rows={30}
-                value={form.system_prompt}
-                onChange={e => setField('system_prompt', e.target.value)}
-                className="w-full h-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 leading-6 resize-none focus:outline-none focus:border-gray-500"
-              />
-            </div>
-          </div>
-        </div>
+        <SystemPromptEditorModal
+          agentConfig={{
+            agent_id: form.agent_id || 'new-agent',
+            pair: form.pair,
+            broker: form.broker,
+            snapshot_profile: form.snapshot_profile,
+            decision_prompt_profile: form.decision_prompt_profile,
+            event_triggers: form.event_triggers,
+            allowed_tools: form.allowed_tools,
+          }}
+          systemPrompt={form.system_prompt}
+          onChangeSystemPrompt={text => setField('system_prompt', text)}
+          onClose={() => setSystemPromptModalOpen(false)}
+        />
       )}
     </div>
 
@@ -1210,6 +1203,13 @@ export function AgentConfigWizard() {
         defaultSourceAgentId={form.agent_id || 'management_api'}
         defaultEventType={form.event_triggers[0] ?? ''}
         onClose={() => setTestModalOpen(false)}
+      />
+    )}
+    {historyOpen && form.agent_id && (
+      <EntityHistoryModal
+        entityType="agent"
+        entityId={form.agent_id}
+        onClose={() => setHistoryOpen(false)}
       />
     )}
     </>

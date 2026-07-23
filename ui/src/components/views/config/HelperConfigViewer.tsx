@@ -128,7 +128,7 @@ export function HelperConfigViewer() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-300 font-medium">Helper Config</span>
-          <span className="text-xs text-gray-600">{root ? joinPath(root, 'config', 'snapshot_helpers.py') : 'config/snapshot_helpers.py'}</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'snapshot_helpers.py') : 'config/snapshot_helpers.py'}</span>
         </div>
         <div className="flex items-center gap-3">
           {(saveMessage || saveError) && (
@@ -136,16 +136,16 @@ export function HelperConfigViewer() {
               {saveError ?? saveMessage}
             </span>
           )}
-          <span className="text-xs text-gray-600 font-mono select-none">Ln {cursorPos.line}, Col {cursorPos.col}</span>
+          <span className="text-xs text-white font-mono select-none">Ln {cursorPos.line}, Col {cursorPos.col}</span>
           <button
             type="button" title="Snippet Library" onClick={openLibrary}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors"
           >
             <BookOpen className="w-3.5 h-3.5" />
           </button>
           <button
             type="button" title="Copy" onClick={handleCopy}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
@@ -175,7 +175,7 @@ export function HelperConfigViewer() {
       </div>
 
       {/* Shortkey hints */}
-      <div className="flex items-center gap-4 px-4 py-1 bg-gray-950/60 border-b border-gray-700/50 text-[10px] text-gray-500 select-none overflow-x-auto flex-shrink-0">
+      <div className="flex items-center gap-4 px-4 py-1 bg-gray-950/60 border-b border-gray-700/50 text-[10px] text-white select-none overflow-x-auto flex-shrink-0">
         {([
           ['Ctrl+F', 'Find'],
           ['Ctrl+H', 'Replace'],
@@ -187,7 +187,7 @@ export function HelperConfigViewer() {
           ['Ctrl+S', 'Save'],
         ] as [string, string][]).map(([key, label]) => (
           <span key={key} className="flex items-center gap-1 whitespace-nowrap">
-            <kbd className="font-mono bg-gray-800 border border-gray-700 rounded px-1 py-px text-gray-400 text-[9px]">{key}</kbd>
+            <kbd className="font-mono bg-gray-800 border border-gray-700 rounded px-1 py-px text-white text-[9px]">{key}</kbd>
             <span>{label}</span>
           </span>
         ))}

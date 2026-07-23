@@ -55,7 +55,15 @@ Returns `[]` if the DB holds no candles for the pair/timeframe.
 ### calculate_indicator
 Compute a technical indicator.
 
-**Parameters:** `indicator`* (RSI|ATR|SMA|EMA|BB|VWAP|DXY|SLOPE_E|SLOPE_S), `period`* (int, min 0 — 0 only valid for VWAP daily reset; all others need ≥1), `timeframe`* (M5|M15|M30|H1|H4|D1), `history` (1–500, default 1), `smooth_period` (EMA smoothing on scalar output only, default 1 = off; ignored for BB/DXY dict values)
+**Parameters:** `indicator`* (RSI|ATR|SMA|EMA|BB|VWAP|DXY|SLOPE_E|SLOPE_S), `period`* (int, min 0 — 0 only valid for VWAP daily reset; all others need ≥1), `timeframe`* (M5|M15|M30|H1|H4|D1), `history` (1–500, default 1), `smooth_period` (EMA smoothing on scalar output only, default 1 = off; ignored for BB/DXY dict values), `warmup_candles` (0–2000, optional)
+
+**`warmup_candles`:** RSI/ATR (Wilder's smoothing) and EMA (incl. smoothed SLOPE_E/SLOPE_S) are
+recursive — the returned value depends on how many candles preceded it, not just on `period`.
+Leave `warmup_candles` empty to auto-size it from `period` (targets ~0.1% residual error: roughly
+`period × 10`, minimum 50). Set it explicitly to override — e.g. to reproduce a specific chart's
+lookback, or to intentionally accept a "cold" value with fewer DB reads. A small explicit `history`
+alone does **not** shrink the candle window used to compute it — `warmup_candles` is the only way
+to control that. Not applicable to SMA/BB/VWAP (fixed rolling window, no recursion, unaffected).
 
 **Outer return structure** (same for all indicators). `values` is **always a list**, even when `history=1`:
 ```python

@@ -171,7 +171,7 @@ export function InitialPage() {
         <button
           onClick={load}
           disabled={loading || updateBusy}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+          className="flex items-center gap-1 text-xs text-white hover:text-gray-200 transition-colors disabled:opacity-50"
           title="Refresh"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -186,7 +186,7 @@ export function InitialPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <section className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex flex-col items-center justify-center gap-2">
             <img src="/OFAI.png" alt="OpenForexAI" className="max-h-28 w-auto object-contain" />
-            <span className="text-xs tracking-widest text-gray-400 font-medium">A TRADING FRAMEWORK</span>
+            <span className="text-xs tracking-widest text-white font-medium">A TRADING FRAMEWORK</span>
           </section>
 
           <section className="bg-gray-900 border border-gray-700 rounded-lg p-4">
@@ -252,7 +252,7 @@ export function InitialPage() {
 
             {updateStatus.output.length > 0 && (
               <div className="mt-3">
-                <div className="text-[11px] text-gray-400 mb-1">Update Log</div>
+                <div className="text-[11px] text-white mb-1">Update Log</div>
                 <pre className="text-[11px] leading-4 bg-gray-950 border border-gray-700 rounded p-2 max-h-44 overflow-auto text-gray-300">
                   {updateStatus.output.join('\n')}
                 </pre>
@@ -264,7 +264,7 @@ export function InitialPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <section className="bg-gray-900 border border-gray-700 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-gray-100 mb-2">LLM Interfaces</h3>
-            <p className="text-xs text-gray-400 mb-3">
+            <p className="text-xs text-white mb-3">
               Configured: <span className="text-gray-200">{data.llm.configured_count}</span>
               {' · '}
               Connected: <span className="text-emerald-300">{data.llm.connected_count}</span>
@@ -276,13 +276,13 @@ export function InitialPage() {
                   <span className={`px-2 py-0.5 rounded ${badge(item.status)}`}>{item.status}</span>
                 </div>
               ))}
-              {data.llm.items.length === 0 && <p className="text-xs text-gray-500">No LLM modules configured.</p>}
+              {data.llm.items.length === 0 && <p className="text-xs text-white">No LLM modules configured.</p>}
             </div>
           </section>
 
           <section className="bg-gray-900 border border-gray-700 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-gray-100 mb-2">Broker Interfaces</h3>
-            <p className="text-xs text-gray-400 mb-3">
+            <p className="text-xs text-white mb-3">
               Configured: <span className="text-gray-200">{data.broker.configured_count}</span>
               {' · '}
               Connected: <span className="text-emerald-300">{data.broker.connected_count}</span>
@@ -292,19 +292,19 @@ export function InitialPage() {
                 <div key={item.name} className="flex items-center justify-between gap-2 text-xs">
                   <div className="flex flex-col">
                     <span className="text-gray-200 font-mono">{item.name}</span>
-                    {item.short_name && <span className="text-[11px] text-gray-500">short_name: {item.short_name}</span>}
+                    {item.short_name && <span className="text-[11px] text-white">short_name: {item.short_name}</span>}
                   </div>
                   <span className={`px-2 py-0.5 rounded ${badge(item.status)}`}>{item.status}</span>
                 </div>
               ))}
-              {data.broker.items.length === 0 && <p className="text-xs text-gray-500">No broker modules configured.</p>}
+              {data.broker.items.length === 0 && <p className="text-xs text-white">No broker modules configured.</p>}
             </div>
           </section>
         </div>
 
         <section className="bg-gray-900 border border-gray-700 rounded-lg p-4">
           <h3 className="text-sm font-semibold text-gray-100 mb-2">Configured Agents</h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-white mb-3">
             Total: <span className="text-gray-200">{data.agents.configured_count}</span>
             {' · '}
             Enabled: <span className="text-emerald-300">{data.agents.enabled_count}</span>
@@ -345,11 +345,11 @@ export function InitialPage() {
                           </button>
                         ) : (
                           <span className={`px-2 py-0.5 rounded ${(agent.enabled && agent.session_active) ? badge('connected') : badge('missing')}`}>
-                            {agent.enabled ? 'enabled' : 'disabled'}
+                            {!agent.enabled ? 'disabled' : agent.session_active ? 'enabled' : 'session closed'}
                           </span>
                         )}
                         {/* Level 3: stale detection */}
-                        {agent.enabled && agent.last_active_at && (() => {
+                        {agent.enabled && agent.session_active && agent.last_active_at && (() => {
                           const minsAgo = (Date.now() - new Date(agent.last_active_at).getTime()) / 60_000
                           return minsAgo > 15 ? (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-amber-900/40 text-amber-300 border border-amber-700/50" title={`Last active ${Math.round(minsAgo)}m ago`}>
@@ -384,7 +384,7 @@ export function InitialPage() {
 
         <section className="bg-gray-900 border border-gray-700 rounded-lg p-4">
           <h3 className="text-sm font-semibold text-gray-100 mb-2">Configured Event Composers</h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-white mb-3">
             Total: <span className="text-gray-200">{data.event_composers.configured_count}</span>
             {' · '}
             Enabled: <span className="text-emerald-300">{data.event_composers.enabled_count}</span>

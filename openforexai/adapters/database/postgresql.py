@@ -248,6 +248,8 @@ class PostgreSQLRepository(AbstractRepository):
         self,
         agent_id: str | None = None,
         pair: str | None = None,
+        snapshot_profile: str | None = None,
+        decision_prompt_profile: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
         clauses = ["COALESCE(decision_type_new, decision_type) = $1"]
@@ -260,6 +262,14 @@ class PostgreSQLRepository(AbstractRepository):
         if pair:
             clauses.append(f"pair = ${next_index}")
             params.append(pair)
+            next_index += 1
+        if snapshot_profile:
+            clauses.append(f"output::jsonb ->> 'snapshot_profile' = ${next_index}")
+            params.append(snapshot_profile)
+            next_index += 1
+        if decision_prompt_profile:
+            clauses.append(f"output::jsonb ->> 'decision_prompt_profile' = ${next_index}")
+            params.append(decision_prompt_profile)
             next_index += 1
         params.append(limit)
         rows = await self._fetch(
@@ -1048,3 +1058,33 @@ class PostgreSQLRepository(AbstractRepository):
             run.correlation_id,
         )
         return run_id
+
+    def _row_to_ec_run_record(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "ec_id": row["ec_id"],
+            "trigger": row.get("trigger"),
+            "input_json": self._deserialize_json_field(row.get("input_json"), {}),
+            "config_snapshot": self._deserialize_json_field(row.get("config_snapshot"), {}),
+            "tool_calls": self._deserialize_json_field(row.get("tool_calls"), []),
+            "output_json": self._deserialize_json_field(row.get("output_json"), None),
+            "success": bool(row.get("success")),
+            "error": row.get("error"),
+            "latency_ms": row.get("latency_ms"),
+            "run_at": row.get("run_at").isoformat() if hasattr(row.get("run_at"), "isoformat") else row.get("run_at"),
+            "correlation_id": row.get("correlation_id"),
+        }
+
+    async def get_ec_runs(self, ec_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = await self._fetch(
+            """
+            SELECT *
+            FROM ec_runs
+            WHERE ec_id = $1
+            ORDER BY run_at DESC
+            LIMIT $2
+            """,
+            ec_id,
+            limit,
+        )
+        return [self._row_to_ec_run_record(dict(r)) for r in rows]
