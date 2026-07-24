@@ -2391,6 +2391,140 @@ async def get_candles(
     ]
 
 
+# ── Prompt Workbench ──────────────────────────────────────────────────────────
+# Sandbox chat: runs a free-text prompt against a detached, non-registered
+# Agent instance (never started, never part of the routing table) so the exact
+# same LLM/tool-use loop as real agents (`Agent._run_with_tools`) is reused
+# instead of a second, divergent implementation. The agent_id is a throwaway
+# per-request identifier, registered on the bus only for the duration of the
+# call and unregistered again in `finally` — it never appears in any config
+# and cannot be targeted by real routing rules.
+
+class PromptWorkbenchMessage(BaseModel):
+    role: str   # "user" | "assistant"
+    content: str
+
+class PromptWorkbenchChatRequest(BaseModel):
+    system_prompt: str
+    question: str
+    history: list[PromptWorkbenchMessage] = Field(default_factory=list)
+    pair: str
+    broker_name: str | None = None
+    timeframe: str = "M5"
+    candle_count: int = 500
+    visible_count: int | None = Field(
+        default=None,
+        description="If set, only the oldest N of the loaded candles are sent to the agent "
+                    "(the Simulation tab's revealed window). Omit to send all loaded candles.",
+    )
+    llm_name: str | None = None
+    allowed_tools: list[str] = Field(
+        default_factory=lambda: ["calculate_indicator", "zone_marker", "trade_marker"],
+    )
+    timeout: float = 120.0
+
+class PromptWorkbenchChatResponse(BaseModel):
+    answer: str
+    total_tokens: int = 0
+    executed_tools: list[str] = Field(default_factory=list)
+    annotations: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+
+
+@router.post("/prompt-workbench/chat", response_model=PromptWorkbenchChatResponse)
+async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
+    """Ask a free-text question against a prompt + loaded candle window, with tools."""
+    if _bus is None or _repository is None:
+        raise HTTPException(status_code=503, detail="System not ready")
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    if req.broker_name:
+        _, broker = _resolve_connected_broker(req.broker_name)
+        if broker is None:
+            raise HTTPException(status_code=404, detail=f"Broker {req.broker_name!r} not connected")
+        short_name = broker.short_name
+    else:
+        if not _connected_brokers:
+            raise HTTPException(status_code=503, detail="No broker connected")
+        short_name = next(iter(_connected_brokers.values())).short_name
+
+    tf = req.timeframe.upper().strip()
+    limit = max(1, min(req.candle_count, 2000))
+    candles = await _data_container.get_candles(
+        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit,
+    )
+    total = len(candles)
+    visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
+    visible = candles[:visible_count]
+
+    # Numbered #1=newest .. #total=oldest — matches the chart legend and the
+    # Simulation tab's Position field, so the user can say "candle 300 to 250".
+    # Also resolves the numbers zone_marker/trade_marker accept back to real
+    # candles — the agent can only annotate candles it was actually shown.
+    candle_index_map: dict[int, dict[str, Any]] = {
+        total - i: {
+            "timestamp": c.timestamp.isoformat(),
+            "open": float(c.open), "high": float(c.high),
+            "low": float(c.low), "close": float(c.close),
+        }
+        for i, c in enumerate(visible)
+    }
+    candle_lines = [
+        f"#{total - i} {c.timestamp.isoformat()} O={c.open} H={c.high} L={c.low} C={c.close}"
+        for i, c in enumerate(visible)
+    ]
+    candle_block = "\n".join(candle_lines) if candle_lines else "(no candles loaded)"
+    user_message = (
+        f"=== Loaded candles ({req.pair.upper()} {tf}, {len(visible)} of {total} candles visible, "
+        f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ===\n\n{req.question}"
+    )
+
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+    llm_name = req.llm_name
+    if not llm_name:
+        llm_names = RuntimeRegistry.list_llm()
+        if not llm_names:
+            raise HTTPException(status_code=503, detail="No LLM provider available")
+        llm_name = llm_names[0]
+
+    from openforexai.agents.agent import Agent
+    from openforexai.services.llm_service import llm_service_id
+    from openforexai.tools.base import ToolContext
+    from openforexai.tools.dispatcher import ToolDispatcher
+    from openforexai.tools.registry import DEFAULT_REGISTRY
+
+    temp_agent_id = f"WORKBENCH-{uuid4().hex[:8]}"
+    agent = Agent(agent_id=temp_agent_id, bus=_bus, repository=_repository, monitoring_bus=_monitoring_bus)
+    try:
+        agent._system_prompt = req.system_prompt
+        agent._llm_name = llm_name
+        agent._llm_service_id = llm_service_id(llm_name)
+        tool_context = ToolContext(
+            agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+            monitoring_bus=_monitoring_bus, event_bus=_bus,
+            extra={"candle_index_map": candle_index_map, "workbench_annotations": []},
+        )
+        agent._tool_dispatcher = ToolDispatcher(
+            DEFAULT_REGISTRY, tool_context, {"allowed_tools": req.allowed_tools},
+        )
+        history = [{"role": m.role, "content": m.content} for m in req.history]
+        final_text, total_tokens, executed_tool_names = await asyncio.wait_for(
+            agent._run_with_tools(user_message=user_message, trigger="workbench_chat", history=history),
+            timeout=req.timeout,
+        )
+        return PromptWorkbenchChatResponse(
+            answer=final_text, total_tokens=total_tokens, executed_tools=executed_tool_names,
+            annotations=tool_context.extra.get("workbench_annotations", []),
+        )
+    except TimeoutError:
+        return PromptWorkbenchChatResponse(answer="", error=f"Timed out after {req.timeout:.0f}s")
+    except Exception as exc:  # noqa: BLE001
+        return PromptWorkbenchChatResponse(answer="", error=str(exc))
+    finally:
+        _bus.unregister_agent(temp_agent_id)
+
+
 @router.get("/orderbook")
 async def get_orderbook_entries(
     broker_name: str | None = None,

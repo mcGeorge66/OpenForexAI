@@ -263,6 +263,8 @@ export const api = {
                     put<{ status: string; file: string }>(`/config/snippet-library/${scope}`, library),
   llmAssistantChat: (req: LLMAssistantChatRequest) =>
                     post<LLMAssistantChatResponse>('/llm-assistant/chat', req),
+  promptWorkbenchChat: (req: PromptWorkbenchChatRequest) =>
+                    post<PromptWorkbenchChatResponse>('/prompt-workbench/chat', req),
   validateScript: (req: { code: string }) =>
                     post<ScriptValidateResponse>('/scripts/validate', req),
 
@@ -732,6 +734,50 @@ export interface LLMAssistantChatRequest {
 
 export interface LLMAssistantChatResponse {
   answer: string
+  error?: string
+}
+
+export interface PromptWorkbenchChatRequest {
+  system_prompt: string
+  question: string
+  history: LLMAssistantMessage[]
+  pair: string
+  broker_name?: string | null
+  timeframe: string
+  candle_count: number
+  visible_count?: number | null
+  llm_name?: string | null
+  allowed_tools?: string[]
+  timeout?: number
+}
+
+export interface PromptWorkbenchZoneAnnotation {
+  kind: 'zone'
+  zone_id: string
+  heading: string
+  start_candle_number: number
+  end_candle_number: number
+  start_timestamp: string
+  end_timestamp: string
+}
+
+export interface PromptWorkbenchTradeAnnotation {
+  kind: 'trade'
+  action: 'open' | 'close'
+  trade_id: string
+  candle_number: number
+  timestamp: string
+  price: number
+  direction?: 'long' | 'short'
+}
+
+export type PromptWorkbenchAnnotation = PromptWorkbenchZoneAnnotation | PromptWorkbenchTradeAnnotation
+
+export interface PromptWorkbenchChatResponse {
+  answer: string
+  total_tokens: number
+  executed_tools: string[]
+  annotations: PromptWorkbenchAnnotation[]
   error?: string
 }
 

@@ -18,6 +18,10 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'orderbook',      label: 'Orderbook'       },
     { id: 'chart_analysis', label: 'Chart Analysis'  },
     { id: 'event_log',      label: 'Event Log'       },
+    { id: 'prompt_workbench', label: 'Prompt Workbench' },
+    { id: '__div_test',     label: '', divider: true },
+    { id: 'llm_checker',    label: 'LLM Checker'      },
+    { id: 'tool_exec',      label: 'Tool Executor'    },
   ],
   monitor: [
     { id: 'all',          label: 'All Events'   },
@@ -46,10 +50,6 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'package_manager', label: 'Package Manager'  },
     { id: 'broker',          label: 'Broker Modules'   },
     { id: 'llm',             label: 'LLM Modules'      },
-    { id: '__div3',          label: '', divider: true   },
-    { id: '__h_test',        label: 'Test', heading: true },
-    { id: 'llm_checker',     label: 'LLM Checker'      },
-    { id: 'tool_exec',       label: 'Tool Executor'    },
   ],
   test: [],
 }

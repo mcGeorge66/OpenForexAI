@@ -446,6 +446,27 @@ class MockRepository(AbstractRepository):
         self.ec_runs.append(run)
         return str(run.id)
 
+    async def get_ec_runs(self, ec_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        matching = [run for run in self.ec_runs if run.ec_id == ec_id]
+        matching.sort(key=lambda run: run.run_at, reverse=True)
+        return [
+            {
+                "id": str(run.id),
+                "ec_id": run.ec_id,
+                "trigger": run.trigger,
+                "input_json": run.input_json,
+                "config_snapshot": run.config_snapshot,
+                "tool_calls": run.tool_calls,
+                "output_json": run.output_json,
+                "success": run.success,
+                "error": run.error,
+                "latency_ms": run.latency_ms,
+                "run_at": run.run_at.isoformat(),
+                "correlation_id": run.correlation_id,
+            }
+            for run in matching[:limit]
+        ]
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

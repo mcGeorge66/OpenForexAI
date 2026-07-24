@@ -147,6 +147,14 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
     orderedRef.current = orderedCandles
   }, [orderedCandles])
 
+  // Candle number, counted from the newest candle (1) back to the oldest (length)
+  // — matches the Prompt Workbench's position semantics, useful everywhere else too.
+  const hoveredNumber = useMemo(() => {
+    if (!hovered) return null
+    const index = orderedCandles.findIndex(c => c.timestamp === hovered.timestamp)
+    return index === -1 ? null : orderedCandles.length - index
+  }, [hovered, orderedCandles])
+
   useEffect(() => {
     markersRef.current = markers
   }, [markers])
@@ -721,7 +729,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
                 const hl = (hovered.high - hovered.low) / pipSize
                 return (
                   <>
-                    {hovered.timestamp} | O {hovered.open.toFixed(5)} H {hovered.high.toFixed(5)} L {hovered.low.toFixed(5)} C {hovered.close.toFixed(5)}
+                    {hovered.timestamp} <span className="text-amber-300">#{hoveredNumber}</span> | O {hovered.open.toFixed(5)} H {hovered.high.toFixed(5)} L {hovered.low.toFixed(5)} C {hovered.close.toFixed(5)}
                     <span className="text-gray-400"> | OC {oc.toFixed(1)}p HL {hl.toFixed(1)}p</span>
                   </>
                 )

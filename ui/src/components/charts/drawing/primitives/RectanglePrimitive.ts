@@ -34,5 +34,15 @@ export class RectanglePrimitive extends BasePrimitive {
     applyLineDash(ctx, this._drawing.style.lineStyle)
     ctx.strokeRect(x, y, w, h)
     ctx.restore()
+
+    // Heading label, top-left corner of the box
+    if (this._drawing.label) {
+      ctx.save()
+      ctx.font = `${(this._drawing.style.fontSize ?? 12)}px sans-serif`
+      ctx.fillStyle = this._drawing.style.color
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(this._drawing.label, x + 4, y - 4 < 10 ? y + 14 : y - 4)
+      ctx.restore()
+    }
   }
 }

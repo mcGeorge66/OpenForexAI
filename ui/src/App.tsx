@@ -23,6 +23,7 @@ import { InitialPage } from '@/components/views/action/InitialPage'
 import { AgentChat } from '@/components/views/action/AgentChat'
 import { Orderbook } from '@/components/views/action/Orderbook'
 import { ChartAnalysis } from '@/components/views/action/ChartAnalysis'
+import { PromptWorkbench } from '@/components/views/action/PromptWorkbench'
 import { EventLogView } from '@/components/views/events/EventLogView'
 import { EventStream, type SavedMonitorFilter } from '@/components/views/monitor/EventStream'
 import { ConfigViewer } from '@/components/views/config/ConfigViewer'
@@ -75,6 +76,9 @@ const HANDBOOK_FILE: Record<string, string> = {
   'action:chat':            'ui.action.chat',
   'action:orderbook':       'ui.action.orderbook',
   'action:chart_analysis':  'ui.action.chart_analysis',
+  'action:prompt_workbench': 'ui.action.prompt_workbench',
+  'action:llm_checker':     'ui.test.llm_checker',
+  'action:tool_exec':       'ui.test.tool_executor',
   // monitor
   'monitor:all':       'ui.monitor',
   'monitor:llm':       'ui.monitor',
@@ -96,8 +100,6 @@ const HANDBOOK_FILE: Record<string, string> = {
   'config:broker':         'ui.config.broker_modules',
   'config:llm':            'ui.config.llm_modules',
   'config:entity_config':  'ui.config.entity_config',
-  'config:llm_checker': 'ui.test.llm_checker',
-  'config:tool_exec':   'ui.test.tool_executor',
 }
 
 function resolveHandbookFile(section: TopSection, sub: string, lang: 'en' | 'de'): string {
@@ -263,6 +265,9 @@ export default function App() {
         if (activeSub === 'orderbook') return <Orderbook />
         if (activeSub === 'chart_analysis') return <ChartAnalysis />
         if (activeSub === 'event_log') return <EventLogView />
+        if (activeSub === 'prompt_workbench') return <PromptWorkbench />
+        if (activeSub === 'llm_checker') return <LlmChecker />
+        if (activeSub === 'tool_exec') return <ToolExecutor />
         return null
 
       case 'monitor':
@@ -293,8 +298,6 @@ export default function App() {
         if (activeSub === 'broker') return <ModuleConfigViewer moduleType="broker" key="broker" />
         if (activeSub === 'llm') return <ModuleConfigViewer moduleType="llm" key="llm" />
         if (activeSub === 'ai_assistant') return <LlmContextEditor />
-        if (activeSub === 'llm_checker') return <LlmChecker />
-        if (activeSub === 'tool_exec') return <ToolExecutor />
         const cfg = configViews[activeSub]
         if (!cfg) return <p className="p-4 text-gray-500 text-sm">Select a config file</p>
         return (

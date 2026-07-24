@@ -13,5 +13,17 @@ export class TrendLinePrimitive extends BasePrimitive {
     const y2 = conv.priceToY(p2.price)
     if (x1 === null || y1 === null || x2 === null || y2 === null) return
     drawCanvasLine(ctx, x1, y1, x2, y2, this._drawing.style)
+
+    if (this._drawing.label) {
+      const midX = (x1 + x2) / 2
+      const midY = (y1 + y2) / 2
+      ctx.save()
+      ctx.font = `${(this._drawing.style.fontSize ?? 12)}px sans-serif`
+      ctx.fillStyle = this._drawing.style.color
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(this._drawing.label, midX, midY - 6)
+      ctx.restore()
+    }
   }
 }
