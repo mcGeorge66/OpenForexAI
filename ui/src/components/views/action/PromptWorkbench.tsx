@@ -8,27 +8,34 @@
  * which runs the prompt through a detached (non-registered) `Agent` instance
  * reusing `Agent._run_with_tools` — the same LLM/tool-use loop real agents
  * use, not a second implementation. The agent has `calculate_indicator` plus
- * two sandbox-only tools, `zone_marker` and `trade_marker`, which the backend
- * echoes back as structured `annotations` — rendered here as chart drawings
- * (reusing the existing rect/trendline DrawingManager primitives, not a new
- * chart feature) and accumulated client-side across turns, since the backend
- * keeps no session state. The real tool_blocks/calculation_blocks Simulation
- * pipeline (mini Snapshot Designer) is not built yet.
+ * four sandbox-only tools — `zone_marker`, `trade_marker`, `candle_marker`
+ * (write) and `get_annotation` (read, looks up a prior marking + its real
+ * candles by id or candle range so the agent can explain itself from actual
+ * data instead of confabulating) — which the backend echoes back as
+ * structured `annotations`, tagged client-side with whatever color was
+ * selected at send time (so overlapping results from different
+ * questions/runs stay visually distinguishable) and rendered as chart
+ * drawings (reusing the existing rect/trendline DrawingManager primitives,
+ * not a new chart feature). Annotations accumulate client-side across
+ * turns and are sent back on every request as `existing_annotations`, since
+ * the backend keeps no session state of its own. The real tool_blocks/
+ * calculation_blocks Simulation pipeline (mini Snapshot Designer) is not
+ * built yet.
  *
  * Position semantics (as specified): candles count down from `total`
  * (oldest, at the edge of the loaded window) to `0` (newest / fully
  * revealed). The agent's visible window is always candles `total`..`position`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, RefreshCcw, Square, StepForward } from 'lucide-react'
+import { Play, RefreshCcw, Square, StepForward, Trash2 } from 'lucide-react'
 import { LineStyle, type UTCTimestamp } from 'lightweight-charts'
 import {
   api,
+  type CalculationBlock,
   type CandleBar,
   type InitialConsoleModuleItem,
   type PromptWorkbenchAnnotation,
-  type PromptWorkbenchTradeAnnotation,
-  type PromptWorkbenchZoneAnnotation,
+  type ToolInfo,
 } from '@/api/client'
 import {
   ForexChart,
@@ -46,6 +53,18 @@ import {
   type IndicatorName,
 } from '@/components/charts/IndicatorsPanel'
 import { PlainTextMonacoEditor } from '@/components/common/PlainTextMonacoEditor'
+import { ScriptEditor } from '@/components/common/ScriptEditor'
+import {
+  CalculationBlocksPanel,
+  ToolBlocksPanel,
+  defaultArgumentsForTool,
+  defaultOutputKey,
+  normalizeCalculationBlock,
+  normalizeToolBlock,
+  serializeCalculationBlock,
+  serializeToolBlock,
+  type SnapshotToolBlockForm,
+} from '@/components/common/SnapshotBlocksPanel'
 import { TF_MINUTES } from '@/utils/indicators'
 
 function toUnixTime(iso: string): UTCTimestamp {
@@ -56,7 +75,13 @@ function pipSize(price: number): number {
   return price > 20 ? 0.01 : 0.0001
 }
 
+// Tagged with the color selected at send time, so overlapping results from
+// different questions/runs stay visually distinguishable on the chart.
+type TaggedAnnotation = PromptWorkbenchAnnotation & { _color: string }
+
 const TIMEFRAMES = Object.keys(TF_MINUTES).filter(tf => tf !== 'M1')
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high']
+const DEFAULT_ANNOTATION_COLOR = '#f59e0b'
 
 type ToolTab = 'analyse' | 'simulation'
 
@@ -86,6 +111,7 @@ export function PromptWorkbench() {
   const [pair, setPair] = useState('')
   const [timeframe, setTimeframe] = useState('M5')
   const [candleCount, setCandleCount] = useState(500)
+  const [anchorDate, setAnchorDate] = useState('')
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -133,6 +159,18 @@ export function PromptWorkbench() {
       .sort((a, b) => a.agentId.localeCompare(b.agentId))
   }, [systemConfig])
 
+  const snapshotProfileOptions = useMemo(() => {
+    const profiles = (systemConfig?.snapshot_profiles ?? {}) as Record<string, Record<string, unknown>>
+    return Object.entries(profiles)
+      .map(([name, cfg]) => ({
+        name,
+        toolBlocks: Array.isArray(cfg.tool_blocks) ? cfg.tool_blocks : [],
+        calculationBlocks: Array.isArray(cfg.calculation_blocks) ? cfg.calculation_blocks : [],
+        assemblyScript: typeof cfg.assembly_transform_script === 'string' ? cfg.assembly_transform_script : '',
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [systemConfig])
+
   const [availableLlmNames, setAvailableLlmNames] = useState<string[]>([])
   useEffect(() => {
     void api.getModuleNames('llm').then(r => setAvailableLlmNames(r.names)).catch(() => setAvailableLlmNames([]))
@@ -173,6 +211,7 @@ export function PromptWorkbench() {
           pair,
           broker_name: brokerName,
           ...(ind.smoothPeriod && ind.smoothPeriod > 1 ? { smooth_period: ind.smoothPeriod } : {}),
+          ...(anchorDate ? { start: `${anchorDate}T23:59:59` } : {}),
         })
         if (ind.name === 'BB') {
           type BBRaw = { timestamp: string; value: { upper: number; middle: number; lower: number } }
@@ -193,7 +232,7 @@ export function PromptWorkbench() {
       }
     }))
     return results
-  }, [candleCount, pair, timeframe, brokerName])
+  }, [candleCount, pair, timeframe, brokerName, anchorDate])
 
   function addIndicator(name: IndicatorName) {
     const def = INDICATOR_DEFS.find(d => d.name === name)!
@@ -235,23 +274,20 @@ export function PromptWorkbench() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getCandles(pair, timeframe, candleCount, brokerName)
+      const start = anchorDate ? `${anchorDate}T23:59:59` : null
+      const data = await api.getCandles(pair, timeframe, candleCount, brokerName, start)
       setCandles(data)
       setPosition(0) // fully revealed by default; lower it to set up a simulation start point
       const updated = await recomputeIndicators(data, indicatorsRef.current)
       setIndicators(updated)
       // Fresh candle set — stale zones/trade lines from a previous load no longer apply.
-      for (const drawing of chartRef.current?.getDrawings() ?? []) {
-        chartRef.current?.removeDrawing(drawing.id)
-      }
-      renderedDrawingIdsRef.current.clear()
-      setAnnotations([])
+      clearAnnotations()
     } catch (err) {
       setError(String(err))
     } finally {
       setLoading(false)
     }
-  }, [pair, timeframe, candleCount, brokerName, recomputeIndicators])
+  }, [pair, timeframe, candleCount, brokerName, anchorDate, recomputeIndicators])
 
   useEffect(() => { void loadCandles() }, [loadCandles])
 
@@ -267,10 +303,104 @@ export function PromptWorkbench() {
 
   const visibleCount = total > 0 ? Math.max(0, total - Math.min(position, total)) : 0
 
+  // ── Left column tab — [Chat] / [Prompt] ─────────────────────────────────
+  const [leftTab, setLeftTab] = useState<'chat' | 'prompt'>('chat')
+
   // ── Tools tab ────────────────────────────────────────────────────────────
   const [toolTab, setToolTab] = useState<ToolTab>('analyse')
   const [autoTradeStatus, setAutoTradeStatus] = useState(true)
   const [simPreview, setSimPreview] = useState<string | null>(null)
+  const [simPreviewLoading, setSimPreviewLoading] = useState(false)
+
+  // Simulation tab: mini Snapshot Designer — same tool_blocks/calculation_blocks/
+  // assembly_transform_script editing UI as the real Snapshot Designer
+  // (SnapshotBlocksPanel), reused rather than a second hand-rolled editor.
+  const [snapshotProfileName, setSnapshotProfileName] = useState('')
+  const [toolBlocksState, setToolBlocksState] = useState<SnapshotToolBlockForm[]>([])
+  const [calculationBlocksState, setCalculationBlocksState] = useState<CalculationBlock[]>([])
+  const [assemblyScriptText, setAssemblyScriptText] = useState('')
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
+  const [blockTestResults, setBlockTestResults] = useState<Record<string, { loading?: boolean; text?: string; error?: string }>>({})
+
+  useEffect(() => {
+    void api.getTools().then(r => setAvailableTools(r.tools)).catch(() => setAvailableTools([]))
+  }, [])
+
+  const loadSnapshotProfile = () => {
+    const found = snapshotProfileOptions.find(o => o.name === snapshotProfileName)
+    if (!found) return
+    setToolBlocksState(found.toolBlocks.map((b, i) => normalizeToolBlock(b, i)).filter((b): b is SnapshotToolBlockForm => b !== null))
+    setCalculationBlocksState(found.calculationBlocks.map((b, i) => normalizeCalculationBlock(b, i)).filter((b): b is CalculationBlock => b !== null))
+    setAssemblyScriptText(found.assemblyScript)
+  }
+
+  const addToolBlockRow = (toolName: string) => {
+    setToolBlocksState(prev => [...prev, {
+      _reactKey: crypto.randomUUID(),
+      id: `block_${prev.length + 1}`,
+      tool_name: toolName,
+      output_key: defaultOutputKey(toolName, prev.length),
+      enabled: true,
+      arguments: defaultArgumentsForTool(toolName),
+      transform_script: '',
+    }])
+  }
+  const removeToolBlockRow = (index: number) => setToolBlocksState(prev => prev.filter((_b, i) => i !== index))
+  const updateToolBlockRow = (index: number, patch: Partial<SnapshotToolBlockForm>) =>
+    setToolBlocksState(prev => prev.map((b, i) => i === index ? { ...b, ...patch } : b))
+  const updateToolBlockArgumentRow = (index: number, argName: string, value: string) =>
+    setToolBlocksState(prev => prev.map((b, i) => i === index ? { ...b, arguments: { ...b.arguments, [argName]: value } } : b))
+
+  const addCalcBlockRow = () => setCalculationBlocksState(prev => [...prev, {
+    id: `calc_${prev.length + 1}`, type: 'script', enabled: true, sources: {}, config: {}, script: '',
+  }])
+  const removeCalcBlockRow = (index: number) => setCalculationBlocksState(prev => prev.filter((_b, i) => i !== index))
+  const updateCalcBlockRow = (index: number, patch: Partial<CalculationBlock>) =>
+    setCalculationBlocksState(prev => prev.map((b, i) => i === index ? { ...b, ...patch } : b))
+
+  // Per-block Test — reuses /prompt-workbench/snapshot-preview with just the
+  // one block (tool block) or all tool blocks + just the one calc block
+  // (calc blocks read tool outputs), no separate backend endpoint needed.
+  const testToolBlock = async (index: number) => {
+    const block = toolBlocksState[index]
+    if (!block) return
+    setBlockTestResults(prev => ({ ...prev, [block._reactKey]: { loading: true } }))
+    try {
+      const resp = await api.promptWorkbenchSnapshotPreview({
+        pair, broker_name: brokerName, timeframe, candle_count: candleCount, visible_count: visibleCount,
+        tool_blocks: [serializeToolBlock(block, index)],
+        calculation_blocks: [],
+        assembly_transform_script: '',
+      })
+      const output = resp.snapshot?.tool_outputs as Record<string, unknown> | undefined
+      const text = resp.errors.length
+        ? resp.errors.join('\n')
+        : JSON.stringify(output?.[block.output_key] ?? resp.snapshot, null, 2)
+      setBlockTestResults(prev => ({ ...prev, [block._reactKey]: { text } }))
+    } catch (err) {
+      setBlockTestResults(prev => ({ ...prev, [block._reactKey]: { error: String(err) } }))
+    }
+  }
+
+  const testCalcBlock = async (index: number) => {
+    const block = calculationBlocksState[index]
+    if (!block) return
+    const key = `${block.id}-${index}`
+    setBlockTestResults(prev => ({ ...prev, [key]: { loading: true } }))
+    try {
+      const resp = await api.promptWorkbenchSnapshotPreview({
+        pair, broker_name: brokerName, timeframe, candle_count: candleCount, visible_count: visibleCount,
+        tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
+        calculation_blocks: [serializeCalculationBlock(block)],
+        assembly_transform_script: '',
+      })
+      const calc = resp.snapshot?.calculations as Record<string, unknown> | undefined
+      const text = resp.errors.length ? resp.errors.join('\n') : JSON.stringify(calc ?? resp.snapshot, null, 2)
+      setBlockTestResults(prev => ({ ...prev, [key]: { text } }))
+    } catch (err) {
+      setBlockTestResults(prev => ({ ...prev, [key]: { error: String(err) } }))
+    }
+  }
 
   const overlayLines: ForexChartOverlayLine[] = useMemo(() => {
     const lines: ForexChartOverlayLine[] = []
@@ -318,14 +448,28 @@ export function PromptWorkbench() {
     }]
   }, [toolTab, total, position, visibleCount, candles])
 
-  // ── Agent-drawn annotations (zone_marker / trade_marker) ─────────────────
+  // ── Agent-drawn annotations (zone_marker / trade_marker / candle_marker) ──
   // Accumulated client-side across turns — the backend keeps no session state,
   // each response only returns the annotations created during that one call.
-  const [annotations, setAnnotations] = useState<PromptWorkbenchAnnotation[]>([])
+  const [annotations, setAnnotations] = useState<TaggedAnnotation[]>([])
   const renderedDrawingIdsRef = useRef<Set<string>>(new Set())
+  const [annotationColor, setAnnotationColor] = useState(DEFAULT_ANNOTATION_COLOR)
+
+  const tagAnnotations = useCallback(
+    (list: PromptWorkbenchAnnotation[]): TaggedAnnotation[] => list.map(a => ({ ...a, _color: annotationColor })),
+    [annotationColor],
+  )
+
+  const clearAnnotations = useCallback(() => {
+    for (const drawing of chartRef.current?.getDrawings() ?? []) {
+      chartRef.current?.removeDrawing(drawing.id)
+    }
+    renderedDrawingIdsRef.current.clear()
+    setAnnotations([])
+  }, [])
 
   const openTrades = useMemo(() => {
-    const open = new Map<string, PromptWorkbenchTradeAnnotation>()
+    const open = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
     for (const a of annotations) {
       if (a.kind !== 'trade') continue
       if (a.action === 'open') open.set(a.trade_id, a)
@@ -335,21 +479,31 @@ export function PromptWorkbench() {
   }, [annotations])
 
   const tradeMarkers: ForexChartMarker[] = useMemo(() => annotations
-    .filter((a): a is PromptWorkbenchTradeAnnotation => a.kind === 'trade')
+    .filter((a): a is Extract<TaggedAnnotation, { kind: 'trade' }> => a.kind === 'trade')
     .map(a => ({
       timestamp: a.timestamp,
       position: a.action === 'open' ? 'belowBar' : 'aboveBar',
       shape: a.action === 'open' ? (a.direction === 'short' ? 'arrowDown' : 'arrowUp') : 'circle',
-      color: a.action === 'open' ? (a.direction === 'short' ? '#ef4444' : '#10b981') : '#94a3b8',
+      color: a._color,
       text: `${a.action}\n${a.trade_id}`,
+    })), [annotations])
+
+  const candleMarkers: ForexChartMarker[] = useMemo(() => annotations
+    .filter((a): a is Extract<TaggedAnnotation, { kind: 'candle_marker' }> => a.kind === 'candle_marker')
+    .map(a => ({
+      timestamp: a.timestamp,
+      position: a.position === 'above' ? 'aboveBar' : 'belowBar',
+      shape: a.position === 'above' ? 'arrowDown' : 'arrowUp',
+      color: a._color,
+      text: a.text,
     })), [annotations])
 
   // Draw new zones/closed-trade lines as they arrive — DrawingManager is
   // imperative (chartRef.addDrawing), so this only ever ADDS, never re-renders
   // existing ones; each annotation gets a stable id so it's only drawn once.
   useEffect(() => {
-    const zonesById = new Map<string, PromptWorkbenchZoneAnnotation>()
-    const opensByTradeId = new Map<string, PromptWorkbenchTradeAnnotation>()
+    const zonesById = new Map<string, Extract<TaggedAnnotation, { kind: 'zone' }>>()
+    const opensByTradeId = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
     for (const a of annotations) {
       if (a.kind === 'zone') zonesById.set(a.zone_id, a)
       else if (a.kind === 'trade' && a.action === 'open') opensByTradeId.set(a.trade_id, a)
@@ -367,6 +521,7 @@ export function PromptWorkbench() {
       if (inRange.length === 0) continue
       const high = Math.max(...inRange.map(c => c.high))
       const low = Math.min(...inRange.map(c => c.low))
+      const heightPips = (high - low) / pipSize(high)
       const drawing: Drawing = {
         id: drawingId,
         tool: 'rect',
@@ -374,8 +529,9 @@ export function PromptWorkbench() {
           { time: toUnixTime(zone.start_timestamp), price: high },
           { time: toUnixTime(zone.end_timestamp), price: low },
         ],
-        style: { color: '#f59e0b', lineStyle: LineStyle.Solid, lineWidth: 1, fillColor: '#f59e0b', fillOpacity: 0.12 },
+        style: { color: zone._color, lineStyle: LineStyle.Solid, lineWidth: 1, fillColor: zone._color, fillOpacity: 0.12 },
         label: zone.heading,
+        sublabel: `${inRange.length} candles, ${heightPips.toFixed(1)} pips`,
         visible: true,
         selected: false,
       }
@@ -398,7 +554,7 @@ export function PromptWorkbench() {
           { time: toUnixTime(openAnn.timestamp), price: openAnn.price },
           { time: toUnixTime(a.timestamp), price: a.price },
         ],
-        style: { color: pips >= 0 ? '#10b981' : '#ef4444', lineStyle: LineStyle.Solid, lineWidth: 2 },
+        style: { color: openAnn._color, lineStyle: LineStyle.Solid, lineWidth: 2 },
         label: `${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
         visible: true,
         selected: false,
@@ -420,6 +576,7 @@ export function PromptWorkbench() {
   const [promptText, setPromptText] = useState('')
   const [loadFromAgentId, setLoadFromAgentId] = useState('')
   const [llmName, setLlmName] = useState('')
+  const [reasoningEffort, setReasoningEffort] = useState('low')
 
   const loadPromptFromAgent = () => {
     const found = agentPromptOptions.find(o => o.agentId === loadFromAgentId)
@@ -435,10 +592,38 @@ export function PromptWorkbench() {
   const [sending, setSending] = useState(false)
   const [simBusy, setSimBusy] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+
+  // Scroll to bottom on every new message — unless the new message itself is
+  // taller than the visible history, in which case scroll just far enough
+  // that its top edge lines up with the top of the history area, so its
+  // beginning stays readable instead of being scrolled past.
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const lastEl = container.lastElementChild as HTMLElement | null
+    if (!lastEl) return
+    if (lastEl.offsetHeight <= container.clientHeight) {
+      container.scrollTop = container.scrollHeight
+    } else {
+      container.scrollTop = lastEl.offsetTop
+    }
+  }, [messages])
 
   const pushMessage = (role: ChatMessage['role'], content: string) => {
     setMessages(prev => [...prev, { id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role, content, timestamp: now() }])
   }
+
+  // Only sent when the Simulation tab has tool_blocks configured — otherwise
+  // the agent keeps getting raw candle text, unchanged from before.
+  const snapshotPipelineFields = useCallback(() => {
+    if (toolTab !== 'simulation' || toolBlocksState.length === 0) return {}
+    return {
+      tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
+      calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
+      assembly_transform_script: assemblyScriptText,
+    }
+  }, [toolTab, toolBlocksState, calculationBlocksState, assemblyScriptText])
 
   const sendChat = async () => {
     const question = chatInput.trim()
@@ -458,10 +643,14 @@ export function PromptWorkbench() {
         candle_count: candleCount,
         visible_count: toolTab === 'simulation' ? visibleCount : undefined,
         llm_name: llmName || undefined,
-        allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker'],
+        reasoning_effort: reasoningEffort,
+        allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
+        existing_annotations: annotations,
+        ...snapshotPipelineFields(),
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
-      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...resp.annotations])
+      if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
+      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...tagAnnotations(resp.annotations)])
     } catch (err) {
       pushMessage('assistant', `Error: ${String(err)}`)
     } finally {
@@ -503,10 +692,14 @@ export function PromptWorkbench() {
         candle_count: candleCount,
         visible_count: newVisibleCount,
         llm_name: llmName || undefined,
-        allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker'],
+        reasoning_effort: reasoningEffort,
+        allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
+        existing_annotations: annotations,
+        ...snapshotPipelineFields(),
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
-      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...resp.annotations])
+      if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
+      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...tagAnnotations(resp.annotations)])
     } catch (err) {
       pushMessage('assistant', `Error: ${String(err)}`)
     } finally {
@@ -515,7 +708,7 @@ export function PromptWorkbench() {
     positionRef.current = newPosition
     setPosition(newPosition)
     return newPosition > 0
-  }, [total, stepSize, autoTradeStatus, promptText, pair, brokerName, timeframe, candleCount, llmName, openTrades])
+  }, [total, stepSize, autoTradeStatus, promptText, pair, brokerName, timeframe, candleCount, llmName, reasoningEffort, openTrades, tagAnnotations, annotations, snapshotPipelineFields])
 
   const handleStep = () => { void stepOnce() }
 
@@ -537,21 +730,30 @@ export function PromptWorkbench() {
     })()
   }
 
-  const handlePreview = () => {
+  const handlePreview = async () => {
     if (total === 0) { setSimPreview('Keine Kerzen geladen.'); return }
-    const first = candles[0]
-    const last = candles[Math.max(0, visibleCount - 1)]
-    setSimPreview(JSON.stringify({
-      note: 'Platzhalter — die echte Snapshot-Pipeline (tool_blocks/calculation_blocks/assembly_transform_script) folgt in einem späteren Schritt.',
-      visible_candles: visibleCount,
-      total_candles: total,
-      position,
-      from_candle_number: total,
-      to_candle_number: position,
-      window_start: first?.timestamp ?? null,
-      window_end: last?.timestamp ?? null,
-      auto_trade_status: autoTradeStatus,
-    }, null, 2))
+    if (toolBlocksState.length === 0) {
+      setSimPreview('Keine tool_blocks konfiguriert — Profil laden oder Tool hinzufügen.')
+      return
+    }
+    setSimPreviewLoading(true)
+    try {
+      const resp = await api.promptWorkbenchSnapshotPreview({
+        pair, broker_name: brokerName, timeframe, candle_count: candleCount,
+        visible_count: visibleCount,
+        tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
+        calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
+        assembly_transform_script: assemblyScriptText,
+      })
+      const body = resp.errors.length
+        ? `${JSON.stringify(resp.snapshot, null, 2)}\n\n=== Errors ===\n${resp.errors.join('\n')}`
+        : JSON.stringify(resp.snapshot, null, 2)
+      setSimPreview(body)
+    } catch (err) {
+      setSimPreview(`Error: ${String(err)}`)
+    } finally {
+      setSimPreviewLoading(false)
+    }
   }
 
   const selectCls = 'bg-gray-800 border border-gray-600 rounded px-1 text-gray-200 text-xs'
@@ -603,13 +805,27 @@ export function PromptWorkbench() {
           <input
             type="number" min={20} max={2000} value={candleCount}
             onChange={e => setCandleCount(Math.max(20, Math.min(2000, Number(e.target.value))))}
-            className="w-16 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+            className="w-11 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
           />
         </div>
 
-        <div className="flex items-center gap-1 text-xs text-white opacity-50" title="Kommt später — v1 lädt nur über Anzahl">
+        <div className="flex items-center gap-1 text-xs text-white" title="Optional: Kerzen bis zu diesem Datum laden statt der aktuellsten. Leer lassen für Live-Daten.">
           <span>Anchor date</span>
-          <input type="date" disabled className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-400 text-xs cursor-not-allowed" />
+          <input
+            type="date"
+            value={anchorDate}
+            onChange={e => setAnchorDate(e.target.value)}
+            className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+          />
+          {anchorDate && (
+            <button
+              onClick={() => setAnchorDate('')}
+              title="Anchor zurücksetzen (Live-Daten)"
+              className="text-gray-500 hover:text-gray-300"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         <button
@@ -628,7 +844,7 @@ export function PromptWorkbench() {
           <input
             type="number" min={0} max={total} value={position}
             onChange={e => setPosition(Math.max(0, Math.min(total, Number(e.target.value))))}
-            className="w-16 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+            className="w-11 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
           />
         </div>
         <div className="flex items-center gap-1 text-xs text-white">
@@ -636,7 +852,7 @@ export function PromptWorkbench() {
           <input
             type="number" min={1} max={200} value={stepSize}
             onChange={e => setStepSize(Math.max(1, Number(e.target.value)))}
-            className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+            className="w-7 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
           />
         </div>
         <button
@@ -656,9 +872,20 @@ export function PromptWorkbench() {
         >
           {running ? <><Square className="w-3 h-3" /> Stop</> : <><Play className="w-3 h-3" /> Run</>}
         </button>
-        <span className="text-xs text-white">
-          sichtbar: {visibleCount} / {total} (Kerzen {total}–{position})
-        </span>
+        {position > 0 && (
+          <span className="text-xs text-white">
+            sichtbar: {visibleCount} / {total} (Kerzen {total}–{position})
+          </span>
+        )}
+
+        <button
+          onClick={clearAnnotations}
+          disabled={annotations.length === 0}
+          title="Remove all zones/trades the agent drew on the chart"
+          className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
+        >
+          <Trash2 className="w-3 h-3" /> Clear chart
+        </button>
 
         {error && <span className="text-xs text-red-400">Error: {error}</span>}
       </div>
@@ -669,7 +896,7 @@ export function PromptWorkbench() {
           <ForexChart
             ref={chartRef}
             candles={candles}
-            markers={[...boundaryMarkers, ...tradeMarkers]}
+            markers={[...boundaryMarkers, ...tradeMarkers, ...candleMarkers]}
             overlayLines={overlayLines}
             oscillators={oscillators}
             ranges={[]}
@@ -695,58 +922,121 @@ export function PromptWorkbench() {
         <div className="w-12 h-0.5 bg-gray-500 rounded-full pointer-events-none" />
       </div>
 
-      {/* Bottom: 3 columns — Agent Chat | Tools | Agent Prompt */}
+      {/* Bottom: 2 columns — [Chat/Prompt] | Tools */}
       <div className="flex-1 min-h-0 flex">
-        {/* Agent Chat */}
-        <section className="flex flex-col min-h-0 w-1/3 border-r border-gray-700">
-          <div className="px-3 py-1.5 bg-gray-900 border-b border-gray-800 text-xs text-white font-medium">
-            Agent Chat
-          </div>
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-            {messages.length === 0 && (
-              <p className="text-xs text-white italic">Ask a question, or use Step/Run above to walk the simulation.</p>
-            )}
-            {messages.map(msg => (
-              <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                <div className={
-                  msg.role === 'user'
-                    ? 'max-w-[85%] rounded-lg px-3 py-1.5 text-xs bg-emerald-900/50 text-emerald-100 whitespace-pre-wrap'
-                    : 'max-w-[90%] rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-gray-200 whitespace-pre-wrap'
-                }>
-                  {msg.content}
-                </div>
-              </div>
+        {/* Left column — [Chat] / [Prompt] */}
+        <section className="flex flex-col min-h-0 w-1/2 border-r border-gray-700">
+          <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
+            {(['chat', 'prompt'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setLeftTab(tab)}
+                className={[
+                  'px-3 py-1.5 text-xs transition-colors capitalize',
+                  leftTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
+                ].join(' ')}
+              >
+                {tab}
+              </button>
             ))}
-            {(sending || simBusy) && (
-              <div className="flex justify-start">
-                <div className="bg-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-400 animate-pulse">
-                  Waiting for the agent…
+          </div>
+
+          {leftTab === 'chat' ? (
+            <>
+              <div className="flex items-center justify-end px-3 py-1.5 bg-gray-900 border-b border-gray-800 text-xs text-white font-medium">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="color"
+                    value={annotationColor}
+                    onChange={e => setAnnotationColor(e.target.value)}
+                    title="Color used for zones/trade/candle markers drawn from now on"
+                    className="w-6 h-6 cursor-pointer rounded border-0 bg-transparent"
+                  />
+                  <select
+                    value={reasoningEffort}
+                    onChange={e => setReasoningEffort(e.target.value)}
+                    title="Reasoning effort — compare behavior across levels"
+                    className={selectCls}
+                  >
+                    {REASONING_EFFORTS.map(level => <option key={level} value={level}>{level}</option>)}
+                  </select>
                 </div>
               </div>
-            )}
-          </div>
-          <div className="flex-shrink-0 px-3 py-2 border-t border-gray-700 flex gap-2 items-end">
-            <textarea
-              ref={inputRef}
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={handleChatKeyDown}
-              rows={2}
-              placeholder="Ask the agent about the loaded chart…"
-              className="flex-1 resize-none bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 placeholder-gray-600"
-            />
-            <button
-              onClick={() => void sendChat()}
-              disabled={!chatInput.trim() || sending}
-              className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs rounded transition-colors"
-            >
-              Send
-            </button>
-          </div>
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+                {messages.length === 0 && (
+                  <p className="text-xs text-white italic">Ask a question, or use Step/Run above to walk the simulation.</p>
+                )}
+                {messages.map(msg => (
+                  <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                    <div className={
+                      msg.role === 'user'
+                        ? 'max-w-[85%] rounded-lg px-3 py-1.5 text-xs bg-emerald-900/50 text-emerald-100 whitespace-pre-wrap'
+                        : 'max-w-[90%] rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-gray-200 whitespace-pre-wrap'
+                    }>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                {(sending || simBusy) && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-400 animate-pulse">
+                      Waiting for the agent…
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex-shrink-0 px-3 py-2 border-t border-gray-700 flex gap-2 items-end">
+                <textarea
+                  ref={inputRef}
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={handleChatKeyDown}
+                  rows={2}
+                  placeholder="Ask the agent about the loaded chart…"
+                  className="flex-1 resize-none bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 placeholder-gray-600"
+                />
+                <button
+                  onClick={() => void sendChat()}
+                  disabled={!chatInput.trim() || sending}
+                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs rounded transition-colors"
+                >
+                  Send
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-800 flex-shrink-0 gap-2 flex-wrap">
+                <div className="flex items-center gap-1">
+                  <select value={loadFromAgentId} onChange={e => setLoadFromAgentId(e.target.value)} className={selectCls}>
+                    <option value="">— load from agent —</option>
+                    {agentPromptOptions.map(o => <option key={o.agentId} value={o.agentId}>{o.agentId}</option>)}
+                  </select>
+                  <button
+                    onClick={loadPromptFromAgent}
+                    disabled={!loadFromAgentId}
+                    className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs disabled:opacity-40"
+                  >
+                    Load
+                  </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-white">LLM:</span>
+                  <select value={llmName} onChange={e => setLlmName(e.target.value)} className={selectCls} title="LLM used to run the prompt in this Workbench">
+                    <option value="">— auto —</option>
+                    {availableLlmNames.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0">
+                <PlainTextMonacoEditor value={promptText} onChange={setPromptText} language="plaintext" />
+              </div>
+            </>
+          )}
         </section>
 
         {/* Tools — [Analyse] / [Simulation] */}
-        <section className="flex flex-col min-h-0 w-1/3 border-r border-gray-700">
+        <section className="flex flex-col min-h-0 w-1/2">
           <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
             {(['analyse', 'simulation'] as ToolTab[]).map(tab => (
               <button
@@ -778,12 +1068,62 @@ export function PromptWorkbench() {
             ) : (
               <>
                 <p className="text-white">
-                  Simulation: [Step] schickt den Agenten mit dem aktuell sichtbaren Fenster (Kerzen {total}–{position})
-                  echt an die LLM (über einen detached Agent, gleiche Tool-Loop wie live). Die eigentliche
-                  Block-Pipeline (tool_blocks / calculation_blocks / assembly_transform_script, wie im Snapshot
-                  Designer) folgt in einem späteren Schritt — aktuell stehen `calculate_indicator`, `zone_marker`
-                  und `trade_marker` zur Verfügung.
+                  Simulation: [Step]/[Run] und Chat schicken dem Agenten den echten, per
+                  tool_blocks/calculation_blocks/assembly_transform_script assemblierten Snapshot (gleiche Pipeline
+                  wie im Snapshot Designer), verankert auf die zuletzt sichtbare Kerze (#{position || total}) statt
+                  auf Live-Daten — sobald hier tool_blocks eingetragen sind. Leer lassen, um weiterhin die rohen
+                  Kerzendaten zu verwenden.
                 </p>
+
+                <div className="flex items-center gap-1">
+                  <select value={snapshotProfileName} onChange={e => setSnapshotProfileName(e.target.value)} className={selectCls}>
+                    <option value="">— load from snapshot profile —</option>
+                    {snapshotProfileOptions.map(o => <option key={o.name} value={o.name}>{o.name}</option>)}
+                  </select>
+                  <button
+                    onClick={loadSnapshotProfile}
+                    disabled={!snapshotProfileName}
+                    className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs disabled:opacity-40"
+                  >
+                    Load
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-white">tool_blocks</span>
+                  <ToolBlocksPanel
+                    blocks={toolBlocksState}
+                    tools={availableTools}
+                    onAdd={addToolBlockRow}
+                    onRemove={removeToolBlockRow}
+                    onUpdate={updateToolBlockRow}
+                    onUpdateArgument={updateToolBlockArgumentRow}
+                    onTest={index => void testToolBlock(index)}
+                    testResultByKey={blockTestResults}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-white">calculation_blocks (optional)</span>
+                  <CalculationBlocksPanel
+                    blocks={calculationBlocksState}
+                    onAdd={addCalcBlockRow}
+                    onRemove={removeCalcBlockRow}
+                    onUpdate={updateCalcBlockRow}
+                    onTest={index => void testCalcBlock(index)}
+                    testResultByKey={blockTestResults}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-white">assembly_transform_script (optional)</span>
+                  <ScriptEditor
+                    value={assemblyScriptText}
+                    onChange={setAssemblyScriptText}
+                    minHeight={100}
+                    snippetScope="snapshot"
+                    contextFile="script_snapshot_assembly_context.md"
+                  />
+                </div>
+
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input type="checkbox" checked={autoTradeStatus} onChange={e => setAutoTradeStatus(e.target.checked)} className="accent-emerald-500" />
                   <span className={autoTradeStatus ? 'text-emerald-400' : 'text-white'}>Auto Trade-Status einfügen</span>
@@ -794,10 +1134,11 @@ export function PromptWorkbench() {
                   </pre>
                 )}
                 <button
-                  onClick={handlePreview}
-                  className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs"
+                  onClick={() => void handlePreview()}
+                  disabled={simPreviewLoading}
+                  className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs disabled:opacity-40"
                 >
-                  Test / Preview
+                  {simPreviewLoading ? 'Testing…' : 'Test / Preview'}
                 </button>
                 {simPreview && (
                   <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
@@ -806,36 +1147,6 @@ export function PromptWorkbench() {
                 )}
               </>
             )}
-          </div>
-        </section>
-
-        {/* Agent Prompt */}
-        <section className="flex flex-col min-h-0 w-1/3">
-          <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-800 flex-shrink-0 gap-2 flex-wrap">
-            <span className="text-xs text-white font-medium flex-shrink-0">Agent Prompt</span>
-            <div className="flex items-center gap-1">
-              <select value={loadFromAgentId} onChange={e => setLoadFromAgentId(e.target.value)} className={selectCls}>
-                <option value="">— load from agent —</option>
-                {agentPromptOptions.map(o => <option key={o.agentId} value={o.agentId}>{o.agentId}</option>)}
-              </select>
-              <button
-                onClick={loadPromptFromAgent}
-                disabled={!loadFromAgentId}
-                className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white hover:text-gray-200 text-xs disabled:opacity-40"
-              >
-                Load
-              </button>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-white">LLM:</span>
-              <select value={llmName} onChange={e => setLlmName(e.target.value)} className={selectCls} title="LLM used to run the prompt in this Workbench">
-                <option value="">— auto —</option>
-                {availableLlmNames.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="flex-1 min-h-0">
-            <PlainTextMonacoEditor value={promptText} onChange={setPromptText} language="plaintext" />
           </div>
         </section>
       </div>

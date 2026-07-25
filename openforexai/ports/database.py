@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any
 
 from openforexai.models.account import AccountStatus
@@ -62,8 +63,15 @@ class AbstractRepository(ABC):
         pair: str,
         timeframe: str,
         limit: int = 500,
+        start: datetime | None = None,
     ) -> list[Candle]:
-        """Return up to *limit* candles (newest first) from the persistent store."""
+        """Return up to *limit* candles (newest first) from the persistent store.
+
+        *start*, when given, anchors the query to a point in the past instead of
+        "now": only candles with ``timestamp <= start`` are considered, so the
+        result is the *limit* most recent candles as of that moment. Omit for
+        the normal "last *limit* candles up to now" behaviour.
+        """
         ...
 
     @abstractmethod

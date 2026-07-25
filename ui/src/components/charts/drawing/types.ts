@@ -39,6 +39,7 @@ export interface Drawing {
   points: DrawingPoint[]
   style: DrawingStyle
   label?: string
+  sublabel?: string   // shown below-left of the shape, e.g. rect height/width stats
   elliottLabels?: string[]
   visible: boolean
   selected: boolean

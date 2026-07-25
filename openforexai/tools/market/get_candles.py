@@ -38,6 +38,13 @@ class GetCandlesTool(BaseTool):
                 "minimum": 1,
                 "maximum": 500,
             },
+            "start": {
+                "type": "string",
+                "description": (
+                    "Optional ISO8601 timestamp. If set, only candles at or before this point "
+                    "are returned (an anchor into the past) instead of the most recent live data."
+                ),
+            },
         },
         "required": ["timeframe"],
     }
@@ -48,6 +55,7 @@ class GetCandlesTool(BaseTool):
             raise ValueError(f"Invalid timeframe {timeframe!r}. Must be one of: {', '.join(sorted(_VALID_TIMEFRAMES))}")
 
         count = min(int(arguments.get("count") or get_tool_default("get_candles", "count", 50)), 500)
+        start = str(arguments.get("start") or "").strip() or None
 
         if not context.broker_name:
             raise RuntimeError("broker_name not set in tool context")
@@ -63,6 +71,7 @@ class GetCandlesTool(BaseTool):
                 "broker_name": context.broker_name,
                 "timeframe": timeframe,
                 "limit": count,
+                **({"start": start} if start else {}),
             },
         )
 

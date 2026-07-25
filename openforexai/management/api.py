@@ -2351,8 +2351,14 @@ async def get_candles(
     timeframe: str = "M5",
     count: int = 200,
     broker_name: str | None = None,
+    start: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return recent candles for a pair/timeframe, broker-agnostic."""
+    """Return recent candles for a pair/timeframe, broker-agnostic.
+
+    *start*, when given, anchors the read to a historical point instead of
+    "now" (see DataContainer.get_candles) — used by the Prompt Workbench to
+    load a candle window ending at a specific date instead of the latest data.
+    """
     if _data_container is None:
         raise HTTPException(status_code=503, detail="DataContainer not available")
 
@@ -2360,6 +2366,13 @@ async def get_candles(
     if tf not in {"M5", "M15", "M30", "H1", "H4", "D1"}:
         raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe!r}")
     limit = max(1, min(count, 2000))
+
+    start_dt: datetime | None = None
+    if start:
+        try:
+            start_dt = datetime.fromisoformat(start)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid start timestamp: {start!r}") from None
 
     if broker_name:
         _, broker = _resolve_connected_broker(broker_name)
@@ -2376,6 +2389,7 @@ async def get_candles(
         pair=pair.upper(),
         timeframe=tf,
         limit=limit,
+        start=start_dt,
     )
     return [
         {
@@ -2418,9 +2432,32 @@ class PromptWorkbenchChatRequest(BaseModel):
                     "(the Simulation tab's revealed window). Omit to send all loaded candles.",
     )
     llm_name: str | None = None
-    allowed_tools: list[str] = Field(
-        default_factory=lambda: ["calculate_indicator", "zone_marker", "trade_marker"],
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Optional override — the effective default is 'low' regardless of what the "
+                    "LLM module is configured with, never inherited from it. Raise this only "
+                    "for tasks that actually need more reasoning.",
     )
+    allowed_tools: list[str] = Field(
+        default_factory=lambda: [
+            "calculate_indicator", "zone_marker", "trade_marker", "candle_marker", "get_annotation",
+        ],
+    )
+    existing_annotations: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Annotations already accumulated client-side (from prior responses in this "
+                    "session), so get_annotation has something to look up — the backend keeps no "
+                    "state between requests.",
+    )
+    tool_blocks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Simulation tab: same shape as a Snapshot Profile's tool_blocks. When non-empty, "
+                    "the agent receives the assembled market_snapshot (built via the same "
+                    "tool_blocks/calculation_blocks/assembly_transform_script pipeline as production, "
+                    "anchored to the last visible candle) instead of the raw candle text.",
+    )
+    calculation_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    assembly_transform_script: str = ""
     timeout: float = 120.0
 
 class PromptWorkbenchChatResponse(BaseModel):
@@ -2428,6 +2465,7 @@ class PromptWorkbenchChatResponse(BaseModel):
     total_tokens: int = 0
     executed_tools: list[str] = Field(default_factory=list)
     annotations: list[dict[str, Any]] = Field(default_factory=list)
+    snapshot_errors: list[str] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -2475,10 +2513,48 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         for i, c in enumerate(visible)
     ]
     candle_block = "\n".join(candle_lines) if candle_lines else "(no candles loaded)"
-    user_message = (
-        f"=== Loaded candles ({req.pair.upper()} {tf}, {len(visible)} of {total} candles visible, "
-        f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ===\n\n{req.question}"
-    )
+
+    snapshot_errors: list[str] = []
+    if req.tool_blocks:
+        # Simulation tab with a configured Snapshot pipeline: the agent gets the
+        # assembled market_snapshot (same tool_blocks/calculation_blocks/
+        # assembly_transform_script pipeline as production), anchored to the
+        # last visible candle so tool_blocks (calculate_indicator etc.) resolve
+        # historically instead of against live/current data.
+        from openforexai.agents.analysis_snapshot import build_analysis_snapshot
+        last_visible = visible[-1] if visible else None
+        trigger_payload = {
+            "candle": {
+                "timestamp": last_visible.timestamp.isoformat(),
+                "open": float(last_visible.open), "high": float(last_visible.high),
+                "low": float(last_visible.low), "close": float(last_visible.close),
+                "spread": float(last_visible.spread),
+            },
+        } if last_visible is not None else {}
+        profile = {
+            "tool_blocks": req.tool_blocks,
+            "calculation_blocks": req.calculation_blocks,
+            "assembly_transform_script": req.assembly_transform_script,
+            "short_timeframe": tf,
+            "long_timeframe": "H1",
+        }
+        snapshot, snapshot_errors = await build_analysis_snapshot(
+            broker_name=short_name, pair=req.pair.upper(), trigger_payload=trigger_payload,
+            profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
+            repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
+            start=last_visible.timestamp.isoformat() if last_visible is not None else None,
+        )
+        snapshot_text = json.dumps(snapshot.get("assembled") or snapshot, default=str, indent=2)
+        errors_block = f"\n=== Snapshot errors ===\n{chr(10).join(snapshot_errors)}\n" if snapshot_errors else ""
+        user_message = (
+            f"=== Market Snapshot ({req.pair.upper()} {tf}, as of candle #{visible_count if visible_count else total}) "
+            f"===\n{snapshot_text}\n=== End snapshot ==={errors_block}\n{req.question}"
+        )
+    else:
+        user_message = (
+            f"=== Loaded candles ({req.pair.upper()} {tf}, {len(visible)} of {total} candles visible, "
+            f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ===\n\n{req.question}"
+        )
 
     from openforexai.registry.runtime_registry import RuntimeRegistry
     llm_name = req.llm_name
@@ -2487,6 +2563,32 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         if not llm_names:
             raise HTTPException(status_code=503, detail="No LLM provider available")
         llm_name = llm_names[0]
+
+    # Read the module's own temperature/max_tokens — a detached agent skips the
+    # normal AGENT_CONFIG_RESPONSE handshake (_apply_config), so without this it
+    # would silently run with Agent.__init__'s bare max_tokens=4096, which
+    # reasoning models can burn entirely on internal reasoning before producing
+    # any visible text or tool call on larger candle windows — an empty answer
+    # with zero tool calls, not an error.
+    #
+    # reasoning_effort is deliberately NOT inherited from the module: it
+    # defaults to "low" (same as _ASSISTANT_DEFAULT_REASONING_EFFORT below) and
+    # is only raised via req.reasoning_effort when a task actually needs it —
+    # an unset value must not silently fall through to the trading module's
+    # own effort (e.g. "medium" for azure_azmin), which would make every
+    # workbench call slower for no reason regardless of task complexity.
+    llm_temperature: float | None = None
+    llm_max_tokens = 4096
+    try:
+        llm_cfg_path = _resolve_module_config_path("llm", llm_name)
+        llm_module_cfg = json5.loads(llm_cfg_path.read_text(encoding="utf-8"))
+        if isinstance(llm_module_cfg.get("temperature"), (int, float)):
+            llm_temperature = float(llm_module_cfg["temperature"])
+        if isinstance(llm_module_cfg.get("max_tokens"), int) and llm_module_cfg["max_tokens"] > 0:
+            llm_max_tokens = llm_module_cfg["max_tokens"]
+    except HTTPException:
+        pass  # module config not resolvable — fall back to the safe defaults above
+    llm_reasoning_effort = req.reasoning_effort.strip() if req.reasoning_effort and req.reasoning_effort.strip() else "low"
 
     from openforexai.agents.agent import Agent
     from openforexai.services.llm_service import llm_service_id
@@ -2500,10 +2602,18 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         agent._system_prompt = req.system_prompt
         agent._llm_name = llm_name
         agent._llm_service_id = llm_service_id(llm_name)
+        agent._llm_temperature = llm_temperature
+        agent._max_tokens = llm_max_tokens
+        agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
+        agent._llm_reasoning_effort = llm_reasoning_effort
         tool_context = ToolContext(
             agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
             monitoring_bus=_monitoring_bus, event_bus=_bus,
-            extra={"candle_index_map": candle_index_map, "workbench_annotations": []},
+            extra={
+                "candle_index_map": candle_index_map,
+                "workbench_annotations": [],
+                "existing_annotations": req.existing_annotations,
+            },
         )
         agent._tool_dispatcher = ToolDispatcher(
             DEFAULT_REGISTRY, tool_context, {"allowed_tools": req.allowed_tools},
@@ -2516,6 +2626,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         return PromptWorkbenchChatResponse(
             answer=final_text, total_tokens=total_tokens, executed_tools=executed_tool_names,
             annotations=tool_context.extra.get("workbench_annotations", []),
+            snapshot_errors=snapshot_errors,
         )
     except TimeoutError:
         return PromptWorkbenchChatResponse(answer="", error=f"Timed out after {req.timeout:.0f}s")
@@ -2523,6 +2634,80 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         return PromptWorkbenchChatResponse(answer="", error=str(exc))
     finally:
         _bus.unregister_agent(temp_agent_id)
+
+
+class PromptWorkbenchSnapshotPreviewRequest(BaseModel):
+    pair: str
+    broker_name: str | None = None
+    timeframe: str = "M5"
+    candle_count: int = 500
+    visible_count: int | None = None
+    tool_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    calculation_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    assembly_transform_script: str = ""
+
+class PromptWorkbenchSnapshotPreviewResponse(BaseModel):
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+
+
+@router.post("/prompt-workbench/snapshot-preview", response_model=PromptWorkbenchSnapshotPreviewResponse)
+async def prompt_workbench_snapshot_preview(
+    req: PromptWorkbenchSnapshotPreviewRequest,
+) -> PromptWorkbenchSnapshotPreviewResponse:
+    """Preview the assembled market_snapshot for the Simulation tab — no LLM call.
+
+    Same tool_blocks/calculation_blocks/assembly_transform_script pipeline and
+    historical anchoring as /prompt-workbench/chat, just without running the agent.
+    """
+    if _bus is None or _data_container is None:
+        raise HTTPException(status_code=503, detail="System not ready")
+
+    if req.broker_name:
+        _, broker = _resolve_connected_broker(req.broker_name)
+        if broker is None:
+            raise HTTPException(status_code=404, detail=f"Broker {req.broker_name!r} not connected")
+        short_name = broker.short_name
+    else:
+        if not _connected_brokers:
+            raise HTTPException(status_code=503, detail="No broker connected")
+        short_name = next(iter(_connected_brokers.values())).short_name
+
+    tf = req.timeframe.upper().strip()
+    limit = max(1, min(req.candle_count, 2000))
+    candles = await _data_container.get_candles(
+        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit,
+    )
+    total = len(candles)
+    visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
+    visible = candles[:visible_count]
+    if not visible:
+        return PromptWorkbenchSnapshotPreviewResponse(snapshot={}, errors=["No candles loaded."])
+
+    last_visible = visible[-1]
+    trigger_payload = {
+        "candle": {
+            "timestamp": last_visible.timestamp.isoformat(),
+            "open": float(last_visible.open), "high": float(last_visible.high),
+            "low": float(last_visible.low), "close": float(last_visible.close),
+            "spread": float(last_visible.spread),
+        },
+    }
+    profile = {
+        "tool_blocks": req.tool_blocks,
+        "calculation_blocks": req.calculation_blocks,
+        "assembly_transform_script": req.assembly_transform_script,
+        "short_timeframe": tf,
+        "long_timeframe": "H1",
+    }
+    from openforexai.agents.analysis_snapshot import build_analysis_snapshot
+    snapshot, errors = await build_analysis_snapshot(
+        broker_name=short_name, pair=req.pair.upper(), trigger_payload=trigger_payload,
+        profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
+        repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
+        start=last_visible.timestamp.isoformat(),
+    )
+    return PromptWorkbenchSnapshotPreviewResponse(snapshot=snapshot, errors=errors)
 
 
 @router.get("/orderbook")

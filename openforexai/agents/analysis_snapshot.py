@@ -391,6 +391,7 @@ async def _execute_tool_blocks(
     event_bus: Any = None,
     short_timeframe: str = "M5",
     long_timeframe: str = "H1",
+    start: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     context = ToolContext(
         agent_id=agent_id,
@@ -419,6 +420,12 @@ async def _execute_tool_blocks(
             arguments["timeframe"] = short_timeframe
         elif tf == "LONG_TF":
             arguments["timeframe"] = long_timeframe
+
+        # Historical anchor (e.g. Prompt Workbench simulation position) — only
+        # injected when the block doesn't already set its own start, so an
+        # explicit per-block override always wins.
+        if start and not arguments.get("start"):
+            arguments["start"] = start
 
         if not tool_name:
             errors.append(f"{block_id}:missing_tool_name")
@@ -795,6 +802,7 @@ async def build_analysis_snapshot(
     broker: Any = None,
     monitoring_bus: Any = None,
     event_bus: Any = None,
+    start: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     from time import perf_counter as _perf_counter
     _snap_started = _perf_counter()
@@ -824,6 +832,7 @@ async def build_analysis_snapshot(
             broker=broker,
             monitoring_bus=monitoring_bus,
             event_bus=event_bus,
+            start=start,
         )
         if event_bus is not None:
             from openforexai.models.messaging import AgentMessage, EventType
@@ -867,6 +876,7 @@ async def _build_analysis_snapshot_inner(
     broker: Any = None,
     monitoring_bus: Any = None,
     event_bus: Any = None,
+    start: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     profile = profile if isinstance(profile, dict) else {}
     pair = pair.upper()
@@ -891,6 +901,7 @@ async def _build_analysis_snapshot_inner(
         event_bus=event_bus,
         short_timeframe=short_timeframe,
         long_timeframe=long_timeframe,
+        start=start,
     )
 
     errors: list[str] = list(tool_errors)

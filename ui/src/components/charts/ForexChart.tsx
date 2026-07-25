@@ -327,14 +327,14 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
     sessionBandsPrimitiveRef.current = sessionBandsPrimitive
 
     const onCrosshairMove = (param: { time?: unknown }) => {
-      if (typeof param.time !== 'number') {
-        setHovered(null)
-        return
-      }
+      // Keep showing the last hovered candle when the mouse leaves the chart —
+      // clearing it here made the legend row appear/disappear on every move,
+      // which reflows the layout and reads as the chart constantly jittering.
+      if (typeof param.time !== 'number') return
       const candle = orderedRef.current.find(
         item => Math.floor(new Date(item.timestamp).getTime() / 1000) === param.time,
       )
-      setHovered(candle ?? null)
+      if (candle) setHovered(candle)
     }
     chart.subscribeCrosshairMove(onCrosshairMove)
 

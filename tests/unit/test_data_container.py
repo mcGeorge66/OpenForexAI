@@ -92,10 +92,14 @@ class FreshReadBroker(MockBroker):
 
 class NewestFirstMockRepository(MockRepository):
     async def get_candles(
-        self, broker_name: str, pair: str, timeframe: str, limit: int = 500
+        self, broker_name: str, pair: str, timeframe: str, limit: int = 500,
+        start=None,
     ) -> list[Candle]:
         key = (broker_name, pair, timeframe)
-        return list(reversed(self.candles.get(key, [])))[0:limit]
+        candles = self.candles.get(key, [])
+        if start is not None:
+            candles = [c for c in candles if c.timestamp <= start]
+        return list(reversed(candles))[0:limit]
 
 
 class UpsertingMockRepository(MockRepository):

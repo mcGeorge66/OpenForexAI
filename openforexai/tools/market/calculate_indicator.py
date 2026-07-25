@@ -56,6 +56,15 @@ class CalculateIndicatorTool(BaseTool):
                 ),
                 "minimum": 0, "maximum": 2000,
             },
+            "start": {
+                "type": "string",
+                "description": (
+                    "Optional ISO8601 timestamp. If set, this becomes the anchor point: only "
+                    "candles at or before it are used, so the computed values reflect that "
+                    "moment in the past instead of the live/most-recent data. Leave empty for "
+                    "the normal live behaviour."
+                ),
+            },
         },
         "required": ["indicator", "period", "timeframe"],
     }
@@ -94,10 +103,11 @@ class CalculateIndicatorTool(BaseTool):
             raise ValueError(f"Unknown indicator {indicator!r}. Available: {', '.join(DEFAULT_REGISTRY.registered_names())}")
 
         warmup = self._resolve_warmup(arguments, period)
+        start = str(arguments.get("start") or "").strip() or None
 
         # DXY needs component pair candles
         if getattr(plugin, "requires_component_pairs", False):
-            return await self._compute_dxy(context, plugin, period, timeframe, history, warmup)
+            return await self._compute_dxy(context, plugin, period, timeframe, history, warmup, start)
 
         # Get candles via DataContainer bus request
         # For VWAP period=0 (daily reset), fetch extra candles to cover from midnight
@@ -111,7 +121,8 @@ class CalculateIndicatorTool(BaseTool):
             target_id=DATA_CONTAINER_ID,
             instrument=context.pair,
             payload={"broker_name": context.broker_name,
-                     "timeframe": timeframe, "limit": candle_limit},
+                     "timeframe": timeframe, "limit": candle_limit,
+                     **({"start": start} if start else {})},
         )
         if response.get("error"):
             raise RuntimeError(f"DataContainer error: {response['error']}")
@@ -161,7 +172,7 @@ class CalculateIndicatorTool(BaseTool):
             "values": timestamped,
         }
 
-    async def _compute_dxy(self, context: ToolContext, plugin: Any, period: int, timeframe: str, history: int, warmup: int) -> Any:
+    async def _compute_dxy(self, context: ToolContext, plugin: Any, period: int, timeframe: str, history: int, warmup: int, start: str | None = None) -> Any:
         from openforexai.data.indicators import synthetic_dxy
 
         component_candles: dict[str, list] = {}
@@ -172,7 +183,8 @@ class CalculateIndicatorTool(BaseTool):
                 target_id=DATA_CONTAINER_ID,
                 instrument=comp_pair,
                 payload={"broker_name": context.broker_name,
-                         "timeframe": timeframe, "limit": warmup + history},
+                         "timeframe": timeframe, "limit": warmup + history,
+                         **({"start": start} if start else {})},
             )
             candles = candle_dicts_to_objects(resp.get("candles", []))
             if candles:

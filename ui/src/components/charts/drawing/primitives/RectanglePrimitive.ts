@@ -44,5 +44,16 @@ export class RectanglePrimitive extends BasePrimitive {
       ctx.fillText(this._drawing.label, x + 4, y - 4 < 10 ? y + 14 : y - 4)
       ctx.restore()
     }
+
+    // Sublabel (e.g. height in pips / width in candles), bottom-left, left-aligned
+    if (this._drawing.sublabel) {
+      ctx.save()
+      ctx.font = `${(this._drawing.style.fontSize ?? 12)}px sans-serif`
+      ctx.fillStyle = this._drawing.style.color
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText(this._drawing.sublabel, x + 4, y + h + 4)
+      ctx.restore()
+    }
   }
 }

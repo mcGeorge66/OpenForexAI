@@ -588,14 +588,21 @@ class SQLiteRepository(AbstractRepository):
         pair: str,
         timeframe: str,
         limit: int = 500,
+        start: datetime | None = None,
     ) -> list[Candle]:
         if not await self._candle_table_exists(broker_name, pair, timeframe):
             return []
         table = self._series_table(broker_name, pair, timeframe)
-        cursor = await self._db().execute(
-            f"SELECT * FROM {table} ORDER BY timestamp DESC LIMIT ?",
-            (limit,),
-        )
+        if start is not None:
+            cursor = await self._db().execute(
+                f"SELECT * FROM {table} WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT ?",
+                (start.isoformat(), limit),
+            )
+        else:
+            cursor = await self._db().execute(
+                f"SELECT * FROM {table} ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            )
         rows = await cursor.fetchall()
         return [self._row_to_candle(r, timeframe) for r in rows]
 

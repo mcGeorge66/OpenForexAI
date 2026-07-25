@@ -17,6 +17,8 @@ from openforexai.tools.market.chartshot import ChartShotTool
 from openforexai.tools.market.get_candles import GetCandlesTool
 from openforexai.tools.orderbook.get_order_book import GetOrderBookTool
 from openforexai.tools.registry import DEFAULT_REGISTRY, ToolRegistry
+from openforexai.tools.sandbox.candle_marker import CandleMarkerTool
+from openforexai.tools.sandbox.get_annotation import GetAnnotationTool
 from openforexai.tools.sandbox.trade_marker import TradeMarkerTool
 from openforexai.tools.sandbox.zone_marker import ZoneMarkerTool
 from openforexai.tools.system.alarm import RaiseAlarmTool
@@ -52,6 +54,8 @@ DEFAULT_REGISTRY.register(ManageSubPromptTool())
 DEFAULT_REGISTRY.register(GetNewsTool())
 DEFAULT_REGISTRY.register(ZoneMarkerTool())
 DEFAULT_REGISTRY.register(TradeMarkerTool())
+DEFAULT_REGISTRY.register(CandleMarkerTool())
+DEFAULT_REGISTRY.register(GetAnnotationTool())
 
 __all__ = [
     "DEFAULT_REGISTRY",

@@ -277,10 +277,14 @@ class MockRepository(AbstractRepository):
             await self.save_candle(broker_name, pair, c)
 
     async def get_candles(
-        self, broker_name: str, pair: str, timeframe: str, limit: int = 500
+        self, broker_name: str, pair: str, timeframe: str, limit: int = 500,
+        start: datetime | None = None,
     ) -> list[Candle]:
         key = (broker_name, pair, timeframe)
-        return list(self.candles.get(key, []))[-limit:]
+        candles = self.candles.get(key, [])
+        if start is not None:
+            candles = [c for c in candles if c.timestamp <= start]
+        return list(candles)[-limit:]
 
     async def get_candle_count(self, broker_name: str, pair: str, timeframe: str) -> int:
         key = (broker_name, pair, timeframe)

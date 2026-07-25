@@ -66,6 +66,10 @@ class EventType(StrEnum):
     # ── Market data (DataContainer queries) ──────────────────────────────────
     CANDLES_REQUEST  = "candles_request"
     CANDLES_RESPONSE = "candles_response"
+    CANDLES_REQUEST_TIMEOUT = "candles_request_timeout"
+    # DataContainer's own handling of a CANDLES_REQUEST exceeded its internal
+    # timeout — published (not just monitoring-emitted) so it's visible/
+    # filterable in the persistent Event Log, never silent.
 
     INDICATOR_REQUEST  = "indicator_request"
     INDICATOR_RESPONSE = "indicator_response"

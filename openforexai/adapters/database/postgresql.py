@@ -640,14 +640,21 @@ class PostgreSQLRepository(AbstractRepository):
         pair: str,
         timeframe: str,
         limit: int = 500,
+        start: datetime | None = None,
     ) -> list[Candle]:
         if not await self._candle_table_exists(broker_name, pair, timeframe):
             return []
         table = self._q_ident(self._series_table(broker_name, pair, timeframe))
-        rows = await self._fetch(
-            f"SELECT * FROM {table} ORDER BY timestamp DESC LIMIT $1",
-            limit,
-        )
+        if start is not None:
+            rows = await self._fetch(
+                f"SELECT * FROM {table} WHERE timestamp <= $1 ORDER BY timestamp DESC LIMIT $2",
+                start.isoformat(), limit,
+            )
+        else:
+            rows = await self._fetch(
+                f"SELECT * FROM {table} ORDER BY timestamp DESC LIMIT $1",
+                limit,
+            )
         return [self._row_to_candle(dict(r), timeframe) for r in rows]
 
     async def get_candle_count(self, broker_name: str, pair: str, timeframe: str) -> int:

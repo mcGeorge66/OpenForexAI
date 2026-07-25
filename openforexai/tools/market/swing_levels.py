@@ -177,11 +177,18 @@ class GetSwingLevelsTool(BaseTool):
                 "enum": ["nearest", "prominent"],
                 "default": "nearest",
             },
+            "start": {
+                "type": "string",
+                "description": (
+                    "Optional ISO8601 timestamp. If set, swing detection (and the current-price "
+                    "fallback below) anchors to this point in the past instead of live data."
+                ),
+            },
         },
         "required": ["timeframe"],
     }
 
-    async def _get_candles(self, context: ToolContext, timeframe: str, limit: int):
+    async def _get_candles(self, context: ToolContext, timeframe: str, limit: int, start: str | None = None):
         try:
             response = await bus_request(
                 context=context,
@@ -189,7 +196,8 @@ class GetSwingLevelsTool(BaseTool):
                 target_id=DATA_CONTAINER_ID,
                 instrument=context.pair,
                 payload={"broker_name": context.broker_name,
-                         "timeframe": timeframe, "limit": limit},
+                         "timeframe": timeframe, "limit": limit,
+                         **({"start": start} if start else {})},
             )
         except Exception:
             return []
@@ -217,8 +225,9 @@ class GetSwingLevelsTool(BaseTool):
         sort_by      = str(arguments.get("sort_by") or _D("sort_by", "nearest")).lower()
         arg_price    = arguments.get("current_price")
         explicit_price: float | None = float(arg_price) if arg_price is not None else None
+        start        = str(arguments.get("start") or "").strip() or None
 
-        candles = await self._get_candles(context, timeframe, lookback)
+        candles = await self._get_candles(context, timeframe, lookback, start)
 
         if not candles or len(candles) < 3:
             return {
@@ -246,7 +255,7 @@ class GetSwingLevelsTool(BaseTool):
             current_price = explicit_price
             current_price_source = "argument"
         elif timeframe != "M5":
-            m5_candles = await self._get_candles(context, "M5", 1)
+            m5_candles = await self._get_candles(context, "M5", 1, start)
             if m5_candles:
                 current_price = float(list(m5_candles)[-1].close)
                 current_price_source = "M5"

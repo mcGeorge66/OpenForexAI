@@ -17,6 +17,13 @@ _log = get_logger(__name__)
 
 DATA_CONTAINER_ID = "SYSTM-ALL___-GA-DATA"
 
+# _on_candles_request runs inside DataContainer's single sequential message
+# loop — this bounds how long one request can stall it, since a hung handler
+# would otherwise block every other message (M5 updates, other requests)
+# indefinitely. Read-only local DB queries should never take anywhere near
+# this long; it exists purely as a circuit breaker.
+_CANDLES_REQUEST_TIMEOUT_SECONDS = 15.0
+
 # How many M5 candles to back-fill from the broker when DB is empty (~4 weeks)
 _M5_BACKFILL = 4 * 7 * 24 * 12   # 8 064
 
@@ -317,15 +324,28 @@ class DataContainer:
 
         Reads from DB only — does NOT trigger broker backfill.
         Backfill happens via the background M5_CANDLE_UPDATE flow.
+
+        Wrapped in an internal timeout: this handler runs inside DataContainer's
+        single sequential message loop (run()) — if it never returned, every
+        other message routed to DataContainer (M5 updates, other requests)
+        would queue up behind it forever, freezing candle data system-wide.
+        The timeout is never silent — it always publishes a CANDLES_REQUEST_TIMEOUT
+        event (persisted to the Event Log, not just monitoring) in addition to
+        the error response, so an incident like this is visible after the fact.
         """
         payload = message.payload
         broker_name = payload.get("broker_name", "")
         pair = message.instrument or ""
         timeframe = payload.get("timeframe", "M5")
         limit = payload.get("limit")
+        raw_start = payload.get("start")
 
         try:
-            candles = await self._get_candles_from_db(broker_name, pair, timeframe, limit)
+            start = datetime.fromisoformat(raw_start) if raw_start else None
+            candles = await asyncio.wait_for(
+                self._get_candles_from_db(broker_name, pair, timeframe, limit, start=start),
+                timeout=_CANDLES_REQUEST_TIMEOUT_SECONDS,
+            )
             result = [
                 {
                     "timestamp": c.timestamp.isoformat(),
@@ -340,6 +360,29 @@ class DataContainer:
                 for c in candles
             ]
             error = None
+        except TimeoutError:
+            result = []
+            error = (
+                f"_get_candles_from_db timed out after {_CANDLES_REQUEST_TIMEOUT_SECONDS:.0f}s "
+                f"(broker={broker_name!r} pair={pair!r} timeframe={timeframe!r} limit={limit!r}) "
+                "— DataContainer's message loop was not blocked further."
+            )
+            _log.error("DataContainer: CANDLES_REQUEST timed out — %s", error)
+            self._emit(
+                "data_container", MonitoringEventType.SYSTEM_ERROR,
+                broker_name=broker_name, pair=pair, reason="candles_request_timeout", error=error,
+            )
+            if self._event_bus is not None:
+                await self._event_bus.publish(AgentMessage(
+                    event_type=EventType.CANDLES_REQUEST_TIMEOUT,
+                    source_agent_id=DATA_CONTAINER_ID,
+                    instrument=pair,
+                    payload={
+                        "broker_name": broker_name, "pair": pair, "timeframe": timeframe,
+                        "limit": limit, "timeout_seconds": _CANDLES_REQUEST_TIMEOUT_SECONDS,
+                        "requested_by": message.source_agent_id,
+                    },
+                ), triggered_by=message)
         except Exception as exc:
             result = []
             error = str(exc)
@@ -504,11 +547,13 @@ class DataContainer:
         pair: str,
         timeframe: str,
         limit: int | None = None,
+        start: datetime | None = None,
     ) -> list[Candle]:
         """Read candles from DB only — no broker fetch, no completeness check.
 
         Used for bus requests (CANDLES_REQUEST) where latency must be low.
-        The caller gets whatever is currently in the DB.
+        The caller gets whatever is currently in the DB. *start*, when given,
+        anchors the read to a point in the past (see AbstractRepository.get_candles).
         """
         broker_name = str(broker_name).strip()
         pair = str(pair).strip().upper()
@@ -518,7 +563,7 @@ class DataContainer:
 
         if timeframe == "M5":
             raw = await self._store.get_candles(
-                broker_name, pair, "M5", limit=effective_limit + _NULL_FILTER_BUFFER_M5
+                broker_name, pair, "M5", limit=effective_limit + _NULL_FILTER_BUFFER_M5, start=start,
             )
             return self._drop_null_candles(list(reversed(raw)))[-effective_limit:]
 
@@ -526,7 +571,7 @@ class DataContainer:
             multiplier = _TF_M5_MULTIPLIER[timeframe]
             m5_required = effective_limit * multiplier + multiplier
             m5_limit = m5_required + _NULL_FILTER_BUFFER_M5
-            raw_m5 = await self._store.get_candles(broker_name, pair, "M5", limit=m5_limit)
+            raw_m5 = await self._store.get_candles(broker_name, pair, "M5", limit=m5_limit, start=start)
             m5 = self._drop_null_candles(list(reversed(raw_m5)))
             return resample_candles(
                 m5, timeframe, bucket_offset_hours=self._resample_bucket_offset_hours,
@@ -540,6 +585,7 @@ class DataContainer:
         pair: str,
         timeframe: str,
         limit: int | None = None,
+        start: datetime | None = None,
     ) -> list[Candle]:
         broker_name = str(broker_name).strip()
         pair = str(pair).strip().upper()
@@ -548,9 +594,12 @@ class DataContainer:
         effective_limit = limit if limit is not None else _SNAPSHOT_LIMITS.get(timeframe, 300)
 
         if timeframe == "M5":
-            await self._ensure_m5_complete_for_read(broker_name, pair, effective_limit)
+            # A historical anchor (start) means we're deliberately looking into the
+            # past — never trigger a live gap-repair fetch from the broker for that.
+            if start is None:
+                await self._ensure_m5_complete_for_read(broker_name, pair, effective_limit)
             raw = await self._store.get_candles(
-                broker_name, pair, "M5", limit=effective_limit + _NULL_FILTER_BUFFER_M5
+                broker_name, pair, "M5", limit=effective_limit + _NULL_FILTER_BUFFER_M5, start=start,
             )
             result = self._drop_null_candles(list(reversed(raw)))[-effective_limit:]
 
@@ -558,8 +607,9 @@ class DataContainer:
             multiplier = _TF_M5_MULTIPLIER[timeframe]
             m5_required = effective_limit * multiplier + multiplier
             m5_limit = m5_required + _NULL_FILTER_BUFFER_M5
-            await self._ensure_m5_complete_for_read(broker_name, pair, m5_required)
-            raw_m5 = await self._store.get_candles(broker_name, pair, "M5", limit=m5_limit)
+            if start is None:
+                await self._ensure_m5_complete_for_read(broker_name, pair, m5_required)
+            raw_m5 = await self._store.get_candles(broker_name, pair, "M5", limit=m5_limit, start=start)
             m5 = self._drop_null_candles(list(reversed(raw_m5)))
             result = resample_candles(
                 m5, timeframe, bucket_offset_hours=self._resample_bucket_offset_hours,

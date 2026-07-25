@@ -146,9 +146,10 @@ export const api = {
                     get<CandleBar[]>(
                       `/orderbook/${encodeURIComponent(entryId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
                     ),
-  getCandles: (pair: string, timeframe = 'M5', count = 200, broker_name?: string | null) => {
+  getCandles: (pair: string, timeframe = 'M5', count = 200, broker_name?: string | null, start?: string | null) => {
                     const q = new URLSearchParams({ pair, timeframe, count: String(count) })
                     if (broker_name) q.set('broker_name', broker_name)
+                    if (start) q.set('start', start)
                     return get<CandleBar[]>(`/candles?${q.toString()}`)
                   },
   getAnalyses: (params?: {
@@ -191,6 +192,7 @@ export const api = {
                     pair?: string | null
                     agent_id?: string | null
                     smooth_period?: number
+                    start?: string | null
                   }) =>
                     post<ToolExecuteResponse>('/tools/execute', {
                       tool_name: 'calculate_indicator',
@@ -200,6 +202,7 @@ export const api = {
                         timeframe: params.timeframe,
                         history: params.history,
                         ...(params.smooth_period && params.smooth_period > 1 ? { smooth_period: params.smooth_period } : {}),
+                        ...(params.start ? { start: params.start } : {}),
                       },
                       broker_name: params.broker_name || null,
                       pair: params.pair || null,
@@ -265,6 +268,8 @@ export const api = {
                     post<LLMAssistantChatResponse>('/llm-assistant/chat', req),
   promptWorkbenchChat: (req: PromptWorkbenchChatRequest) =>
                     post<PromptWorkbenchChatResponse>('/prompt-workbench/chat', req),
+  promptWorkbenchSnapshotPreview: (req: PromptWorkbenchSnapshotPreviewRequest) =>
+                    post<PromptWorkbenchSnapshotPreviewResponse>('/prompt-workbench/snapshot-preview', req),
   validateScript: (req: { code: string }) =>
                     post<ScriptValidateResponse>('/scripts/validate', req),
 
@@ -747,8 +752,29 @@ export interface PromptWorkbenchChatRequest {
   candle_count: number
   visible_count?: number | null
   llm_name?: string | null
+  reasoning_effort?: string | null
   allowed_tools?: string[]
+  existing_annotations?: unknown[]
+  tool_blocks?: Record<string, unknown>[]
+  calculation_blocks?: Record<string, unknown>[]
+  assembly_transform_script?: string
   timeout?: number
+}
+
+export interface PromptWorkbenchSnapshotPreviewRequest {
+  pair: string
+  broker_name?: string | null
+  timeframe: string
+  candle_count: number
+  visible_count?: number | null
+  tool_blocks: Record<string, unknown>[]
+  calculation_blocks: Record<string, unknown>[]
+  assembly_transform_script: string
+}
+
+export interface PromptWorkbenchSnapshotPreviewResponse {
+  snapshot: Record<string, unknown>
+  errors: string[]
 }
 
 export interface PromptWorkbenchZoneAnnotation {
@@ -771,13 +797,26 @@ export interface PromptWorkbenchTradeAnnotation {
   direction?: 'long' | 'short'
 }
 
-export type PromptWorkbenchAnnotation = PromptWorkbenchZoneAnnotation | PromptWorkbenchTradeAnnotation
+export interface PromptWorkbenchCandleMarkerAnnotation {
+  kind: 'candle_marker'
+  marker_id: string
+  candle_number: number
+  timestamp: string
+  position: 'above' | 'below'
+  text: string
+}
+
+export type PromptWorkbenchAnnotation =
+  | PromptWorkbenchZoneAnnotation
+  | PromptWorkbenchTradeAnnotation
+  | PromptWorkbenchCandleMarkerAnnotation
 
 export interface PromptWorkbenchChatResponse {
   answer: string
   total_tokens: number
   executed_tools: string[]
   annotations: PromptWorkbenchAnnotation[]
+  snapshot_errors?: string[]
   error?: string
 }
 
