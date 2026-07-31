@@ -65,7 +65,7 @@ class GetAnnotationTool(BaseTool):
         existing: list[dict[str, Any]] = context.extra.get("existing_annotations", [])
         index_map: dict[int, dict[str, Any]] = context.extra.get("candle_index_map", {})
 
-        annotation_id = str(arguments.get("annotation_id", "")).strip()
+        annotation_id = str(arguments.get("annotation_id", "")).strip().upper()
         start = arguments.get("start_candle_number")
         end = arguments.get("end_candle_number")
 

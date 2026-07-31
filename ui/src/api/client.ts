@@ -264,10 +264,15 @@ export const api = {
   getSnippetLibrary: (scope: string) => get<SnippetLibrary>(`/config/snippet-library/${scope}`),
   saveSnippetLibrary: (scope: string, library: SnippetLibrary) =>
                     put<{ status: string; file: string }>(`/config/snippet-library/${scope}`, library),
+  getPromptWorkbenchConfigs: () => get<PromptWorkbenchConfigLibrary>('/config/prompt-workbench-configs'),
+  savePromptWorkbenchConfigs: (library: PromptWorkbenchConfigLibrary) =>
+                    put<{ status: string; file: string }>('/config/prompt-workbench-configs', library),
   llmAssistantChat: (req: LLMAssistantChatRequest) =>
                     post<LLMAssistantChatResponse>('/llm-assistant/chat', req),
   promptWorkbenchChat: (req: PromptWorkbenchChatRequest) =>
                     post<PromptWorkbenchChatResponse>('/prompt-workbench/chat', req),
+  promptWorkbenchContextPreview: (req: PromptWorkbenchChatRequest) =>
+                    post<PromptWorkbenchContextPreviewResponse>('/prompt-workbench/context-preview', req),
   promptWorkbenchSnapshotPreview: (req: PromptWorkbenchSnapshotPreviewRequest) =>
                     post<PromptWorkbenchSnapshotPreviewResponse>('/prompt-workbench/snapshot-preview', req),
   validateScript: (req: { code: string }) =>
@@ -750,6 +755,7 @@ export interface PromptWorkbenchChatRequest {
   broker_name?: string | null
   timeframe: string
   candle_count: number
+  candle_anchor?: string | null
   visible_count?: number | null
   llm_name?: string | null
   reasoning_effort?: string | null
@@ -758,7 +764,25 @@ export interface PromptWorkbenchChatRequest {
   tool_blocks?: Record<string, unknown>[]
   calculation_blocks?: Record<string, unknown>[]
   assembly_transform_script?: string
+  indicators?: Record<string, unknown>[]
+  swing_levels?: Record<string, unknown>[]
   timeout?: number
+}
+
+export interface PromptWorkbenchContextPreviewResponse {
+  mode: 'snapshot' | 'candles'
+  pair: string
+  timeframe: string
+  total_candles: number
+  visible_candles: number
+  candles: Record<string, unknown>[]
+  indicators: Record<string, unknown>[]
+  swing_levels: Record<string, unknown>[]
+  snapshot: Record<string, unknown> | null
+  snapshot_errors: string[]
+  system_prompt: string
+  question: string
+  user_message: string
 }
 
 export interface PromptWorkbenchSnapshotPreviewRequest {
@@ -766,6 +790,7 @@ export interface PromptWorkbenchSnapshotPreviewRequest {
   broker_name?: string | null
   timeframe: string
   candle_count: number
+  candle_anchor?: string | null
   visible_count?: number | null
   tool_blocks: Record<string, unknown>[]
   calculation_blocks: Record<string, unknown>[]
@@ -811,13 +836,52 @@ export type PromptWorkbenchAnnotation =
   | PromptWorkbenchTradeAnnotation
   | PromptWorkbenchCandleMarkerAnnotation
 
+// What the agent removed this turn via op='delete' — enough fields to identify
+// which accumulated annotation to drop client-side, mirroring the shape the
+// backend (openforexai/tools/sandbox/*) emits per annotation kind.
+export type PromptWorkbenchAnnotationRemoval =
+  | { kind: 'zone'; zone_id: string }
+  | { kind: 'trade'; trade_id: string; action: 'open' | 'close' }
+  | { kind: 'candle_marker'; marker_id: string }
+
 export interface PromptWorkbenchChatResponse {
   answer: string
   total_tokens: number
   executed_tools: string[]
   annotations: PromptWorkbenchAnnotation[]
+  removed_annotation_ids?: PromptWorkbenchAnnotationRemoval[]
   snapshot_errors?: string[]
   error?: string
+}
+
+// Workbench *setup*, not session state — no candles/messages/annotations/position.
+// Reloading one re-triggers a fresh candle load via the usual pair/timeframe/etc.
+// effects; it doesn't try to restore a prior session snapshot.
+export interface PromptWorkbenchSavedConfig {
+  name: string
+  broker_name?: string | null
+  pair: string
+  timeframe: string
+  candle_count: number
+  anchor_date: string
+  annotation_color: string
+  step_size: number
+  auto_trade_status: boolean
+  left_tab: 'chat' | 'prompt'
+  tool_tab: 'analyse' | 'simulation'
+  system_prompt: string
+  llm_name: string
+  reasoning_effort: string
+  // Analyse tab — chart indicator overlays (config only, not their computed values;
+  // those get recalculated against whatever candles this config loads).
+  indicators: Record<string, unknown>[]
+  tool_blocks: Record<string, unknown>[]
+  calculation_blocks: Record<string, unknown>[]
+  assembly_transform_script: string
+}
+
+export interface PromptWorkbenchConfigLibrary {
+  configs: PromptWorkbenchSavedConfig[]
 }
 
 export interface ScriptValidateError {

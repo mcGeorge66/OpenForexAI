@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from openforexai.adapters.llm.azure import AzureOpenAILLMProvider
+from openforexai.adapters.llm.openai import OpenAILLMProvider
 
 
 def _fake_chat_completion() -> SimpleNamespace:
@@ -38,27 +38,21 @@ def _make_async_callable(value):
     return _call
 
 
-async def test_azure_provider_writes_full_transcript_records() -> None:
-    transcript_base_path = Path.cwd() / ".tmp" / f"azure_llm_transcript_{uuid4().hex}.log"
-    transcript_base_path.parent.mkdir(parents=True, exist_ok=True)
+async def test_provider_writes_full_transcript_records(tmp_path: Path) -> None:
+    transcript_base_path = tmp_path / f"llm_transcript_{uuid4().hex}.log"
 
-    provider = AzureOpenAILLMProvider.__new__(AzureOpenAILLMProvider)
-    provider._deployment = "gpt-5-mini"
-    provider._model = "gpt-5-mini"
-    provider._retry_attempts = 1
-    provider._retry_base_delay = 0.0
-    provider._default_temperature = None
-    provider._default_max_tokens = 512
-    provider._reasoning_effort = None
-    provider._verbosity = None
-    provider._debug_diagnostics_context = {"agent_id": "OXS_T-EURUSD-AA-ANLYS", "turn": 6}
-    provider._debug_diagnostics_callback = None
-    provider._transcript_enabled = True
-    provider._transcript_base_path = transcript_base_path
-    provider._transcript_last_date = None
-    provider._transcript_max_files = 10
-    import asyncio
-    provider._transcript_lock = asyncio.Lock()
+    # Built through the real from_config path (not __new__ + attribute stuffing)
+    # so config-parsing bugs would actually surface here — only the SDK client
+    # itself is swapped for a fake.
+    provider = OpenAILLMProvider.from_config({
+        "api_key": "test-key",
+        "model": "gpt-5-mini",
+        "retry_attempts": 1,
+        "retry_base_delay": 0.0,
+        "max_tokens": 512,
+        "transcript_enabled": True,
+        "transcript_path": str(transcript_base_path),
+    })
     provider._client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=SimpleNamespace(
@@ -77,9 +71,8 @@ async def test_azure_provider_writes_full_transcript_records() -> None:
     transcript_path = provider._today_transcript_path()
     text = transcript_path.read_text(encoding="utf-8")
     assert "sender: openforexai" in text
-    assert "receiver: azure_openai" in text
-    assert "sender: azure_openai" in text
+    assert "receiver: llm_provider" in text
+    assert "sender: llm_provider" in text
     assert "receiver: openforexai" in text
     assert '"messages":[{"role":"system","content":"system prompt"},{"role":"user","content":"hello"}]' in text
     assert '"content":"plain response"' in text
-    transcript_path.unlink(missing_ok=True)

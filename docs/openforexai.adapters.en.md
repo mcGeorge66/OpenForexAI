@@ -12,8 +12,9 @@ adapters/
 │   ├── __init__.py      # Self-registration of all LLM adapters
 │   ├── base.py          # Shared retry decorator (llm_retry)
 │   ├── anthropic.py     # Anthropic Claude (native tool_use API)
-│   ├── openai.py        # OpenAI GPT models
-│   └── azure.py         # Azure OpenAI Service
+│   ├── openai.py        # OpenAI-compatible: OpenAI, Azure AI Foundry (v1, via base_url), any OpenAI-compatible API
+│   ├── lmstudio.py      # LM Studio (local) — subclasses openai.py
+│   └── ollama.py        # Ollama (local) — subclasses openai.py
 ├── brokers/
 │   ├── __init__.py      # Self-registration of all broker adapters
 │   ├── base.py          # BrokerBase — shared M5 streaming + account polling
@@ -36,11 +37,13 @@ All adapters register themselves at **import time** via `PluginRegistry`. This h
 from openforexai.registry.plugin_registry import PluginRegistry
 from openforexai.adapters.llm.anthropic import AnthropicLLMProvider
 from openforexai.adapters.llm.openai import OpenAILLMProvider
-from openforexai.adapters.llm.azure import AzureOpenAILLMProvider
+from openforexai.adapters.llm.lmstudio import LMStudioLLMProvider
+from openforexai.adapters.llm.ollama import OllamaLLMProvider
 
 PluginRegistry.register_llm_provider("anthropic", AnthropicLLMProvider)
 PluginRegistry.register_llm_provider("openai", OpenAILLMProvider)
-PluginRegistry.register_llm_provider("azure_openai", AzureOpenAILLMProvider)
+PluginRegistry.register_llm_provider("lmstudio", LMStudioLLMProvider)
+PluginRegistry.register_llm_provider("ollama", OllamaLLMProvider)
 ```
 
 The `bootstrap.py` then creates live instances via `adapter_class.from_config(cfg)`.
@@ -83,15 +86,18 @@ All adapters accept tools in the internal **Anthropic-style** `input_schema` for
 
 ### `openai.py`
 
-- Uses the OpenAI Python SDK
+- Uses the plain OpenAI Python SDK client (`AsyncOpenAI`), pointed at any
+  OpenAI-compatible `base_url` — real OpenAI, Azure AI Foundry's `/openai/v1`
+  endpoint, LM Studio, Ollama, or anything else implementing the same API.
+  There is no separate Azure adapter: Azure's v1 API dropped the `api-version`
+  requirement and the need for a dedicated `AzureOpenAI` client.
 - Converts `input_schema` → OpenAI `function` / `tool` format
-- Config keys: `api_key`, `model` (e.g. `gpt-4o`)
-
-### `azure.py`
-
-- Uses the Azure OpenAI SDK (`openai` package with Azure endpoint)
-- Config keys: `api_key`, `endpoint`, `deployment_name`, `api_version`
-- Identical tool-calling protocol to OpenAI
+- Config keys: `api_key`, `model`, optional `base_url` (omit for real OpenAI;
+  set to `https://<resource>.services.ai.azure.com/openai/v1` for Azure, or a
+  local server URL for LM Studio/Ollama), `reasoning_effort`, `verbosity`,
+  `timeout_seconds`, `transcript_enabled` + `transcript_path`
+- `lmstudio.py`/`ollama.py` are thin subclasses that just set a local default
+  `base_url`
 
 ### Adding a New LLM Provider
 

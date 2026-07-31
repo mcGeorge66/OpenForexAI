@@ -50,14 +50,14 @@ Agent._wait_for_config()
   "agent_id": "OAPR1_EURUSD_AA_ANLYS",
   "config": {
     "type": "AA",
-    "llm": "azure_openai",
+    "llm": "openai_main",
     "broker": "oanda",
     "pair": "EURUSD",
     "system_prompt": "...",
     "tool_config": {...}
   },
   "modules": {
-    "llm": {"adapter": "azure_openai", "api_key": "...", "endpoint": "..."},
+    "llm": {"adapter": "openai", "api_key": "...", "base_url": "...", "model": "..."},
     "broker": {"adapter": "oanda", "api_key": "...", "account_id": "..."}
   }
 }
@@ -78,18 +78,17 @@ Loads JSON files with recursive **environment variable substitution**.
 
 ### Example
 
-`config/modules/llm/azure_openai.json5`:
+`config/modules/llm/openai.main.json5`:
 ```json
 {
-  "adapter": "azure_openai",
-  "api_key": "${AZURE_OPENAI_API_KEY}",
-  "endpoint": "${AZURE_OPENAI_ENDPOINT}",
-  "deployment": "${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}",
-  "api_version": "${AZURE_OPENAI_API_VERSION:-2024-02-01}"
+  "adapter": "openai",
+  "api_key": "${OPENAI_API_KEY}",
+  "base_url": "${OPENAI_BASE_URL:-}",
+  "model": "${OPENAI_MODEL:-gpt-4o}"
 }
 ```
 
-If `AZURE_OPENAI_DEPLOYMENT` is not set, the value `"gpt-4o"` is used. If `AZURE_OPENAI_API_KEY` is not set and no default is provided, an error is raised at startup.
+If `OPENAI_MODEL` is not set, the value `"gpt-4o"` is used. If `OPENAI_API_KEY` is not set and no default is provided, an error is raised at startup. `base_url` is optional — omit it (or leave it empty) for real OpenAI; set it to `https://<resource>.services.ai.azure.com/openai/v1` for Azure AI Foundry, or a local server's URL for LM Studio/Ollama-style deployments.
 
 Substitution is applied recursively to all string values at any nesting level.
 

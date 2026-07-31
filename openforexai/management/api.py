@@ -2426,6 +2426,14 @@ class PromptWorkbenchChatRequest(BaseModel):
     broker_name: str | None = None
     timeframe: str = "M5"
     candle_count: int = 500
+    candle_anchor: str | None = Field(
+        default=None,
+        description="ISO timestamp of the newest candle in the Workbench's currently loaded window "
+                    "(frontend: the last of the loaded `candles`, captured once at Load time). Pins "
+                    "the candle fetch to that exact frozen window instead of always pulling the "
+                    "freshest live data — the loaded chart must stay the single source of truth for "
+                    "the whole session, not silently drift as real time passes between turns.",
+    )
     visible_count: int | None = Field(
         default=None,
         description="If set, only the oldest N of the loaded candles are sent to the agent "
@@ -2458,6 +2466,19 @@ class PromptWorkbenchChatRequest(BaseModel):
     )
     calculation_blocks: list[dict[str, Any]] = Field(default_factory=list)
     assembly_transform_script: str = ""
+    indicators: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Analyse-tab chart overlays currently shown — each {name, period, timeframe, "
+                    "last_value}. Only used in the plain candle-text path (no tool_blocks): folded "
+                    "into a '## Indicators' section so the agent sees what's actually drawn on the "
+                    "chart, not just raw OHLC.",
+    )
+    swing_levels: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Swing-level price lines currently shown on the chart — each {title, price}, "
+                    "already anchored to the visible window by the frontend. Only used in the plain "
+                    "candle-text path (no tool_blocks): folded into a '## Swing Levels' section.",
+    )
     timeout: float = 120.0
 
 class PromptWorkbenchChatResponse(BaseModel):
@@ -2465,15 +2486,22 @@ class PromptWorkbenchChatResponse(BaseModel):
     total_tokens: int = 0
     executed_tools: list[str] = Field(default_factory=list)
     annotations: list[dict[str, Any]] = Field(default_factory=list)
+    removed_annotation_ids: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Annotations the agent removed this turn via op='delete' — each a "
+                    "{kind, <id field>[, action]} descriptor identifying what to drop from "
+                    "the client-side accumulated list.",
+    )
     snapshot_errors: list[str] = Field(default_factory=list)
     error: str | None = None
 
 
-@router.post("/prompt-workbench/chat", response_model=PromptWorkbenchChatResponse)
-async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
-    """Ask a free-text question against a prompt + loaded candle window, with tools."""
-    if _bus is None or _repository is None:
-        raise HTTPException(status_code=503, detail="System not ready")
+async def _build_prompt_workbench_context(req: PromptWorkbenchChatRequest) -> dict[str, Any]:
+    """Gather candles/indicators/swing-levels and build the exact `user_message` text
+    /prompt-workbench/chat sends the agent. Shared with /prompt-workbench/context-preview
+    so the "what does the LLM actually see" tab can never drift from what a real chat
+    turn sends — both call this one function.
+    """
     if _data_container is None:
         raise HTTPException(status_code=503, detail="DataContainer not available")
 
@@ -2489,8 +2517,20 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
 
     tf = req.timeframe.upper().strip()
     limit = max(1, min(req.candle_count, 2000))
+    # candle_anchor pins this fetch to the exact window the Workbench chart already
+    # has loaded. Without it, DataContainer.get_candles(start=None) triggers a live
+    # gap-repair fetch on every single turn — the candle set (and every #N the agent
+    # numbers) would silently drift forward as real time passes between messages,
+    # even though the chart on screen never changes. The loaded chart must stay the
+    # one source of truth for the whole session, not a snapshot that quietly ages.
+    anchor_dt: datetime | None = None
+    if req.candle_anchor:
+        try:
+            anchor_dt = datetime.fromisoformat(req.candle_anchor)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid candle_anchor timestamp: {req.candle_anchor!r}") from None
     candles = await _data_container.get_candles(
-        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit,
+        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit, start=anchor_dt,
     )
     total = len(candles)
     visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
@@ -2508,12 +2548,25 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         }
         for i, c in enumerate(visible)
     }
+    candle_dicts = [
+        {"number": total - i, **candle_index_map[total - i]}
+        for i, c in enumerate(visible)
+    ]
     candle_lines = [
         f"#{total - i} {c.timestamp.isoformat()} O={c.open} H={c.high} L={c.low} C={c.close}"
         for i, c in enumerate(visible)
     ]
     candle_block = "\n".join(candle_lines) if candle_lines else "(no candles loaded)"
 
+    # The boundary of what the agent is currently allowed to see — the newest of the
+    # *visible* (possibly Simulation-revealed) candles, never the newest overall.
+    # Reused below both for the tool_blocks Snapshot pipeline and as a forced (LLM
+    # can't override) `start` argument on any candle-consuming tool the agent calls
+    # directly, so a direct calculate_indicator call can't compute over live/future
+    # data the chart isn't currently showing.
+    last_visible = visible[-1] if visible else None
+
+    snapshot: dict[str, Any] | None = None
     snapshot_errors: list[str] = []
     if req.tool_blocks:
         # Simulation tab with a configured Snapshot pipeline: the agent gets the
@@ -2522,7 +2575,6 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         # last visible candle so tool_blocks (calculate_indicator etc.) resolve
         # historically instead of against live/current data.
         from openforexai.agents.analysis_snapshot import build_analysis_snapshot
-        last_visible = visible[-1] if visible else None
         trigger_payload = {
             "candle": {
                 "timestamp": last_visible.timestamp.isoformat(),
@@ -2543,6 +2595,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
             profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
             repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
             start=last_visible.timestamp.isoformat() if last_visible is not None else None,
+            blocklist="prompt_workbench",
         )
         snapshot_text = json.dumps(snapshot.get("assembled") or snapshot, default=str, indent=2)
         errors_block = f"\n=== Snapshot errors ===\n{chr(10).join(snapshot_errors)}\n" if snapshot_errors else ""
@@ -2551,10 +2604,55 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
             f"===\n{snapshot_text}\n=== End snapshot ==={errors_block}\n{req.question}"
         )
     else:
+        # Analyse-tab chart overlays — folded in here (not just used for chart
+        # drawing) so the agent actually sees what's visually shown, not just raw
+        # OHLC. Both sections are pre-computed client-side (indicators via
+        # calculate_indicator, swing levels via get_swing_levels already anchored
+        # to this same visible window) and passed through as-is.
+        indicator_lines = [
+            f"- {ind.get('name')}({ind.get('period')}) [{ind.get('timeframe')}]: {ind.get('last_value')}"
+            for ind in req.indicators
+        ]
+        indicators_section = f"\n\n## Indicators\n{chr(10).join(indicator_lines)}" if indicator_lines else ""
+        swing_lines_fmt = [f"- {sw.get('title')}: {sw.get('price')}" for sw in req.swing_levels]
+        swing_section = f"\n\n## Swing Levels\n{chr(10).join(swing_lines_fmt)}" if swing_lines_fmt else ""
         user_message = (
             f"=== Loaded candles ({req.pair.upper()} {tf}, {len(visible)} of {total} candles visible, "
-            f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ===\n\n{req.question}"
+            f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ==="
+            f"{indicators_section}{swing_section}\n\n{req.question}"
         )
+
+    return {
+        "short_name": short_name,
+        "tf": tf,
+        "candles": candles,
+        "candle_dicts": candle_dicts,
+        "total": total,
+        "visible_count": visible_count,
+        "visible": visible,
+        "candle_index_map": candle_index_map,
+        "last_visible": last_visible,
+        "snapshot": snapshot,
+        "snapshot_errors": snapshot_errors,
+        "user_message": user_message,
+    }
+
+
+@router.post("/prompt-workbench/chat", response_model=PromptWorkbenchChatResponse)
+async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
+    """Ask a free-text question against a prompt + loaded candle window, with tools."""
+    if _bus is None or _repository is None:
+        raise HTTPException(status_code=503, detail="System not ready")
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    ctx = await _build_prompt_workbench_context(req)
+    short_name = ctx["short_name"]
+    tf = ctx["tf"]
+    candle_index_map = ctx["candle_index_map"]
+    last_visible = ctx["last_visible"]
+    snapshot_errors = ctx["snapshot_errors"]
+    user_message = ctx["user_message"]
 
     from openforexai.registry.runtime_registry import RuntimeRegistry
     llm_name = req.llm_name
@@ -2612,11 +2710,26 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
             extra={
                 "candle_index_map": candle_index_map,
                 "workbench_annotations": [],
+                "workbench_removed_annotation_ids": [],
                 "existing_annotations": req.existing_annotations,
             },
         )
+        # Force (not just default) `start` on candle-consuming tools the agent can call
+        # directly during chat — forced_arguments overrides whatever the LLM supplies
+        # and is hidden from its tool spec (ToolDispatcher._merged_arguments /
+        # _spec_with_forced_arguments_hidden), so there's no way for it to accidentally
+        # or deliberately pull live/future data outside the frozen, visible window.
+        pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
+        forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
         agent._tool_dispatcher = ToolDispatcher(
-            DEFAULT_REGISTRY, tool_context, {"allowed_tools": req.allowed_tools},
+            DEFAULT_REGISTRY, tool_context, {
+                "allowed_tools": req.allowed_tools,
+                "forced_arguments": {
+                    "calculate_indicator": forced_start_args,
+                    "get_candles": forced_start_args,
+                    "get_swing_levels": forced_start_args,
+                },
+            },
         )
         history = [{"role": m.role, "content": m.content} for m in req.history]
         final_text, total_tokens, executed_tool_names = await asyncio.wait_for(
@@ -2626,6 +2739,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         return PromptWorkbenchChatResponse(
             answer=final_text, total_tokens=total_tokens, executed_tools=executed_tool_names,
             annotations=tool_context.extra.get("workbench_annotations", []),
+            removed_annotation_ids=tool_context.extra.get("workbench_removed_annotation_ids", []),
             snapshot_errors=snapshot_errors,
         )
     except TimeoutError:
@@ -2636,11 +2750,59 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         _bus.unregister_agent(temp_agent_id)
 
 
+class PromptWorkbenchContextPreviewResponse(BaseModel):
+    mode: str = Field(description="'snapshot' when a Simulation tool_blocks profile is configured, else 'candles'.")
+    pair: str
+    timeframe: str
+    total_candles: int
+    visible_candles: int
+    candles: list[dict[str, Any]] = Field(default_factory=list)
+    indicators: list[dict[str, Any]] = Field(default_factory=list)
+    swing_levels: list[dict[str, Any]] = Field(default_factory=list)
+    snapshot: dict[str, Any] | None = None
+    snapshot_errors: list[str] = Field(default_factory=list)
+    system_prompt: str
+    question: str
+    user_message: str = Field(description="The exact text /prompt-workbench/chat would send as the agent's user message.")
+
+
+@router.post("/prompt-workbench/context-preview", response_model=PromptWorkbenchContextPreviewResponse)
+async def prompt_workbench_context_preview(req: PromptWorkbenchChatRequest) -> PromptWorkbenchContextPreviewResponse:
+    """Preview exactly what the agent would receive for this request — no LLM call.
+
+    Backs the Workbench's "LLM Context" tab. Reuses the same context-building
+    function /prompt-workbench/chat uses, so what this shows can never drift
+    from what a real turn actually sends.
+    """
+    if req.tool_blocks and (_bus is None or _repository is None):
+        raise HTTPException(status_code=503, detail="System not ready")
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    ctx = await _build_prompt_workbench_context(req)
+    return PromptWorkbenchContextPreviewResponse(
+        mode="snapshot" if ctx["snapshot"] is not None else "candles",
+        pair=req.pair.upper(),
+        timeframe=ctx["tf"],
+        total_candles=ctx["total"],
+        visible_candles=ctx["visible_count"],
+        candles=ctx["candle_dicts"],
+        indicators=req.indicators,
+        swing_levels=req.swing_levels,
+        snapshot=ctx["snapshot"],
+        snapshot_errors=ctx["snapshot_errors"],
+        system_prompt=req.system_prompt,
+        question=req.question,
+        user_message=ctx["user_message"],
+    )
+
+
 class PromptWorkbenchSnapshotPreviewRequest(BaseModel):
     pair: str
     broker_name: str | None = None
     timeframe: str = "M5"
     candle_count: int = 500
+    candle_anchor: str | None = None
     visible_count: int | None = None
     tool_blocks: list[dict[str, Any]] = Field(default_factory=list)
     calculation_blocks: list[dict[str, Any]] = Field(default_factory=list)
@@ -2675,8 +2837,16 @@ async def prompt_workbench_snapshot_preview(
 
     tf = req.timeframe.upper().strip()
     limit = max(1, min(req.candle_count, 2000))
+    # See /prompt-workbench/chat — pins this fetch to the chart's already-loaded
+    # window instead of a fresh live gap-repair fetch on every preview.
+    anchor_dt: datetime | None = None
+    if req.candle_anchor:
+        try:
+            anchor_dt = datetime.fromisoformat(req.candle_anchor)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid candle_anchor timestamp: {req.candle_anchor!r}") from None
     candles = await _data_container.get_candles(
-        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit,
+        broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit, start=anchor_dt,
     )
     total = len(candles)
     visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
@@ -2706,6 +2876,7 @@ async def prompt_workbench_snapshot_preview(
         profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
         repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
         start=last_visible.timestamp.isoformat(),
+        blocklist="prompt_workbench",
     )
     return PromptWorkbenchSnapshotPreviewResponse(snapshot=snapshot, errors=errors)
 
@@ -4239,8 +4410,9 @@ async def save_information_readme_text(content: str = Body(..., embed=False)) ->
 
 # Known config file names that can be served
 _CONFIG_FILES: dict[str, str | None] = {
-    "agent_tools":    None,  # resolved under project root config/RunTime/
-    "event_routing":  None,
+    "agent_tools":                 None,  # resolved under project root config/RunTime/
+    "event_routing":               None,
+    "snapshot_tool_blocklists":    None,
 }
 
 # event_schemas.json5 lives directly under config/ (not RunTime/)
@@ -4510,6 +4682,42 @@ async def save_snippet_library(scope: str, content: dict[str, Any]) -> dict:
     lib_path = _project_root() / "config" / f"snippet_library_{scope}.json5"
     _write_json_file(lib_path, content)
     return {"status": "saved", "file": f"config/snippet_library_{scope}.json5"}
+
+
+# ── Prompt Workbench — saved configs ─────────────────────────────────────────
+# Same shape/pattern as prompt/snippet libraries: one file, whole-array GET/PUT.
+# There's no dedicated delete endpoint — the frontend removes the entry
+# client-side and PUTs the remaining array back, exactly like the library
+# modals already do.
+
+_PROMPT_WORKBENCH_CONFIGS_PATH_REL = Path("config") / "prompt_workbench_configs.json5"
+
+
+@router.get("/config/prompt-workbench-configs")
+async def get_prompt_workbench_configs() -> dict:
+    """Return saved Prompt Workbench configs (setup, not session state).
+
+    Returns an empty list when the file does not yet exist so the frontend can
+    start writing entries without a manual bootstrap step.
+    """
+    cfg_path = _project_root() / _PROMPT_WORKBENCH_CONFIGS_PATH_REL
+    if not cfg_path.exists():
+        return {"configs": []}
+    try:
+        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"prompt_workbench_configs.json5 contains invalid JSON5: {exc}",
+        )
+
+
+@router.put("/config/prompt-workbench-configs")
+async def save_prompt_workbench_configs(content: dict[str, Any]) -> dict:
+    """Persist the full list of saved Prompt Workbench configs."""
+    cfg_path = _project_root() / _PROMPT_WORKBENCH_CONFIGS_PATH_REL
+    _write_json_file(cfg_path, content)
+    return {"status": "saved", "file": str(_PROMPT_WORKBENCH_CONFIGS_PATH_REL)}
 
 
 @router.get("/config/modules/{module_type}")

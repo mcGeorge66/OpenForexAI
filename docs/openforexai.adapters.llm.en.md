@@ -11,8 +11,9 @@ Concrete implementations of `AbstractLLMProvider` for all supported LLM services
 | `__init__.py` | — | Self-registration of all adapters |
 | `base.py` | — | Shared `llm_retry` decorator |
 | `anthropic.py` | Anthropic Claude | Anthropic Python SDK |
-| `openai.py` | OpenAI GPT | OpenAI Python SDK |
-| `azure.py` | Azure OpenAI | Azure OpenAI (via OpenAI SDK) |
+| `openai.py` | OpenAI, Azure AI Foundry (v1), any OpenAI-compatible API | OpenAI Python SDK (`base_url` override) |
+| `lmstudio.py` | LM Studio (local) | Subclasses `openai.py` with a local default `base_url` |
+| `ollama.py` | Ollama (local) | Subclasses `openai.py` with a local default `base_url` |
 
 ---
 
@@ -22,9 +23,10 @@ All adapters register at import time:
 
 ```python
 # adapters/llm/__init__.py
-PluginRegistry.register_llm_provider("anthropic",    AnthropicLLMProvider)
-PluginRegistry.register_llm_provider("openai",       OpenAILLMProvider)
-PluginRegistry.register_llm_provider("azure_openai", AzureOpenAILLMProvider)
+PluginRegistry.register_llm_provider("anthropic", AnthropicLLMProvider)
+PluginRegistry.register_llm_provider("openai",    OpenAILLMProvider)
+PluginRegistry.register_llm_provider("lmstudio",  LMStudioLLMProvider)
+PluginRegistry.register_llm_provider("ollama",    OllamaLLMProvider)
 ```
 
 ---
@@ -127,25 +129,29 @@ messages = [
 }
 ```
 
----
-
-## `azure.py` — Azure OpenAI
-
-Identical protocol to OpenAI but connects to an Azure-hosted deployment.
-
-### Config Keys
+There is no separate Azure adapter. Azure AI Foundry's `/openai/v1` API is fully
+OpenAI-compatible (no `api-version` query param, no `AzureOpenAI` SDK client) —
+point `base_url` at your resource and use the deployment name as `model`:
 
 ```json
 {
-  "adapter": "azure_openai",
-  "api_key": "${AZURE_OPENAI_API_KEY}",
-  "endpoint": "${AZURE_OPENAI_ENDPOINT}",
-  "deployment": "${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}",
-  "api_version": "${AZURE_OPENAI_API_VERSION:-2024-02-01}"
+  "adapter": "openai",
+  "api_key": "${AZURE_API_KEY}",
+  "base_url": "https://<resource>.services.ai.azure.com/openai/v1",
+  "model": "${AZURE_DEPLOYMENT}",
+  "reasoning_effort": "medium"
 }
 ```
 
-`deployment` is the name of your Azure OpenAI deployment (not the model name — those are set in Azure Portal).
+Note: some models (confirmed for GPT-5-family Azure deployments) reject function
+tools combined with `reasoning_effort` on `/chat/completions` — the adapter drops
+`reasoning_effort` automatically whenever tools are present in the request rather
+than failing, since tool-calling is core to the agent loop.
+
+Optional keys shared by every provider on this adapter (OpenAI, Azure, LM Studio,
+Ollama): `base_url`, `timeout_seconds` (default 30), `sdk_max_retries` (default 0),
+`reasoning_effort`, `verbosity`, `transcript_enabled` + `transcript_path` (writes a
+dated, size-capped forensic log of every request/response).
 
 ---
 

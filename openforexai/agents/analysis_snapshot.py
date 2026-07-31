@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import json5
 import math
 import statistics
 from decimal import Decimal
@@ -19,6 +20,27 @@ from decimal import Decimal
 from openforexai.models.market import Candle
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.base import ToolContext
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_SNAPSHOT_TOOL_BLOCKLISTS_PATH = _PROJECT_ROOT / "config" / "RunTime" / "snapshot_tool_blocklists.json5"
+
+
+def _snapshot_tool_blocklist(name: str) -> frozenset[str]:
+    """Tools that must never execute for the given tool_blocks context.
+
+    Read fresh from config/RunTime/snapshot_tool_blocklists.json5 on every call
+    (same "no restart needed" convention as event_routing/agent_tools) — a
+    missing file, missing key, or invalid JSON5 fails safe to an empty set
+    rather than raising, but that only ever makes the gate less restrictive, so
+    treat a broken file as a config bug to fix, not a safe fallback to rely on.
+    """
+    try:
+        data = json5.loads(_SNAPSHOT_TOOL_BLOCKLISTS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    raw = data.get(name) if isinstance(data, dict) else None
+    return frozenset(str(t) for t in raw) if isinstance(raw, list) else frozenset()
+
 
 SNAPSHOT_SCHEMA_VERSION = "1.1"
 DEFAULT_DECISION_INPUT_PREFIX = (
@@ -392,6 +414,7 @@ async def _execute_tool_blocks(
     short_timeframe: str = "M5",
     long_timeframe: str = "H1",
     start: str | None = None,
+    blocklist: str = "snapshot_designer",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     context = ToolContext(
         agent_id=agent_id,
@@ -401,6 +424,7 @@ async def _execute_tool_blocks(
         event_bus=event_bus,
     )
     errors: list[str] = []
+    blocked_tools = _snapshot_tool_blocklist(blocklist)
 
     # Phase 1: resolve metadata for every enabled block in original order.
     # Each entry: (block_dict, block_id, tool_name, output_key, arguments, tool_or_None)
@@ -429,6 +453,9 @@ async def _execute_tool_blocks(
 
         if not tool_name:
             errors.append(f"{block_id}:missing_tool_name")
+            continue
+        if tool_name in blocked_tools:
+            errors.append(f"{block_id}:blocked_tool:{tool_name}")
             continue
         tool = DEFAULT_REGISTRY.get(tool_name)
         if tool is None:
@@ -803,6 +830,7 @@ async def build_analysis_snapshot(
     monitoring_bus: Any = None,
     event_bus: Any = None,
     start: str | None = None,
+    blocklist: str = "snapshot_designer",
 ) -> tuple[dict[str, Any], list[str]]:
     from time import perf_counter as _perf_counter
     _snap_started = _perf_counter()
@@ -833,6 +861,7 @@ async def build_analysis_snapshot(
             monitoring_bus=monitoring_bus,
             event_bus=event_bus,
             start=start,
+            blocklist=blocklist,
         )
         if event_bus is not None:
             from openforexai.models.messaging import AgentMessage, EventType
@@ -877,6 +906,7 @@ async def _build_analysis_snapshot_inner(
     monitoring_bus: Any = None,
     event_bus: Any = None,
     start: str | None = None,
+    blocklist: str = "snapshot_designer",
 ) -> tuple[dict[str, Any], list[str]]:
     profile = profile if isinstance(profile, dict) else {}
     pair = pair.upper()
@@ -902,6 +932,7 @@ async def _build_analysis_snapshot_inner(
         short_timeframe=short_timeframe,
         long_timeframe=long_timeframe,
         start=start,
+        blocklist=blocklist,
     )
 
     errors: list[str] = list(tool_errors)

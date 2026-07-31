@@ -62,13 +62,13 @@ Note: `_data_containers` and `_repositories` share the same internal dict — `A
 Holds live adapter **instances** created during bootstrap. Unlike `PluginRegistry` (which holds classes), `RuntimeRegistry` holds the actual connected objects.
 
 ```python
-RuntimeRegistry.set_llm("azure_openai", azure_llm_instance)
-RuntimeRegistry.get_llm("azure_openai")          # → live AzureOpenAILLMProvider
+RuntimeRegistry.set_llm("openai_main", openai_llm_instance)
+RuntimeRegistry.get_llm("openai_main")           # → live OpenAILLMProvider
 
 RuntimeRegistry.set_broker("oanda", oanda_instance)
 RuntimeRegistry.get_broker("oanda")              # → live OANDABroker
 
-RuntimeRegistry.list_llms()                      # → ["azure_openai"]
+RuntimeRegistry.list_llms()                      # → ["openai_main"]
 RuntimeRegistry.list_brokers()                   # → ["oanda"]
 ```
 
@@ -81,9 +81,9 @@ bootstrap.py:
     3. import adapters.database → PluginRegistry gets SQLiteRepository
 
     4. For each LLM module in system.json5:
-          klass = PluginRegistry.get_llm_provider("azure_openai")
+          klass = PluginRegistry.get_llm_provider("openai")
           instance = klass.from_config(llm_cfg)
-          RuntimeRegistry.set_llm("azure_openai", instance)
+          RuntimeRegistry.set_llm("openai_main", instance)
 
     5. For each broker module in system.json5:
           klass = PluginRegistry.get_broker("oanda")

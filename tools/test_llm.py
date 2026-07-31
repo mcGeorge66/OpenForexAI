@@ -7,7 +7,7 @@ Usage::
 
 Examples::
 
-    python test_llm.py azure_openai
+    python test_llm.py azure_azmin
     python test_llm.py openai
 
 This script is intentionally verbose and designed for troubleshooting real-world
@@ -245,22 +245,24 @@ async def _check_tool_loop_adapter(llm) -> CheckResult:
     return result
 
 
-async def _check_azure_raw_calls(llm) -> list[CheckResult]:
-    """Azure-specific raw API probes bypassing adapter retry/fallback logic."""
+async def _check_raw_calls(llm) -> list[CheckResult]:
+    """Raw OpenAI-compatible API probes bypassing adapter retry/fallback logic
+    (works for any provider on the shared OpenAI-compatible adapter — real
+    OpenAI, Azure AI Foundry's v1 endpoint, LM Studio, Ollama)."""
     results: list[CheckResult] = []
 
-    if not hasattr(llm, "_client") or not hasattr(llm, "_deployment"):
+    if not hasattr(llm, "_client") or not hasattr(llm, "_model"):
         return results
 
     client = getattr(llm, "_client")
-    deployment = getattr(llm, "_deployment")
+    model = getattr(llm, "_model")
 
     # Raw basic completion
-    r1 = CheckResult("Azure raw chat.completions (no tools)")
+    r1 = CheckResult("Raw chat.completions (no tools)")
     t0 = time.perf_counter()
     try:
         resp = await client.chat.completions.create(
-            model=deployment,
+            model=model,
             max_completion_tokens=32,
             messages=[
                 {"role": "system", "content": "You are a test assistant."},
@@ -282,11 +284,11 @@ async def _check_azure_raw_calls(llm) -> list[CheckResult]:
     results.append(r1)
 
     # Raw tool call with forced tool choice
-    r2 = CheckResult("Azure raw chat.completions (tools, forced)")
+    r2 = CheckResult("Raw chat.completions (tools, forced)")
     t1 = time.perf_counter()
     try:
         resp = await client.chat.completions.create(
-            model=deployment,
+            model=model,
             max_completion_tokens=120,
             messages=[
                 {"role": "system", "content": "You are a test assistant."},
@@ -362,19 +364,14 @@ async def _run_tests(name: str) -> tuple[list[CheckResult], dict[str, Any]]:
     sanity = CheckResult("Config sanity")
     adapter = str(cfg.get("adapter", "")).strip().lower()
     key = str(cfg.get("api_key", "") or "")
-    endpoint = str(cfg.get("endpoint", "") or "")
-    deployment = str(cfg.get("deployment", "") or "")
+    base_url = str(cfg.get("base_url", "") or "")
+    model = str(cfg.get("model", "") or "")
 
     missing: list[str] = []
     if not adapter:
         missing.append("adapter")
     if not key:
         missing.append("api_key")
-    if adapter == "azure":
-        if not endpoint:
-            missing.append("endpoint")
-        if not deployment:
-            missing.append("deployment")
 
     if missing:
         sanity.status = "FAIL"
@@ -384,9 +381,8 @@ async def _run_tests(name: str) -> tuple[list[CheckResult], dict[str, Any]]:
 
     sanity.details.extend([
         f"api_key(masked)={_mask_secret(key)}",
-        f"endpoint={endpoint or '<n/a>'}",
-        f"deployment={deployment or '<n/a>'}",
-        f"api_version={cfg.get('api_version', '<n/a>')}",
+        f"base_url={base_url or '<default: api.openai.com>'}",
+        f"model={model or '<n/a>'}",
     ])
 
     if key and "${" in key:
@@ -417,8 +413,8 @@ async def _run_tests(name: str) -> tuple[list[CheckResult], dict[str, Any]]:
     checks.append(await _check_complete(llm))
     checks.append(await _check_tool_loop_adapter(llm))
 
-    # Azure deep probes (bypass adapter behavior)
-    checks.extend(await _check_azure_raw_calls(llm))
+    # Raw deep probes (bypass adapter retry/fallback behavior)
+    checks.extend(await _check_raw_calls(llm))
 
     return checks, cfg
 
@@ -432,7 +428,7 @@ def main() -> None:
     )
     parser.add_argument(
         "llm_module_name",
-        help="Module name from config/modules/llm/<name>.json5 (e.g. azure_openai)",
+        help="Module name from config/modules/llm/<name>.json5 (e.g. azure_azmin)",
     )
     args = parser.parse_args()
     name = args.llm_module_name

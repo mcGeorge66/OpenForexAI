@@ -59,3 +59,7 @@ tools/*.jsonl
 
 config/modules/llm/lmstudio.oss20b.json5
 config/modules/llm/lmstudio.quen25.json5
+
+# Prompt Workbench saved configs — personal, user-generated presets (system
+# prompts etc.), analogous to the personal llm module configs above.
+config/prompt_workbench_configs.json5

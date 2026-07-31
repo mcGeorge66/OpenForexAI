@@ -1,7 +1,7 @@
 {
   // LLM module configuration
   // This file is managed by the module owner. The system only loads it by name.
-  "adapter":         "anthropic|oanda|azure",
+  "adapter":         "anthropic|openai|ollama|lmstudio",
   "api_key":         "${LLM_API_KEY}",
   "model":           "${LLM_MODEL:-claude-opus-4-6}",
   "temperature":     0.1,

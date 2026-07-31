@@ -27,22 +27,30 @@
  * revealed). The agent's visible window is always candles `total`..`position`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, RefreshCcw, Square, StepForward, Trash2 } from 'lucide-react'
+import { BookOpen, Check, Copy, Play, RefreshCcw, RotateCcw, Square, StepForward, Trash2 } from 'lucide-react'
 import { LineStyle, type UTCTimestamp } from 'lightweight-charts'
+import { JsonView, darkStyles } from 'react-json-view-lite'
+import 'react-json-view-lite/dist/index.css'
 import {
   api,
   type CalculationBlock,
   type CandleBar,
   type InitialConsoleModuleItem,
   type PromptWorkbenchAnnotation,
+  type PromptWorkbenchAnnotationRemoval,
+  type PromptWorkbenchChatResponse,
+  type PromptWorkbenchContextPreviewResponse,
+  type PromptWorkbenchSavedConfig,
   type ToolInfo,
 } from '@/api/client'
+import { kbImport } from '@/knowledgebase/kbImport'
 import {
   ForexChart,
   type ForexChartHandle,
   type ForexChartMarker,
   type ForexChartOscillator,
   type ForexChartOverlayLine,
+  type ForexChartPriceLine,
 } from '@/components/charts/ForexChart'
 import type { Drawing } from '@/components/charts/drawing/types'
 import {
@@ -52,6 +60,7 @@ import {
   type IndicatorInstance,
   type IndicatorName,
 } from '@/components/charts/IndicatorsPanel'
+import { SwingLevelsPanel, type SwingResult } from '@/components/charts/SwingLevelsPanel'
 import { PlainTextMonacoEditor } from '@/components/common/PlainTextMonacoEditor'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
 import {
@@ -79,11 +88,62 @@ function pipSize(price: number): number {
 // different questions/runs stay visually distinguishable on the chart.
 type TaggedAnnotation = PromptWorkbenchAnnotation & { _color: string }
 
+// Identifies an annotation for upsert-by-id merging: a `change`/`new` call with
+// the same key replaces the previous entry instead of piling up next to it. A
+// trade's open and close legs share a trade_id but are corrected independently,
+// hence the `action` suffix — everything else has exactly one record per id.
+function annotationKey(a: { kind: string }): string {
+  if (a.kind === 'zone') return `zone:${(a as Extract<PromptWorkbenchAnnotation, { kind: 'zone' }>).zone_id}`
+  if (a.kind === 'candle_marker') return `candle_marker:${(a as Extract<PromptWorkbenchAnnotation, { kind: 'candle_marker' }>).marker_id}`
+  const trade = a as Extract<PromptWorkbenchAnnotation, { kind: 'trade' }>
+  return `trade:${trade.trade_id}:${trade.action}`
+}
+
+function removalKey(r: PromptWorkbenchAnnotationRemoval): string {
+  if (r.kind === 'zone') return `zone:${r.zone_id}`
+  if (r.kind === 'candle_marker') return `candle_marker:${r.marker_id}`
+  return `trade:${r.trade_id}:${r.action}`
+}
+
+// Analyse-tab indicator config for a saved Workbench Config — deliberately excludes
+// `data`/`bbData` (computed values, recalculated fresh against whatever candles the
+// config loads) and `id` (regenerated on load).
+function serializeIndicatorInstance(ind: IndicatorInstance): Record<string, unknown> {
+  return {
+    name: ind.name,
+    period: ind.period,
+    timeframe: ind.timeframe,
+    color: ind.color,
+    line_style: ind.lineStyle,
+    line_width: ind.lineWidth,
+    visible: ind.visible,
+    ...(ind.smoothPeriod !== undefined ? { smooth_period: ind.smoothPeriod } : {}),
+  }
+}
+
+function normalizeIndicatorInstance(raw: Record<string, unknown>, index: number): IndicatorInstance | null {
+  const name = typeof raw.name === 'string' ? raw.name as IndicatorName : null
+  const def = name ? INDICATOR_DEFS.find(d => d.name === name) : undefined
+  if (!name || !def) return null
+  return {
+    id: `ind_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    period: typeof raw.period === 'number' ? raw.period : def.defaultPeriod,
+    timeframe: typeof raw.timeframe === 'string' ? raw.timeframe : 'M5',
+    color: typeof raw.color === 'string' ? raw.color : DEFAULT_COLORS[index % DEFAULT_COLORS.length],
+    lineStyle: typeof raw.line_style === 'number' ? raw.line_style : LineStyle.Solid,
+    lineWidth: typeof raw.line_width === 'number' ? raw.line_width : 1,
+    visible: typeof raw.visible === 'boolean' ? raw.visible : true,
+    data: [],
+    ...(typeof raw.smooth_period === 'number' ? { smoothPeriod: raw.smooth_period } : {}),
+  }
+}
+
 const TIMEFRAMES = Object.keys(TF_MINUTES).filter(tf => tf !== 'M1')
 const REASONING_EFFORTS = ['none', 'low', 'medium', 'high']
 const DEFAULT_ANNOTATION_COLOR = '#f59e0b'
 
-type ToolTab = 'analyse' | 'simulation'
+type ToolTab = 'analyse' | 'simulation' | 'context'
 
 interface ChatMessage {
   id: string
@@ -94,6 +154,25 @@ interface ChatMessage {
 
 function now(): string {
   return new Date().toISOString().replace('T', ' ').substring(11, 19) + ' UTC'
+}
+
+function CopyButton({ getText }: { getText: () => string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      title="Copy to clipboard"
+      onClick={() => {
+        void navigator.clipboard.writeText(getText()).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+      className="inline-flex items-center text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+    </button>
+  )
 }
 
 function sleep(ms: number): Promise<void> {
@@ -111,11 +190,29 @@ export function PromptWorkbench() {
   const [pair, setPair] = useState('')
   const [timeframe, setTimeframe] = useState('M5')
   const [candleCount, setCandleCount] = useState(500)
+  // Decoupled from candleCount itself — candleCount drives loadCandles (a live
+  // network request), so committing on every keystroke would re-fetch on each
+  // digit typed. Only commit on blur/Enter.
+  const [candleCountInput, setCandleCountInput] = useState('500')
+  useEffect(() => { setCandleCountInput(String(candleCount)) }, [candleCount])
+  const commitCandleCount = () => {
+    const parsed = Number(candleCountInput)
+    const clamped = Math.max(20, Math.min(2000, Number.isFinite(parsed) && parsed > 0 ? parsed : candleCount))
+    setCandleCount(clamped)
+    setCandleCountInput(String(clamped))
+  }
   const [anchorDate, setAnchorDate] = useState('')
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const chartRef = useRef<ForexChartHandle | null>(null)
+
+  // ISO timestamp of the newest candle in the currently loaded window, captured once
+  // per Load — sent with every chat/step/preview request so the backend re-derives
+  // this exact frozen window instead of a fresh live fetch. The loaded chart is the
+  // single source of truth for the whole session; it must never silently drift as
+  // real time passes between messages, whether or not an Anchor date was set.
+  const candleAnchorRef = useRef<string | null>(null)
 
   // ── Draggable divider between the chart and the bottom 3-column area ────
   const [chartHeight, setChartHeight] = useState(260)
@@ -269,6 +366,23 @@ export function PromptWorkbench() {
     })
   }
 
+  // ── Agent-drawn annotation state — declared before loadCandles, which calls
+  // clearAnnotations() on every fresh candle set (stale zones/trade lines from
+  // a previous load no longer apply).
+  const [annotations, setAnnotations] = useState<TaggedAnnotation[]>([])
+  const renderedDrawingIdsRef = useRef<Set<string>>(new Set())
+  const renderedDrawingContentRef = useRef<Map<string, string>>(new Map())
+  const [annotationColor, setAnnotationColor] = useState(DEFAULT_ANNOTATION_COLOR)
+
+  const clearAnnotations = useCallback(() => {
+    for (const drawing of chartRef.current?.getDrawings() ?? []) {
+      chartRef.current?.removeDrawing(drawing.id)
+    }
+    renderedDrawingIdsRef.current.clear()
+    renderedDrawingContentRef.current.clear()
+    setAnnotations([])
+  }, [])
+
   const loadCandles = useCallback(async () => {
     if (!pair) return
     setLoading(true)
@@ -277,6 +391,9 @@ export function PromptWorkbench() {
       const start = anchorDate ? `${anchorDate}T23:59:59` : null
       const data = await api.getCandles(pair, timeframe, candleCount, brokerName, start)
       setCandles(data)
+      candleAnchorRef.current = data.length > 0
+        ? data.reduce((newest, c) => c.timestamp > newest ? c.timestamp : newest, data[0].timestamp)
+        : null
       setPosition(0) // fully revealed by default; lower it to set up a simulation start point
       const updated = await recomputeIndicators(data, indicatorsRef.current)
       setIndicators(updated)
@@ -287,7 +404,7 @@ export function PromptWorkbench() {
     } finally {
       setLoading(false)
     }
-  }, [pair, timeframe, candleCount, brokerName, anchorDate, recomputeIndicators])
+  }, [pair, timeframe, candleCount, brokerName, anchorDate, recomputeIndicators, clearAnnotations])
 
   useEffect(() => { void loadCandles() }, [loadCandles])
 
@@ -302,6 +419,64 @@ export function PromptWorkbench() {
   useEffect(() => { positionRef.current = position }, [position])
 
   const visibleCount = total > 0 ? Math.max(0, total - Math.min(position, total)) : 0
+
+  // ── Analyse-tab swing levels — same shared panel/tool as Chart Analysis, but
+  // ALWAYS anchored to the visible window (candles[visibleCount-1], the same
+  // boundary the rest of the Workbench already treats as "now") instead of
+  // Chart Analysis's candle-count-derived lookback against live data — the
+  // loaded chart must stay the single source of truth, not silently query live
+  // data for this one feature while everything else stays frozen.
+  const [swingEnabled, setSwingEnabled] = useState(false)
+  const [swingTf, setSwingTf] = useState('H1')
+  const [swingCount, setSwingCount] = useState(5)
+  const [swingAtrPeriod, setSwingAtrPeriod] = useState(14)
+  const [swingMinGapAtr, setSwingMinGapAtr] = useState(0.3)
+  const [swingLineWidth, setSwingLineWidth] = useState(2)
+  const [swingLineStyle, setSwingLineStyle] = useState<LineStyle>(LineStyle.Dashed)
+  const [swingPriceSource, setSwingPriceSource] = useState<'HL' | 'OC'>('HL')
+  const [swingSortBy, setSwingSortBy] = useState<'nearest' | 'prominent'>('nearest')
+  const swingSortByRef = useRef<'nearest' | 'prominent'>('nearest')
+  useEffect(() => { swingSortByRef.current = swingSortBy }, [swingSortBy])
+  const [swingLines, setSwingLines] = useState<ForexChartPriceLine[]>([])
+  const [swingLoading, setSwingLoading] = useState(false)
+
+  const loadSwingLevels = useCallback(async () => {
+    if (!pair || !swingEnabled || visibleCount === 0) { setSwingLines([]); return }
+    setSwingLoading(true)
+    try {
+      const anchor = candles[visibleCount - 1]?.timestamp
+      const chartMinutes = visibleCount * (TF_MINUTES[timeframe] ?? 5)
+      const swingLookback = Math.max(10, Math.ceil(chartMinutes / (TF_MINUTES[swingTf] ?? 60)))
+      const res = await api.executeTool('get_swing_levels', {
+        timeframe: swingTf, max_levels: swingCount, lookback: swingLookback,
+        atr_period: swingAtrPeriod, min_gap_atr: swingMinGapAtr,
+        price_source: swingPriceSource, sort_by: swingSortByRef.current,
+        ...(anchor ? { start: anchor } : {}),
+      }, null, brokerName, null, pair)
+      const result = res.result as SwingResult
+      const lines: ForexChartPriceLine[] = [
+        ...(result.highs ?? []).map(h => ({
+          price: h.price, title: `SH ${h.price.toFixed(5)}`, color: '#10b981',
+          lineStyle: swingLineStyle, lineWidth: swingLineWidth,
+        })),
+        ...(result.lows ?? []).map(l => ({
+          price: l.price, title: `SL ${l.price.toFixed(5)}`, color: '#ef4444',
+          lineStyle: swingLineStyle, lineWidth: swingLineWidth,
+        })),
+        ...(result.confluence ?? []).map(c => ({
+          price: c.price, title: `SH/SL ${c.price.toFixed(5)}`, color: '#f97316',
+          lineStyle: swingLineStyle, lineWidth: Math.min(swingLineWidth + 1, 4),
+        })),
+      ]
+      setSwingLines(lines)
+    } catch {
+      setSwingLines([])
+    } finally {
+      setSwingLoading(false)
+    }
+  }, [pair, swingEnabled, swingTf, swingCount, swingAtrPeriod, swingMinGapAtr, visibleCount, candles, timeframe, swingLineWidth, swingLineStyle, swingPriceSource, brokerName])
+
+  useEffect(() => { void loadSwingLevels() }, [loadSwingLevels])
 
   // ── Left column tab — [Chat] / [Prompt] ─────────────────────────────────
   const [leftTab, setLeftTab] = useState<'chat' | 'prompt'>('chat')
@@ -368,6 +543,7 @@ export function PromptWorkbench() {
     try {
       const resp = await api.promptWorkbenchSnapshotPreview({
         pair, broker_name: brokerName, timeframe, candle_count: candleCount, visible_count: visibleCount,
+        candle_anchor: candleAnchorRef.current,
         tool_blocks: [serializeToolBlock(block, index)],
         calculation_blocks: [],
         assembly_transform_script: '',
@@ -390,6 +566,7 @@ export function PromptWorkbench() {
     try {
       const resp = await api.promptWorkbenchSnapshotPreview({
         pair, broker_name: brokerName, timeframe, candle_count: candleCount, visible_count: visibleCount,
+        candle_anchor: candleAnchorRef.current,
         tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
         calculation_blocks: [serializeCalculationBlock(block)],
         assembly_transform_script: '',
@@ -451,22 +628,26 @@ export function PromptWorkbench() {
   // ── Agent-drawn annotations (zone_marker / trade_marker / candle_marker) ──
   // Accumulated client-side across turns — the backend keeps no session state,
   // each response only returns the annotations created during that one call.
-  const [annotations, setAnnotations] = useState<TaggedAnnotation[]>([])
-  const renderedDrawingIdsRef = useRef<Set<string>>(new Set())
-  const [annotationColor, setAnnotationColor] = useState(DEFAULT_ANNOTATION_COLOR)
-
+  // (State + clearAnnotations are declared further up, before loadCandles.)
   const tagAnnotations = useCallback(
     (list: PromptWorkbenchAnnotation[]): TaggedAnnotation[] => list.map(a => ({ ...a, _color: annotationColor })),
     [annotationColor],
   )
 
-  const clearAnnotations = useCallback(() => {
-    for (const drawing of chartRef.current?.getDrawings() ?? []) {
-      chartRef.current?.removeDrawing(drawing.id)
-    }
-    renderedDrawingIdsRef.current.clear()
-    setAnnotations([])
-  }, [])
+  // Applies one turn's worth of annotation changes: op='new'/'change' upsert by
+  // id (a 'change' with the same id replaces the previous entry in place),
+  // op='delete' drops it. Without this, correcting or removing a marking would
+  // just pile a second record next to the old one instead of fixing it.
+  const applyAnnotationUpdates = useCallback((resp: PromptWorkbenchChatResponse) => {
+    if (!resp.annotations?.length && !resp.removed_annotation_ids?.length) return
+    const removedKeys = new Set((resp.removed_annotation_ids ?? []).map(removalKey))
+    const incoming = tagAnnotations(resp.annotations ?? [])
+    const incomingKeys = new Set(incoming.map(annotationKey))
+    setAnnotations(prev => [
+      ...prev.filter(a => !removedKeys.has(annotationKey(a)) && !incomingKeys.has(annotationKey(a))),
+      ...incoming,
+    ])
+  }, [tagAnnotations])
 
   const openTrades = useMemo(() => {
     const open = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
@@ -485,7 +666,7 @@ export function PromptWorkbench() {
       position: a.action === 'open' ? 'belowBar' : 'aboveBar',
       shape: a.action === 'open' ? (a.direction === 'short' ? 'arrowDown' : 'arrowUp') : 'circle',
       color: a._color,
-      text: `${a.action}\n${a.trade_id}`,
+      text: `[${a.trade_id}] ${a.action} #${a.candle_number}`,
     })), [annotations])
 
   const candleMarkers: ForexChartMarker[] = useMemo(() => annotations
@@ -495,23 +676,41 @@ export function PromptWorkbench() {
       position: a.position === 'above' ? 'aboveBar' : 'belowBar',
       shape: a.position === 'above' ? 'arrowDown' : 'arrowUp',
       color: a._color,
-      text: a.text,
+      text: `[${a.marker_id}] #${a.candle_number} ${a.text}`,
     })), [annotations])
 
-  // Draw new zones/closed-trade lines as they arrive — DrawingManager is
-  // imperative (chartRef.addDrawing), so this only ever ADDS, never re-renders
-  // existing ones; each annotation gets a stable id so it's only drawn once.
+  // Draw/update/remove zones and closed-trade lines as annotations change —
+  // DrawingManager is imperative (chartRef.add/removeDrawing), so this diffs
+  // against what's already on the chart: unchanged content is left alone, a
+  // corrected (op='change') zone/trade is removed and redrawn, and one that
+  // dropped out of `annotations` (op='delete') is removed outright.
   useEffect(() => {
     const zonesById = new Map<string, Extract<TaggedAnnotation, { kind: 'zone' }>>()
     const opensByTradeId = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
+    const closedTradeIds = new Set<string>()
     for (const a of annotations) {
       if (a.kind === 'zone') zonesById.set(a.zone_id, a)
       else if (a.kind === 'trade' && a.action === 'open') opensByTradeId.set(a.trade_id, a)
+      else if (a.kind === 'trade' && a.action === 'close') closedTradeIds.add(a.trade_id)
+    }
+
+    // Drop drawings whose annotation no longer exists (deleted) or whose
+    // matching leg disappeared (a closed trade's line needs both legs present).
+    for (const drawingId of [...renderedDrawingIdsRef.current]) {
+      const stillWanted = drawingId.startsWith('zone_')
+        ? zonesById.has(drawingId.slice(5))
+        : drawingId.startsWith('trade_')
+          ? opensByTradeId.has(drawingId.slice(6)) && closedTradeIds.has(drawingId.slice(6))
+          : true
+      if (!stillWanted) {
+        chartRef.current?.removeDrawing(drawingId)
+        renderedDrawingIdsRef.current.delete(drawingId)
+        renderedDrawingContentRef.current.delete(drawingId)
+      }
     }
 
     for (const zone of zonesById.values()) {
       const drawingId = `zone_${zone.zone_id}`
-      if (renderedDrawingIdsRef.current.has(drawingId)) continue
       const startMs = new Date(zone.start_timestamp).getTime()
       const endMs = new Date(zone.end_timestamp).getTime()
       const inRange = candles.filter(c => {
@@ -519,6 +718,9 @@ export function PromptWorkbench() {
         return t >= Math.min(startMs, endMs) && t <= Math.max(startMs, endMs)
       })
       if (inRange.length === 0) continue
+      const contentKey = `${zone.start_timestamp}|${zone.end_timestamp}|${zone.heading}|${zone._color}`
+      if (renderedDrawingContentRef.current.get(drawingId) === contentKey) continue
+      if (renderedDrawingIdsRef.current.has(drawingId)) chartRef.current?.removeDrawing(drawingId)
       const high = Math.max(...inRange.map(c => c.high))
       const low = Math.min(...inRange.map(c => c.low))
       const heightPips = (high - low) / pipSize(high)
@@ -530,20 +732,24 @@ export function PromptWorkbench() {
           { time: toUnixTime(zone.end_timestamp), price: low },
         ],
         style: { color: zone._color, lineStyle: LineStyle.Solid, lineWidth: 1, fillColor: zone._color, fillOpacity: 0.12 },
-        label: zone.heading,
-        sublabel: `${inRange.length} candles, ${heightPips.toFixed(1)} pips`,
+        label: `[${zone.zone_id}] ${zone.heading}`,
+        sublabel: `#${zone.start_candle_number}–#${zone.end_candle_number} · ${inRange.length} candles, ${heightPips.toFixed(1)} pips`,
         visible: true,
         selected: false,
       }
       chartRef.current?.addDrawing(drawing)
       renderedDrawingIdsRef.current.add(drawingId)
+      renderedDrawingContentRef.current.set(drawingId, contentKey)
     }
 
     for (const a of annotations) {
       if (a.kind !== 'trade' || a.action !== 'close') continue
       const openAnn = opensByTradeId.get(a.trade_id)
+      if (!openAnn) continue
       const drawingId = `trade_${a.trade_id}`
-      if (!openAnn || renderedDrawingIdsRef.current.has(drawingId)) continue
+      const contentKey = `${openAnn.timestamp}|${openAnn.price}|${openAnn.direction}|${a.timestamp}|${a.price}|${openAnn._color}`
+      if (renderedDrawingContentRef.current.get(drawingId) === contentKey) continue
+      if (renderedDrawingIdsRef.current.has(drawingId)) chartRef.current?.removeDrawing(drawingId)
       const candleCountSpan = Math.abs(openAnn.candle_number - a.candle_number)
       const priceDiff = openAnn.direction === 'short' ? openAnn.price - a.price : a.price - openAnn.price
       const pips = priceDiff / pipSize(a.price)
@@ -555,22 +761,23 @@ export function PromptWorkbench() {
           { time: toUnixTime(a.timestamp), price: a.price },
         ],
         style: { color: openAnn._color, lineStyle: LineStyle.Solid, lineWidth: 2 },
-        label: `${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
+        label: `[${a.trade_id}] #${openAnn.candle_number}→#${a.candle_number} · ${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
         visible: true,
         selected: false,
       }
       chartRef.current?.addDrawing(drawing)
       renderedDrawingIdsRef.current.add(drawingId)
+      renderedDrawingContentRef.current.set(drawingId, contentKey)
     }
   }, [annotations, candles])
 
-  function tradeStatusText(): string {
+  const tradeStatusText = useCallback((): string => {
     if (openTrades.size === 0) return 'Currently no simulated trades are open.'
     const lines = [...openTrades.values()].map(t =>
       `- ${t.trade_id}: ${t.direction?.toUpperCase()} opened at candle #${t.candle_number} (entry ${t.price})`,
     )
     return `Currently open simulated trades:\n${lines.join('\n')}`
-  }
+  }, [openTrades])
 
   // ── Agent Prompt column ──────────────────────────────────────────────────
   const [promptText, setPromptText] = useState('')
@@ -591,28 +798,89 @@ export function PromptWorkbench() {
   const [chatInput, setChatInput] = useState('')
   const [sending, setSending] = useState(false)
   const [simBusy, setSimBusy] = useState(false)
+  const [chatKbMsg, setChatKbMsg] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const prevMessageCountRef = useRef(0)
+  const scrollAnchorRef = useRef<HTMLElement | null>(null)
 
-  // Scroll to bottom on every new message — unless the new message itself is
-  // taller than the visible history, in which case scroll just far enough
-  // that its top edge lines up with the top of the history area, so its
-  // beginning stays readable instead of being scrolled past.
+  // Scroll to bottom on every new message — unless the anchor (the first newly
+  // appended message; see below) is taller than the visible history, in which
+  // case scroll just far enough that its top edge lines up with the top of the
+  // history area, so its beginning stays readable instead of being scrolled past.
+  const applyScrollAnchor = (container: HTMLDivElement, anchorEl: HTMLElement | null) => {
+    if (!anchorEl) return
+    // Don't use anchorEl.offsetTop — it's relative to the nearest positioned
+    // offsetParent, not to this container (which isn't itself `position`d), so
+    // it silently measures against some ancestor far up the page instead of
+    // the scroll area. getBoundingClientRect gives both elements' positions in
+    // the same (viewport) coordinate space, so the delta is container-relative.
+    const anchorTop = anchorEl.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    const remaining = container.scrollHeight - anchorTop
+    if (remaining <= container.clientHeight) {
+      container.scrollTop = container.scrollHeight
+    } else {
+      container.scrollTop = anchorTop
+    }
+  }
+
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container) return
-    const lastEl = container.lastElementChild as HTMLElement | null
-    if (!lastEl) return
-    if (lastEl.offsetHeight <= container.clientHeight) {
-      container.scrollTop = container.scrollHeight
-    } else {
-      container.scrollTop = lastEl.offsetTop
-    }
+    // Anchor to the first message added since the last run, not the last DOM
+    // child — a reply can arrive together with a second "Snapshot errors" bubble
+    // in the same batch, and anchoring to that trailing (short) bubble would
+    // scroll the actual answer above it clean out of view.
+    const children = container.children
+    const anchorEl = (children[prevMessageCountRef.current] as HTMLElement | undefined)
+      ?? (children[children.length - 1] as HTMLElement | undefined)
+      ?? null
+    scrollAnchorRef.current = anchorEl
+    applyScrollAnchor(container, anchorEl)
+    prevMessageCountRef.current = messages.length
   }, [messages])
+
+  // Re-apply the same alignment when the panel is resized (e.g. dragging the
+  // chart/chat divider) — a size change alone doesn't touch `messages`, so the
+  // effect above wouldn't otherwise re-run.
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const observer = new ResizeObserver(() => {
+      applyScrollAnchor(container, scrollAnchorRef.current)
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
 
   const pushMessage = (role: ChatMessage['role'], content: string) => {
     setMessages(prev => [...prev, { id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role, content, timestamp: now() }])
   }
+
+  // Clears only the chat transcript — chart drawings have their own dedicated
+  // "Clear chart" button (clearAnnotations) in the toolbar above, kept separate.
+  const clearChatHistory = () => {
+    setMessages([])
+  }
+
+  const handleChatKbImport = useCallback(async () => {
+    const transcript = messages
+      .map(m => `## ${m.role === 'user' ? 'User' : 'Assistant'} (${m.timestamp})\n${m.content}`)
+      .join('\n\n')
+    const md = `# Prompt Workbench Chat — ${pair} / ${timeframe}
+
+**Broker:** ${brokerName ?? '–'} · **Messages:** ${messages.length}
+
+${transcript}`
+
+    try {
+      await kbImport('PromptWorkbenchChat', md)
+      setChatKbMsg('✓ In Knowledgebase gespeichert')
+      setTimeout(() => setChatKbMsg(null), 2000)
+    } catch (e) {
+      pushMessage('assistant', `KB Import failed: ${String(e)}`)
+    }
+  }, [messages, pair, timeframe, brokerName])
 
   // Only sent when the Simulation tab has tool_blocks configured — otherwise
   // the agent keeps getting raw candle text, unchanged from before.
@@ -624,6 +892,58 @@ export function PromptWorkbench() {
       assembly_transform_script: assemblyScriptText,
     }
   }, [toolTab, toolBlocksState, calculationBlocksState, assemblyScriptText])
+
+  // ── LLM Context tab — live preview of exactly what /prompt-workbench/chat
+  // would send, via the same backend context-builder (no LLM call). Unlike
+  // snapshotPipelineFields() (gated on the Simulation tab being focused, so a
+  // filled-in tool_blocks config can be bypassed by switching tabs), this
+  // reflects tool_blocks whenever any are configured — the tab itself isn't
+  // "focus-gated" since it's a separate, persistent preview.
+  const [contextPreview, setContextPreview] = useState<PromptWorkbenchContextPreviewResponse | null>(null)
+  const [contextPreviewLoading, setContextPreviewLoading] = useState(false)
+  const [contextPreviewError, setContextPreviewError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (toolTab !== 'context' || !pair || candles.length === 0) return
+    const timer = setTimeout(() => {
+      setContextPreviewLoading(true)
+      setContextPreviewError(null)
+      const toolBlocksFields = toolBlocksState.length > 0
+        ? {
+            tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
+            calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
+            assembly_transform_script: assemblyScriptText,
+          }
+        : {}
+      void api.promptWorkbenchContextPreview({
+        system_prompt: promptText,
+        question: chatInput,
+        history: [],
+        pair,
+        broker_name: brokerName,
+        timeframe,
+        candle_count: candleCount,
+        candle_anchor: candleAnchorRef.current,
+        visible_count: position > 0 ? visibleCount : undefined,
+        indicators: indicators.filter(ind => ind.visible).map(ind => ({
+          name: ind.name,
+          period: ind.period,
+          timeframe: ind.timeframe,
+          last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
+        })),
+        swing_levels: swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : [],
+        ...toolBlocksFields,
+      })
+        .then(setContextPreview)
+        .catch(err => setContextPreviewError(String(err)))
+        .finally(() => setContextPreviewLoading(false))
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [
+    toolTab, pair, brokerName, timeframe, candleCount, candles, position, visibleCount,
+    indicators, swingEnabled, swingLines, promptText, chatInput,
+    toolBlocksState, calculationBlocksState, assemblyScriptText,
+  ])
 
   const sendChat = async () => {
     const question = chatInput.trim()
@@ -641,16 +961,24 @@ export function PromptWorkbench() {
         broker_name: brokerName,
         timeframe,
         candle_count: candleCount,
+        candle_anchor: candleAnchorRef.current,
         visible_count: toolTab === 'simulation' ? visibleCount : undefined,
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
         allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
         existing_annotations: annotations,
+        indicators: indicators.filter(ind => ind.visible).map(ind => ({
+          name: ind.name,
+          period: ind.period,
+          timeframe: ind.timeframe,
+          last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
+        })),
+        swing_levels: swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : [],
         ...snapshotPipelineFields(),
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
-      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...tagAnnotations(resp.annotations)])
+      applyAnnotationUpdates(resp)
     } catch (err) {
       pushMessage('assistant', `Error: ${String(err)}`)
     } finally {
@@ -690,16 +1018,24 @@ export function PromptWorkbench() {
         broker_name: brokerName,
         timeframe,
         candle_count: candleCount,
+        candle_anchor: candleAnchorRef.current,
         visible_count: newVisibleCount,
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
         allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
         existing_annotations: annotations,
+        indicators: indicators.filter(ind => ind.visible).map(ind => ({
+          name: ind.name,
+          period: ind.period,
+          timeframe: ind.timeframe,
+          last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
+        })),
+        swing_levels: swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : [],
         ...snapshotPipelineFields(),
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
-      if (resp.annotations?.length) setAnnotations(prev => [...prev, ...tagAnnotations(resp.annotations)])
+      applyAnnotationUpdates(resp)
     } catch (err) {
       pushMessage('assistant', `Error: ${String(err)}`)
     } finally {
@@ -708,7 +1044,7 @@ export function PromptWorkbench() {
     positionRef.current = newPosition
     setPosition(newPosition)
     return newPosition > 0
-  }, [total, stepSize, autoTradeStatus, promptText, pair, brokerName, timeframe, candleCount, llmName, reasoningEffort, openTrades, tagAnnotations, annotations, snapshotPipelineFields])
+  }, [total, stepSize, autoTradeStatus, promptText, pair, brokerName, timeframe, candleCount, llmName, reasoningEffort, tradeStatusText, applyAnnotationUpdates, annotations, snapshotPipelineFields])
 
   const handleStep = () => { void stepOnce() }
 
@@ -741,6 +1077,7 @@ export function PromptWorkbench() {
       const resp = await api.promptWorkbenchSnapshotPreview({
         pair, broker_name: brokerName, timeframe, candle_count: candleCount,
         visible_count: visibleCount,
+        candle_anchor: candleAnchorRef.current,
         tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
         calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
         assembly_transform_script: assemblyScriptText,
@@ -756,18 +1093,176 @@ export function PromptWorkbench() {
     }
   }
 
+  // ── Workbench config save/load/delete — setup only, no session state (see
+  // PromptWorkbenchSavedConfig). Same whole-array GET/PUT pattern as the
+  // prompt/snippet libraries: delete just removes the entry client-side and
+  // PUTs the remaining array back, no dedicated delete endpoint.
+  const [savedConfigs, setSavedConfigs] = useState<PromptWorkbenchSavedConfig[]>([])
+  const [configMsg, setConfigMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api.getPromptWorkbenchConfigs().then(lib => setSavedConfigs(lib.configs)).catch(() => setSavedConfigs([]))
+  }, [])
+
+  const flashConfigMsg = (text: string) => {
+    setConfigMsg(text)
+    setTimeout(() => setConfigMsg(null), 2000)
+  }
+
+  const handleLoadConfig = () => {
+    const found = savedConfigs.find(c => c.name === savedConfigName)
+    if (!found) return
+    setBrokerName(found.broker_name ?? null)
+    setPair(found.pair)
+    setTimeframe(found.timeframe)
+    setCandleCount(found.candle_count)
+    setAnchorDate(found.anchor_date)
+    setAnnotationColor(found.annotation_color)
+    setStepSize(found.step_size)
+    setAutoTradeStatus(found.auto_trade_status)
+    setLeftTab(found.left_tab)
+    setToolTab(found.tool_tab)
+    setPromptText(found.system_prompt)
+    setLlmName(found.llm_name)
+    setReasoningEffort(found.reasoning_effort)
+    setIndicators(
+      (found.indicators ?? [])
+        .map((ind, i) => normalizeIndicatorInstance(ind, i))
+        .filter((ind): ind is IndicatorInstance => ind !== null),
+    )
+    setToolBlocksState(found.tool_blocks.map((b, i) => normalizeToolBlock(b, i)).filter((b): b is SnapshotToolBlockForm => b !== null))
+    setCalculationBlocksState(found.calculation_blocks.map((b, i) => normalizeCalculationBlock(b, i)).filter((b): b is CalculationBlock => b !== null))
+    setAssemblyScriptText(found.assembly_transform_script)
+  }
+
+  const handleSaveConfig = async () => {
+    const name = savedConfigName.trim()
+    if (!name) return
+    const entry: PromptWorkbenchSavedConfig = {
+      name,
+      broker_name: brokerName,
+      pair,
+      timeframe,
+      candle_count: candleCount,
+      anchor_date: anchorDate,
+      annotation_color: annotationColor,
+      step_size: stepSize,
+      auto_trade_status: autoTradeStatus,
+      left_tab: leftTab,
+      // "context" is a live preview tab, not a persisted workbench mode —
+      // fall back to "analyse" so the saved-config schema stays unchanged.
+      tool_tab: toolTab === 'context' ? 'analyse' : toolTab,
+      system_prompt: promptText,
+      llm_name: llmName,
+      reasoning_effort: reasoningEffort,
+      indicators: indicators.map(ind => serializeIndicatorInstance(ind)),
+      tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
+      calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
+      assembly_transform_script: assemblyScriptText,
+    }
+    const next = [...savedConfigs.filter(c => c.name !== name), entry]
+    try {
+      await api.savePromptWorkbenchConfigs({ configs: next })
+      setSavedConfigs(next)
+      flashConfigMsg('✓ Saved')
+    } catch (err) {
+      flashConfigMsg(`Save failed: ${String(err)}`)
+    }
+  }
+
+  const handleDeleteConfig = async () => {
+    const name = savedConfigName.trim()
+    if (!name || !savedConfigs.some(c => c.name === name)) return
+    const next = savedConfigs.filter(c => c.name !== name)
+    try {
+      await api.savePromptWorkbenchConfigs({ configs: next })
+      setSavedConfigs(next)
+      setSavedConfigName('')
+      flashConfigMsg('✓ Deleted')
+    } catch (err) {
+      flashConfigMsg(`Delete failed: ${String(err)}`)
+    }
+  }
+
+  // Resets the whole Workbench to a blank slate — everything a saved config
+  // covers, plus candles/chat/annotations/simulation state a config doesn't
+  // (those were never part of Save/Load, so New has to clear them itself).
+  const handleNewWorkbench = () => {
+    setSavedConfigName('')
+    setBrokerName(null)
+    setPair('')
+    setTimeframe('M5')
+    setCandleCount(500)
+    setAnchorDate('')
+    setCandles([])
+    setIndicators([])
+    clearAnnotations()
+    setPosition(0)
+    setStepSize(3)
+    setRunning(false)
+    setLeftTab('chat')
+    setToolTab('analyse')
+    setAutoTradeStatus(true)
+    setSimPreview(null)
+    setSnapshotProfileName('')
+    setToolBlocksState([])
+    setCalculationBlocksState([])
+    setAssemblyScriptText('')
+    setBlockTestResults({})
+    setPromptText('')
+    setLoadFromAgentId('')
+    setLlmName('')
+    setReasoningEffort('low')
+    setMessages([])
+    setChatInput('')
+  }
+
   const selectCls = 'bg-gray-800 border border-gray-600 rounded px-1 text-gray-200 text-xs'
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-gray-950">
-      {/* Workbench config (save/load) — disabled placeholders, wired up later */}
+      {/* Workbench config (save/load/delete) — setup only, see PromptWorkbenchSavedConfig */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900/60 border-b border-gray-800 flex-shrink-0">
         <span className="text-xs text-white">Workbench Config:</span>
-        <select disabled value={savedConfigName} onChange={e => setSavedConfigName(e.target.value)} className={`${selectCls} opacity-50 cursor-not-allowed`}>
-          <option value="">— coming soon —</option>
-        </select>
-        <button disabled className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs opacity-40 cursor-not-allowed">Load</button>
-        <button disabled className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs opacity-40 cursor-not-allowed">Save</button>
+        <button
+          onClick={handleNewWorkbench}
+          title="Alles zurücksetzen — leerer Workbench"
+          className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs hover:text-gray-200"
+        >
+          New
+        </button>
+        <input
+          list="workbench-config-names"
+          value={savedConfigName}
+          onChange={e => setSavedConfigName(e.target.value)}
+          placeholder="pick or type a name…"
+          className={`${selectCls} w-48`}
+        />
+        <datalist id="workbench-config-names">
+          {savedConfigs.map(c => <option key={c.name} value={c.name} />)}
+        </datalist>
+        <button
+          onClick={handleLoadConfig}
+          disabled={!savedConfigs.some(c => c.name === savedConfigName)}
+          className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:text-gray-200"
+        >
+          Load
+        </button>
+        <button
+          onClick={() => void handleSaveConfig()}
+          disabled={!savedConfigName.trim()}
+          className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:text-gray-200"
+        >
+          Save
+        </button>
+        <button
+          onClick={() => void handleDeleteConfig()}
+          disabled={!savedConfigs.some(c => c.name === savedConfigName)}
+          className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:text-red-400"
+        >
+          Delete
+        </button>
+        {configMsg && <span className="text-xs text-emerald-400">{configMsg}</span>}
       </div>
 
       {/* Candle-loading bar */}
@@ -803,8 +1298,16 @@ export function PromptWorkbench() {
         <div className="flex items-center gap-1 text-xs text-white">
           <span>Candles</span>
           <input
-            type="number" min={20} max={2000} value={candleCount}
-            onChange={e => setCandleCount(Math.max(20, Math.min(2000, Number(e.target.value))))}
+            type="number" min={20} max={2000} value={candleCountInput}
+            onChange={e => setCandleCountInput(e.target.value)}
+            onBlur={commitCandleCount}
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return
+              e.preventDefault()
+              commitCandleCount()
+              ;(e.target as HTMLInputElement).blur()
+            }}
+            title="Wert übernehmen mit Enter oder beim Verlassen des Felds"
             className="w-11 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
           />
         </div>
@@ -852,7 +1355,7 @@ export function PromptWorkbench() {
           <input
             type="number" min={1} max={200} value={stepSize}
             onChange={e => setStepSize(Math.max(1, Number(e.target.value)))}
-            className="w-7 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+            className="w-7 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
         </div>
         <button
@@ -887,6 +1390,15 @@ export function PromptWorkbench() {
           <Trash2 className="w-3 h-3" /> Clear chart
         </button>
 
+        <button
+          onClick={() => chartRef.current?.resetView()}
+          disabled={total === 0}
+          title="Zoom/Pan zurücksetzen — alle geladenen Kerzen wieder sichtbar"
+          className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
+        >
+          <RotateCcw className="w-3 h-3" /> Reset
+        </button>
+
         {error && <span className="text-xs text-red-400">Error: {error}</span>}
       </div>
 
@@ -899,6 +1411,7 @@ export function PromptWorkbench() {
             markers={[...boundaryMarkers, ...tradeMarkers, ...candleMarkers]}
             overlayLines={overlayLines}
             oscillators={oscillators}
+            priceLines={swingLines}
             ranges={[]}
             range={Math.min(candleCount, total)}
           />
@@ -943,8 +1456,27 @@ export function PromptWorkbench() {
 
           {leftTab === 'chat' ? (
             <>
-              <div className="flex items-center justify-end px-3 py-1.5 bg-gray-900 border-b border-gray-800 text-xs text-white font-medium">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-800 text-xs text-white font-medium">
+                {chatKbMsg
+                  ? <span className="text-xs text-emerald-400 border border-emerald-700 rounded px-2 py-0.5 bg-emerald-900/20">{chatKbMsg}</span>
+                  : <button
+                      onClick={() => void handleChatKbImport()}
+                      disabled={messages.length === 0}
+                      className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs flex items-center gap-1 disabled:opacity-40"
+                      title="Gesamten Chatverlauf in der Knowledgebase [Import] speichern"
+                    >
+                      <BookOpen className="w-3 h-3" /> → KB
+                    </button>
+                }
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={clearChatHistory}
+                    disabled={messages.length === 0}
+                    title="Chatverlauf löschen"
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
+                  >
+                    <Trash2 className="w-3 h-3" /> Delete
+                  </button>
                   <input
                     type="color"
                     value={annotationColor}
@@ -967,7 +1499,7 @@ export function PromptWorkbench() {
                   <p className="text-xs text-white italic">Ask a question, or use Step/Run above to walk the simulation.</p>
                 )}
                 {messages.map(msg => (
-                  <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                  <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start items-start gap-1'}>
                     <div className={
                       msg.role === 'user'
                         ? 'max-w-[85%] rounded-lg px-3 py-1.5 text-xs bg-emerald-900/50 text-emerald-100 whitespace-pre-wrap'
@@ -975,6 +1507,11 @@ export function PromptWorkbench() {
                     }>
                       {msg.content}
                     </div>
+                    {msg.role === 'assistant' && (
+                      <div className="pt-1.5">
+                        <CopyButton getText={() => msg.content} />
+                      </div>
+                    )}
                   </div>
                 ))}
                 {(sending || simBusy) && (
@@ -1038,7 +1575,7 @@ export function PromptWorkbench() {
         {/* Tools — [Analyse] / [Simulation] */}
         <section className="flex flex-col min-h-0 w-1/2">
           <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
-            {(['analyse', 'simulation'] as ToolTab[]).map(tab => (
+            {(['analyse', 'simulation', 'context'] as ToolTab[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setToolTab(tab)}
@@ -1047,7 +1584,7 @@ export function PromptWorkbench() {
                   toolTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
                 ].join(' ')}
               >
-                {tab === 'analyse' ? 'Analyse' : 'Simulation'}
+                {tab === 'analyse' ? 'Analyse' : tab === 'simulation' ? 'Simulation' : 'LLM Context'}
               </button>
             ))}
           </div>
@@ -1055,8 +1592,9 @@ export function PromptWorkbench() {
             {toolTab === 'analyse' ? (
               <>
                 <p className="text-white">
-                  Kerzendaten-Indikatoren, wie in Chart Analysis — Anzeige direkt im Chart oben. Der Agent bekommt
-                  bei einer freien Diskussion die vollständigen Kerzendaten dieses Storages.
+                  Kerzendaten-Indikatoren und Swing Levels, wie in Chart Analysis — Anzeige direkt im Chart oben.
+                  Bei einer freien Diskussion (kein Snapshot-Profil) bekommt der Agent die vollständigen Kerzendaten
+                  dieses Storages sowie die hier sichtbaren Indikatoren/Swing Levels als Text mit — siehe LLM-Context-Tab.
                 </p>
                 <IndicatorsPanel
                   indicators={indicators}
@@ -1064,8 +1602,31 @@ export function PromptWorkbench() {
                   onRemove={removeIndicator}
                   onUpdate={updateIndicator}
                 />
+                <SwingLevelsPanel
+                  enabled={swingEnabled}
+                  onToggle={() => setSwingEnabled(v => !v)}
+                  timeframe={swingTf}
+                  onTimeframeChange={setSwingTf}
+                  count={swingCount}
+                  onCountChange={setSwingCount}
+                  atrPeriod={swingAtrPeriod}
+                  onAtrPeriodChange={setSwingAtrPeriod}
+                  minGapAtr={swingMinGapAtr}
+                  onMinGapAtrChange={setSwingMinGapAtr}
+                  lineWidth={swingLineWidth}
+                  onLineWidthChange={setSwingLineWidth}
+                  lineStyle={swingLineStyle}
+                  onLineStyleChange={setSwingLineStyle}
+                  priceSource={swingPriceSource}
+                  onPriceSourceChange={setSwingPriceSource}
+                  sortBy={swingSortBy}
+                  onSortByChange={s => { swingSortByRef.current = s; setSwingSortBy(s); void loadSwingLevels() }}
+                  loading={swingLoading}
+                  onReload={() => void loadSwingLevels()}
+                  lines={swingLines}
+                />
               </>
-            ) : (
+            ) : toolTab === 'simulation' ? (
               <>
                 <p className="text-white">
                   Simulation: [Step]/[Run] und Chat schicken dem Agenten den echten, per
@@ -1144,6 +1705,32 @@ export function PromptWorkbench() {
                   <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
                     {simPreview}
                   </pre>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-white">
+                  Exakte Vorschau dessen, was der Agent bei der nächsten Chat-Nachricht als Kontext bekäme — über
+                  denselben Backend-Code wie /prompt-workbench/chat aufgebaut, nur ohne das LLM tatsächlich
+                  aufzurufen. Kann also nie von der Realität abweichen.
+                </p>
+                {candles.length === 0 ? (
+                  <p className="text-white italic">Keine Kerzen geladen.</p>
+                ) : contextPreviewError ? (
+                  <span className="text-red-400">Error: {contextPreviewError}</span>
+                ) : contextPreview ? (
+                  <div className="bg-gray-900/60 border border-gray-800 rounded p-2 overflow-x-auto">
+                    {contextPreviewLoading && <div className="text-white mb-1">Aktualisiere…</div>}
+                    <JsonView
+                      data={contextPreview}
+                      style={darkStyles}
+                      shouldExpandNode={(level, _value, field) =>
+                        level === 0 || (level === 1 && field !== 'candles')
+                      }
+                    />
+                  </div>
+                ) : (
+                  <p className="text-white italic">{contextPreviewLoading ? 'Lädt…' : 'Kein Preview verfügbar.'}</p>
                 )}
               </>
             )}

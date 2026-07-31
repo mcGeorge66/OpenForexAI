@@ -90,7 +90,7 @@ Current example:
 ```json
 "modules": {
   "llm": {
-    "azure_azmin": "config/modules/llm/azure.azmin.json5"
+    "azure_azmin": "config/modules/llm/openai_azmin.json5"
   },
   "broker": {
     "mt5_oxs_t": "config/modules/broker/mt5.oxs_t.json5"

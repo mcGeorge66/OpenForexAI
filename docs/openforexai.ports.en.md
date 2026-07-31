@@ -21,7 +21,7 @@ This is the core of the hexagonal (ports & adapters) architecture: business logi
 
 ## `llm.py` — AbstractLLMProvider
 
-The LLM adapter interface. All LLM providers (Anthropic, OpenAI, Azure) implement this.
+The LLM adapter interface. All LLM providers (Anthropic, OpenAI — which also covers Azure AI Foundry, LM Studio, and Ollama via `base_url`) implement this.
 
 ### Data Classes
 

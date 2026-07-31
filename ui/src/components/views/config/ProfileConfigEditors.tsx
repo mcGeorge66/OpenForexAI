@@ -9,6 +9,7 @@ import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
 import { LLMChatPanel } from '@/components/common/LLMChatPanel'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
 import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
+import { filterToolsByBlocklist, useSnapshotToolBlocklist } from '@/components/common/SnapshotBlocksPanel'
 
 function CopyButton({ getText }: { getText: () => string }) {
   const [copied, setCopied] = useState(false)
@@ -426,6 +427,7 @@ export function SnapshotConfigEditor() {
   const [toolPreviewBlockIndex, setToolPreviewBlockIndex] = useState<number | null>(null)
   const [toolPreviewData, setToolPreviewData] = useState<SnapshotToolPreviewResponse | null>(null)
   const [tools, setTools] = useState<ToolInfo[]>([])
+  const blockedTools = useSnapshotToolBlocklist('snapshot_designer')
   const [toolCandidate, setToolCandidate] = useState('')
   const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(new Set())
   const [toolBlocksOpen, setToolBlocksOpen] = useState(false)
@@ -446,7 +448,8 @@ export function SnapshotConfigEditor() {
     [cfg],
   )
   const names = useMemo(() => Object.keys(profileMap).sort(), [profileMap])
-  const toolsByName = useMemo(() => new Map(tools.map(tool => [tool.name, tool])), [tools])
+  const visibleTools = useMemo(() => filterToolsByBlocklist(tools, blockedTools), [tools, blockedTools])
+  const toolsByName = useMemo(() => new Map(visibleTools.map(tool => [tool.name, tool])), [visibleTools])
   const issues = useMemo(
     () => validateSnapshotProfile(form, names, selectedName, toolsByName),
     [form, names, selectedName, toolsByName],
@@ -514,10 +517,10 @@ export function SnapshotConfigEditor() {
   useEffect(() => { void load() }, [])
 
   useEffect(() => {
-    if (!toolCandidate && tools.length > 0) {
-      setToolCandidate(tools[0].name)
+    if (!visibleTools.some(t => t.name === toolCandidate) && visibleTools.length > 0) {
+      setToolCandidate(visibleTools[0].name)
     }
-  }, [toolCandidate, tools])
+  }, [toolCandidate, visibleTools])
 
   useEffect(() => {
     setExpandedBlocks(new Set())
@@ -1037,8 +1040,8 @@ export function SnapshotConfigEditor() {
                           onChange={e => setToolCandidate(e.target.value)}
                           className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 min-w-[200px]"
                         >
-                          {tools.length === 0 && <option value="">-- no tools loaded --</option>}
-                          {tools.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}
+                          {visibleTools.length === 0 && <option value="">-- no tools loaded --</option>}
+                          {visibleTools.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}
                         </select>
                         <button
                           type="button"
@@ -1124,7 +1127,7 @@ export function SnapshotConfigEditor() {
                                       })}
                                       className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
                                     >
-                                      {tools.map(toolItem => <option key={toolItem.name} value={toolItem.name}>{toolItem.name}</option>)}
+                                      {visibleTools.map(toolItem => <option key={toolItem.name} value={toolItem.name}>{toolItem.name}</option>)}
                                     </select>
                                   </label>
                                   <label className="text-xs text-gray-300">

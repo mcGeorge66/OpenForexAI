@@ -1,0 +1,57 @@
+{
+  // Tools that must never appear in a Snapshot's tool_blocks — they perform a real
+  // action instead of gathering read-only data for the LLM to reason over. If one
+  // is named in a tool_blocks entry anyway (UI, hand-edited profile JSON, or
+  // LLM-assisted config edit), the backend refuses to execute it (see
+  // openforexai/agents/analysis_snapshot.py, _execute_tool_blocks) — this list is
+  // both the picker filter AND the actual safety gate, not just cosmetic.
+  //
+  // Edits here take effect immediately on the next request — no restart needed.
+  "snapshot_designer": [
+    "place_order",
+    "auto_place_order",
+    "close_position",
+    "modify_order",
+    "raise_alarm",
+    "trigger_sync",
+    "manage_sub_prompt",
+    "assessment_memory",
+    "agent_bridge",
+    // Sandbox-only chart-annotation tools (Prompt Workbench): depend on
+    // ToolContext.extra keys (candle_index_map etc.) that a real Snapshot run
+    // never populates, so they'd just fail here — not merely off-topic.
+    "zone_marker",
+    "trade_marker",
+    "candle_marker",
+    "get_annotation",
+  ],
+
+  // Prompt Workbench Simulation tab's tool_blocks — same trading-action tools
+  // blocked (still a read-only market_snapshot, still sandboxed, no reason to
+  // let a "snapshot" place a real order), but the sandbox annotation tools are
+  // left available since they work correctly there and can be legitimately
+  // useful in a scripted simulation step.
+  "prompt_workbench": [
+    "place_order",
+    "auto_place_order",
+    "close_position",
+    "modify_order",
+    "raise_alarm",
+    "trigger_sync",
+    "manage_sub_prompt",
+    "assessment_memory",
+    "agent_bridge",
+	"chartshot",
+	"get_account_status",
+	"get_open_positions",
+	"get_order_book",
+	"ask_ga_market_outlook",
+    // Sandbox-only chart-annotation tools (Prompt Workbench): depend on
+    // ToolContext.extra keys (candle_index_map etc.) that a real Snapshot run
+    // never populates, so they'd just fail here — not merely off-topic.
+    "zone_marker",
+    "trade_marker",
+    "candle_marker",
+    "get_annotation",
+  ],
+}

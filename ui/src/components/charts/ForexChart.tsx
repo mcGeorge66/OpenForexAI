@@ -135,6 +135,9 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
   const [range, setRange] = useState(controlledRange ?? initialRange)
   useEffect(() => { if (controlledRange !== undefined) setRange(controlledRange) }, [controlledRange])
   const [resetNonce, setResetNonce] = useState(0)
+  // Read inside useImperativeHandle (created once with [] deps) — must be a ref.
+  const controlledRangeRef = useRef(controlledRange)
+  useEffect(() => { controlledRangeRef.current = controlledRange }, [controlledRange])
   const [hovered, setHovered] = useState<CandleBar | null>(null)
   const orderedCandles = useMemo(
     () => [...candles].sort(
@@ -220,8 +223,19 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
       return screenshot ? screenshot.toDataURL('image/png') : null
     },
     resetView: () => {
-      setRange(initialRange)
+      // Controlled range (e.g. Prompt Workbench's "all loaded candles") wins
+      // over the uncontrolled initialRange default.
+      setRange(controlledRangeRef.current ?? initialRange)
       setResetNonce(value => value + 1)
+      // Vertical zoom via price-axis drag disables autoScale — re-enable it on
+      // every scale so the view returns to the initial fit.
+      const chart = chartRef.current
+      if (chart) {
+        chart.priceScale('right').applyOptions({ autoScale: true })
+        for (const key of oscillatorSeriesRef.current.keys()) {
+          chart.priceScale(key).applyOptions({ autoScale: true })
+        }
+      }
     },
     startDrawing: (tool: DrawingToolName, style: DrawingStyle) => {
       pendingToolRef.current = tool

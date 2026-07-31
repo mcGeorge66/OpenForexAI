@@ -12,7 +12,7 @@ It has two parts:
 
 Collect this information first:
 - Which broker adapter(s) you need (for example `oanda`, `mt5`).
-- Which LLM adapter(s) you need (for example `anthropic`, `azure`, `openai`, `lmstudio`, `ollama`).
+- Which LLM adapter(s) you need (for example `anthropic`, `openai`, `lmstudio`, `ollama` — Azure AI Foundry's OpenAI-compatible endpoint also uses the `openai` adapter, via `base_url`).
 - Credentials and account information for selected providers.
 - One test pair (for example `EURUSD`) for connectivity checks.
 
@@ -120,7 +120,7 @@ For each selected adapter:
 
 Examples:
 - `config/modules/broker/mt5.sample.json5` -> `config/modules/broker/mt5.oxs_t.json5`
-- `config/modules/llm/azure.sample.json5` -> `config/modules/llm/azure.main.json5`
+- `config/modules/llm/openai.sample.json5` -> `config/modules/llm/openai.main.json5` (also used for Azure AI Foundry — set `base_url` to `https://<resource>.services.ai.azure.com/openai/v1` and `model` to your deployment name; no separate Azure adapter/api-version needed)
 
 ### 4. Create custom config `config/system.json5`
 
@@ -132,7 +132,7 @@ Create `config/system.json5` and reference your created module files:
 {
   modules: {
     llm: {
-      azure_main: "config/modules/llm/azure.main.json5"
+      openai_main: "config/modules/llm/openai.main.json5"
     },
     broker: {
       mt5_oxs_t: "config/modules/broker/mt5.oxs_t.json5"
@@ -156,7 +156,7 @@ Example:
 
 ```bash
 python tools/test_broker.py mt5_oxs_t EURUSD
-python tools/test_llm.py azure_main
+python tools/test_llm.py openai_main
 ```
 
 ### 7. Start the app

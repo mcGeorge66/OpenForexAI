@@ -12,9 +12,9 @@
  * "load from snapshot profile" mechanism and doesn't persist back to
  * system.json5.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronRight, Trash2 } from 'lucide-react'
-import type { CalculationBlock, JsonSchemaProperty, ToolInfo } from '@/api/client'
+import { api, type CalculationBlock, type JsonSchemaProperty, type ToolInfo } from '@/api/client'
 import { ScriptEditor } from './ScriptEditor'
 
 export type SnapshotToolBlockForm = {
@@ -108,9 +108,39 @@ export function serializeCalculationBlock(block: CalculationBlock): Record<strin
 const selectCls = 'bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200'
 const inputCls = 'mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200'
 
+// tool_blocks assemble a read-only market_snapshot for an LLM to reason over — no
+// agent decision is made here, so a tool with a real side effect (place an order,
+// raise an alarm, mutate another agent's prompt/memory, run a sub-agent, ...) has
+// no business appearing in this picker: it can't influence anything downstream and,
+// if actually executed by the assembly pipeline, would fire for real (the backend
+// enforces the same list server-side — see analysis_snapshot.py's
+// _execute_tool_blocks — this filter is a convenience, not the actual safety net).
+// Two separate lists, config/RunTime/snapshot_tool_blocklists.json5 ("snapshot_designer"
+// vs "prompt_workbench") — the real Snapshot Designer and the PWB sandbox have
+// different requirements (e.g. chart-annotation tools are meaningless/broken in a
+// real Snapshot but legitimately usable in the PWB). Fetched fresh, not baked into
+// the bundle, so editing the config file takes effect without a rebuild.
+export function filterToolsByBlocklist(tools: ToolInfo[], blocked: Set<string>): ToolInfo[] {
+  return tools.filter(t => !blocked.has(t.name)).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function useSnapshotToolBlocklist(key: 'snapshot_designer' | 'prompt_workbench'): Set<string> {
+  const [blocked, setBlocked] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    void api.getConfigFile('snapshot_tool_blocklists').then(cfg => {
+      if (cancelled) return
+      const list = cfg[key]
+      setBlocked(new Set(Array.isArray(list) ? list.filter((n): n is string => typeof n === 'string') : []))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [key])
+  return blocked
+}
+
 export function ToolBlocksPanel({
   blocks,
-  tools,
+  tools: allTools,
   onAdd,
   onRemove,
   onUpdate,
@@ -127,7 +157,13 @@ export function ToolBlocksPanel({
   onTest?: (index: number) => void
   testResultByKey?: Record<string, { loading?: boolean; text?: string; error?: string }>
 }) {
+  const blockedTools = useSnapshotToolBlocklist('prompt_workbench')
+  const tools = filterToolsByBlocklist(allTools, blockedTools)
   const [toolCandidate, setToolCandidate] = useState(tools[0]?.name ?? '')
+  useEffect(() => {
+    if (!tools.some(t => t.name === toolCandidate)) setToolCandidate(tools[0]?.name ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tools])
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const toolsByName = new Map(tools.map(t => [t.name, t]))
 
