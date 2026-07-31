@@ -2,664 +2,232 @@
 
 # Monitor — Handbook
 
-The **Monitor** is the live event stream viewer for OpenForexAI. It shows every event that passes through the system's event bus in real time, making it the primary tool for runtime observation, debugging, and understanding system behavior at any level of detail.
+The **Monitor** is OpenForexAI's live event-stream viewer. It shows, in real time, every operation flowing through the system's event bus — the primary tool for runtime observation, troubleshooting, and understanding system behavior at any level of detail.
 
-The Monitor does not control anything — it only observes. Think of it as an always-on log viewer with intelligent filtering, rich event metadata, and a structured detail window for any event of interest.
+The Monitor controls nothing — it only observes. Unlike the [Event Log](ui.action.event_log.en.md) (a searchable, persistent database archive), the Monitor shows a **transient live stream**: its content is lost on page reload, but in exchange you see events the moment they happen, without waiting on a database query.
 
 ---
 
 ## 1. Core Concept
 
-### 1.1 Single Subscription, Client-Side Filtering
+### 1.1 One Subscription, One Filter Builder
 
-The UI subscribes to the **full event stream exactly once** via WebSocket. All events flow into a shared ring buffer. The tabs you see are **client-side filters** — switching tabs does not create a new subscription or reload data. It simply changes the filter applied to the buffered events.
-
-This means:
-- Switching tabs is instant (no network round-trip).
-- You never miss events while reading a different tab.
-- The ring buffer always holds the last 1,000 events across all categories.
+The UI subscribes to the full event stream **once** over WebSocket (`/ws/monitoring`) and keeps the last **500 events** in memory (a ring buffer). There are **no fixed category tabs** anymore — instead, a single, freely configurable **Filter Builder** right in the Monitor panel filters what's displayed. Switching or changing a filter is purely client-side: no network round-trip, no new subscription, no lost events.
 
 ### 1.2 Ring Buffer
 
-The Monitor stores the **last 1,000 events** in memory. When the buffer is full, the oldest event is dropped to make room for the newest. This is the sliding window of system activity.
+The browser keeps the last 500 received events in memory; older events are evicted as new ones arrive. The backend additionally maintains its own separate 1,000-event ring buffer for polling purposes, independent of the WebSocket stream.
 
-Practical implications:
-- In active systems with many agents, the buffer may fill within minutes.
-- For quiet systems or during debugging, events can persist in the buffer for hours.
-- Clicking **Clear** empties the display but does not affect the ring buffer — new events continue to arrive.
+**Practical impact:** in active systems with multiple agents, the buffer can fill and start evicting the oldest events within minutes. If you want to keep a specific event permanently reachable, **pin it** (Section 5) instead of relying on the buffer.
+
+**Example of when this bites you:** you're watching `agent_trigger_skipped` events for a specific agent, get pulled away for a minute (a call, another tab), and by the time you're back the event you wanted has already fallen out of the 500-event buffer because plenty of other agents kept running in the meantime. At that point only the persistent [Event Log](ui.action.event_log.en.md) helps — next time, pin the event the moment it reoccurs instead of trying to remember it "for later."
 
 ### 1.3 Live Indicator
 
-The **live indicator** (green dot in the top-right of the Monitor panel) shows the WebSocket connection status:
+Top left of the panel:
 
-| State | Meaning |
-|-------|---------|
-| Green dot, pulsing | WebSocket active, events are streaming |
-| Grey/red dot | WebSocket disconnected — events are not being received |
+| Indicator | Meaning |
+|-----------|---------|
+| `● Live` (green) | WebSocket active, events are being received |
+| `○ Disconnected` (red) | WebSocket disconnected — no events are being received |
 
-If the live indicator is not green, refresh the page or check if the backend is running.
+If `Disconnected`: check backend status on the Initial page, reload the page if needed.
+
+Next to it, two counters are shown: **shown** (how many events are currently in the list after filtering) and **primary** (how many of those are standalone request events, excluding their associated response events — see Section 4).
+
+### 1.4 Auto-Scroll and Ordering
+
+Newest events appear at the **top** of the list (not the bottom). The `Auto`/`Paused` button in the top right controls whether the list auto-scrolls up as new events arrive:
+
+- **Auto** (green) — the list scrolls to the top automatically on every new event.
+- **Paused** — auto-scroll is off, e.g. because you're reading further down the list. Scrolling back to the top re-enables Auto automatically.
+
+**Clear** empties the list currently held in the browser (not the backend) — new events appear normally again right after.
 
 ---
 
 ## 2. Event Row Format
 
-Each event appears as a single row in the Monitor table. Rows are color-coded by event category for fast visual scanning.
+Each event appears as one row:
 
-### 2.1 Row Columns
+| Element | Content |
+|---------|---------|
+| **`[N]` button** (if present) | Number of correlated follow-on events (see Section 4); click to expand/collapse. |
+| **Timestamp** | Time with millisecond precision. |
+| **`orphan` marker** | Only on response events with no visible parent event in the current buffer (see Section 4). |
+| **Event type** | Color-coded per event type (e.g. LLM events in blue tones, errors in red, broker events in green/orange). |
+| **`bus`/`agent` badge** | Only on `llm_request`/`llm_response`: whether the event came from the event-bus transport or directly from agent monitoring. |
+| **Source** | The triggering agent (e.g. `OXS_T-EURUSD-AA-ANLYS`), if available. |
+| **Broker/Pair** | In brackets, if applicable. |
+| **Payload preview** | A compact, event-type-specific summary (e.g. for `llm_response`: turn, stop reason, token counts, tool calls, model) instead of raw JSON. |
+| **Pin icon** | Appears on hover; pins/unpins this event (Section 5). |
 
-| Column | Content |
-|--------|---------|
-| **Timestamp** | HH:MM:SS.mmm — time of the event with millisecond precision |
-| **Arrow indicator** | Direction marker — see below |
-| **Event type** | The event name (e.g. `llm_request`, `m5_candle_update`) |
-| **Source module** | Which component emitted this event |
-| **Payload preview** | First ~80 characters of the JSON payload, truncated |
-
-### 2.2 Arrow Indicators
-
-| Arrow | Meaning |
-|-------|---------|
-| `<` (left, blue) | **Incoming data** — data arriving from an external source (broker, LLM response) |
-| `>` (right, green) | **Outgoing action** — action or signal sent outward (LLM request, order to broker) |
-| `!` (exclamation, red/orange) | **Error or warning** — something went wrong or needs attention |
-
-### 2.3 Color Coding by Category
-
-Rows are colored to match their event category:
-- **LLM events** — purple/violet tones
-- **Tool events** — blue tones
-- **Broker events** — orange tones
-- **Data events** — teal/cyan tones
-- **Core events** — grey/white
-- **Bus events** — yellow/gold tones
-- **Agent events** — green tones
-- **Entity events** — indigo/dark blue
+Double-clicking a row opens the [event detail window](#6-event-detail-window) (Section 6).
 
 ---
 
-## 3. Event Tabs — All Nine Explained
+## 3. Filter Builder
 
-### 3.1 All Events
+The Filter Builder replaces the former fixed category tabs with freely combinable rules.
 
-**Filter:** No filter — shows every event from every component.
+### 3.1 Rules
 
-The **All Events** tab is the unfiltered fire hose. Use it when you want to see the complete picture of what the system is doing, without restricting to a specific category.
+Each rule consists of:
 
-**Best used for:**
-- Getting a first impression of system activity.
-- Watching a complete analysis cycle unfold from trigger to signal.
-- Identifying unexpected event patterns.
-- Following a chain of events that spans multiple categories.
+| Part | Options |
+|------|---------|
+| **Join** | `Start` (only on the first rule), `AND`, `AND NOT`, `OR`, `OR NOT` |
+| **Field** | `Event Type`, `Source`, `Broker`, `Pair`, `Sender`, `Target`, `Message ID`, `Correlation ID`, `Payload Field` |
+| **Operator** | `contains`, `equals`, `starts with`, `ends with`, `exists` |
+| **Path** (only for `Payload Field`) | Dot-separated path into the payload JSON, e.g. `decision.confidence` |
+| **Value** | Comparison value (not used with `exists`) |
 
-**Caution:** In active systems with multiple agents, All Events can scroll very fast. Use the other tabs for focused investigation.
+Rules are evaluated **top to bottom**, in the order they were added — each rule's join applies to the running result so far. `+ Rule` adds a new rule, `Remove` deletes it, `New` resets the whole filter (no rules = all primary events shown).
 
-### 3.2 LLM Events
+**Example:** "all errors except for the test pair GBPUSD" — two rules: `Start: Event Type contains error`, then `AND NOT: Pair equals GBPUSD`. A common mistake is picking `OR NOT` instead — that would widen the result again (any event that *isn't* GBPUSD would also pass, regardless of the error criterion), since `OR` adds the rule independently of the running result so far.
 
-**Filter:** `llm_request`, `llm_response`, `llm_turn_started`, `llm_turn_completed`, `llm_turn_failed`, `llm_error`
+### 3.2 Include responses / Show orphans
 
-The **LLM Events** tab shows all communication with the LLM service.
+- **Include responses** — when enabled, a visible primary request also shows its correlated response events, even if those don't themselves match the filter rules (see Section 4).
+- **Show orphans** — when enabled, response events are shown even if their associated request event is no longer in the buffer (e.g. because it was already evicted).
 
-#### llm_request
+**Recommendation:** leave both enabled by default — otherwise, filtering on `llm_request` for example would show only the requests, not the matching responses, losing exactly the part that's usually most interesting (tokens, result, errors). Only disable `Include responses` when you deliberately want just the request side, e.g. to count how often a particular tool call happens per minute without the response rows cluttering the view.
 
-Emitted when an agent sends a request to the LLM via the event bus. The event is routed to the LLMService module (e.g. `llm:azure_azmin`).
+### 3.3 Saved Filters
 
-Payload includes:
-- `agent_id` — which agent initiated the request
-- `prompt_length` — approximate size of the prompt in tokens
-- `model` — which LLM model is targeted
-- `request_id` — unique identifier for this request
+A configured filter can be saved under a name:
 
-#### llm_response
+| Element | Function |
+|---------|---------|
+| **Name field + Save New** | Saves the current rule combination plus its `Include responses`/`Show orphans` setting under this name. |
+| **Update** | Overwrites the currently loaded saved filter with the current state. |
+| **Delete** | Deletes the currently loaded saved filter. |
 
-Emitted when the LLMService receives a completed response from the LLM provider and sends it back to the requesting agent.
+Saved filters are stored centrally in `system.json5` (`system.ui.monitor.saved_filters`) — meaning they're **visible to everyone using the system**, not just locally in your own browser. Every saved filter automatically appears as an entry in the Monitor section's **left sidebar**; clicking it loads its rules into the Filter Builder. With no saved filters, the sidebar shows "No saved filters".
 
-Payload includes:
-- `agent_id` — which agent receives the response
-- `input_tokens` — tokens consumed by the prompt
-- `output_tokens` — tokens in the response
-- `latency_ms` — total LLM call duration in milliseconds
-- `decision` — extracted decision object (if parsing succeeded)
-- `request_id` — matches the originating `llm_request`
-
-#### llm_turn_started
-
-Emitted at the start of an LLM turn within an agent cycle. Useful for timing: this event marks when the agent actually begins waiting for an LLM response.
-
-#### llm_turn_completed
-
-Emitted when the LLM turn completes successfully. Pairs with `llm_turn_started` for duration calculation.
-
-#### llm_turn_failed
-
-Emitted when an LLM turn fails — timeout, API error, network error, or parsing failure. Payload includes:
-- `reason` — the failure reason
-- `error_code` — HTTP status or error category
-- `retry_count` — how many retries were attempted
-
-#### llm_error
-
-Generic LLM error event for errors that occur outside of a specific turn (e.g. connection failures, authentication errors).
-
-**LLM Events tab is best used for:**
-- Diagnosing LLM connectivity issues.
-- Checking token consumption per agent cycle.
-- Verifying that requests are being sent and responses received.
-- Investigating LLM latency (input/output timing visible in `llm_response`).
-- Checking if decision parsing is succeeding or failing.
-
-### 3.3 Tool Events
-
-**Filter:** `tool_call_started`, `tool_call_completed`, `tool_call_failed`
-
-The **Tool Events** tab tracks all tool invocations dispatched by the ToolDispatcher during agent cycles.
-
-#### tool_call_started
-
-Emitted immediately before a tool function is executed.
-
-Payload includes:
-- `tool_name` — which tool is being called (e.g. `get_candles`, `calculate_indicator`)
-- `agent_id` — which agent initiated the tool call
-- `parameters` — the input parameters passed to the tool
-- `call_id` — unique identifier for this call
-
-#### tool_call_completed
-
-Emitted after a successful tool execution.
-
-Payload includes:
-- `tool_name`
-- `agent_id`
-- `call_id`
-- `duration_ms` — execution time in milliseconds
-- `result_summary` — brief description of the result (e.g. `"returned 200 candles"`)
-
-#### tool_call_failed
-
-Emitted when a tool execution fails.
-
-Payload includes:
-- `tool_name`
-- `agent_id`
-- `call_id`
-- `error` — error description
-- `duration_ms`
-
-**Tool Events tab is best used for:**
-- Verifying that all tool calls during a cycle completed successfully.
-- Identifying slow tools that are increasing cycle duration.
-- Diagnosing failed tool calls that may be causing empty or incomplete snapshots.
-- Understanding which tools an agent calls and in what order.
-
-### 3.4 Broker Events
-
-**Filter:** Broker connectivity, HTTP traffic, sync events, account status events
-
-The **Broker Events** tab shows all interactions between OpenForexAI and the connected broker adapters.
-
-#### broker_connected
-
-Emitted when a broker adapter successfully establishes connection. Payload includes the broker module ID and account details.
-
-#### broker_disconnected
-
-Emitted when a broker connection is lost. Payload includes the reason if known (e.g. timeout, HTTP error).
-
-#### broker_reconnecting
-
-Emitted when the broker adapter begins an automatic reconnection attempt. Payload includes the attempt number and backoff delay.
-
-#### broker_http_request
-
-Emitted for every HTTP request sent to the broker API. Payload includes:
-- `method` (GET/POST/PUT/PATCH)
-- `endpoint` — the API endpoint
-- `broker_id` — which broker module
-- `body` (for POST/PUT requests)
-
-#### broker_http_response
-
-Emitted for every HTTP response received from the broker API. Payload includes:
-- `status_code` — HTTP status (200, 400, 401, 500 etc.)
-- `broker_id`
-- `response_time_ms` — how long the API call took
-- `body_summary` — partial response body
-
-#### sync_check_started
-
-Emitted when a BA agent begins a sync check — verifying that locally tracked positions match what the broker has open.
-
-#### sync_check_completed
-
-Emitted when sync check completes. If a discrepancy was found:
-- `sync_detected: true` — a position was found closed at the broker that was open locally
-- `position_id` — which position
-- `action_taken` — what OpenForexAI did (e.g. `"marked_closed_sync_detected"`)
-
-**Broker Events tab is best used for:**
-- Diagnosing broker connection problems.
-- Watching API calls for a specific trade execution.
-- Verifying that sync checks are running and completing.
-- Investigating 4xx/5xx HTTP errors from the broker API.
-
-### 3.5 Data Events
-
-**Filter:** Candle pipeline events, indicator calculation events
-
-The **Data Events** tab shows the flow of market data through the system.
-
-#### m5_candle_update
-
-Emitted every time a new M5 candle is received from the broker's candle polling service. This is the primary system heartbeat — all agent triggers originate from this event.
-
-Payload includes:
-- `pair` — which currency pair
-- `broker_id`
-- `candle` — the new candle data (timestamp, open, high, low, close, volume)
-- `is_new` — whether this is a newly closed candle or a partial update
-
-#### m5_candle_saved
-
-Emitted after a new M5 candle has been persisted to the database.
-
-#### candles_request
-
-Emitted when an agent or tool requests candle data (e.g. during snapshot building). Payload includes the requested pair, timeframe, and count.
-
-#### candles_response
-
-Emitted when the candle data request is fulfilled. Payload includes count of candles returned and the timeframe.
-
-#### indicator_request
-
-Emitted when an indicator calculation is requested.
-
-#### indicator_response
-
-Emitted when indicator calculation completes. Payload includes the indicator type, period, and result values.
-
-**Data Events tab is best used for:**
-- Verifying that M5 candles are arriving consistently (system heartbeat check).
-- Checking that candles are being saved to the database.
-- Diagnosing data gaps or missing candles.
-- Watching indicator calculations during agent cycles.
-
-### 3.6 Core Events
-
-**Filter:** Agent trigger events, snapshot build events, agent backlog events
-
-The **Core Events** tab shows the lifecycle of agent cycles — from trigger to signal.
-
-#### agent_trigger_received
-
-Emitted when an agent's trigger condition is met and a cycle begins. This is the starting point of every analysis cycle.
-
-Payload includes:
-- `agent_id`
-- `trigger_type` — what triggered the agent (e.g. `m5_candle`)
-- `pair`
-- `candle_timestamp` — the candle that triggered this cycle
-
-#### agent_trigger_skipped
-
-Emitted when a trigger was received but the agent did not start a cycle. **This is the key event for debugging why an agent is not running.**
-
-Payload includes:
-- `agent_id`
-- `reason` — why the trigger was skipped. Possible values:
-  - `"session_filter"` — current time is outside the agent's configured trading session
-  - `"any_candle_divider"` — the agent is configured to only run every N candles, and this was not the Nth
-  - `"runtime_paused"` — the system is in Suspend mode
-  - `"already_running"` — a previous cycle has not yet completed
-  - `"disabled"` — the agent is disabled in configuration
-
-#### agent_backlog_detected
-
-Emitted when an agent's trigger queue has more unprocessed triggers than a configured threshold. This indicates the agent is falling behind.
-
-Payload includes:
-- `agent_id`
-- `backlog_size` — number of pending triggers
-- `oldest_pending_ms` — how old the oldest pending trigger is
-
-#### agent_input_built
-
-Emitted when the full agent input (snapshot) has been assembled and is ready to be sent to the LLM. This marks the end of the data-gathering phase.
-
-Payload includes:
-- `agent_id`
-- `snapshot_size_bytes` — size of the assembled snapshot
-- `build_duration_ms` — how long it took to build the snapshot
-
-#### agent_decision_snapshot_built
-
-Emitted when the decision snapshot (structured output) has been successfully built from the LLM response.
-
-#### agent_decision_snapshot_invalid
-
-Emitted when the LLM response could not be parsed into a valid decision snapshot. This means the LLM returned something that did not match the expected JSON structure.
-
-Payload includes:
-- `agent_id`
-- `reason` — why validation failed (e.g. missing required field, wrong value type)
-- `raw_response_preview` — first 200 characters of the raw LLM response
-
-**Core Events tab is best used for:**
-- Confirming that agents are being triggered as expected.
-- Diagnosing why an agent is not running (check `agent_trigger_skipped` and its `reason` field).
-- Watching the snapshot build process.
-- Identifying LLM response parsing failures.
-
-### 3.7 Bus Events
-
-**Filter:** All event bus routing events
-
-The **Bus Events** tab shows every message routed through the internal event bus, with full sender and target information.
-
-Bus events are the infrastructure layer: every llm_request, signal, trigger, and response is routed through the bus, and Bus Events shows the routing metadata.
-
-Each bus event row includes:
-- `sender` — the agent or module that sent the message (e.g. `agent:OXS_T-EURUSD-AA-ANLYS`)
-- `target` — the intended recipient (e.g. `llm:azure_azmin`, `agent:OXS_T-EURUSD-BA-TRADE`)
-- `event_type` — the type of the routed message
-- `routing_rule` — which routing rule matched (if applicable)
-
-**Bus Events tab is best used for:**
-- Verifying that signals are routed from AA to BA agents correctly.
-- Watching the full LLM call chain (request from agent → LLMService → response back to agent).
-- Diagnosing routing misconfigurations where signals are not reaching their targets.
-- Understanding the message flow between system components.
-
-### 3.8 Agent Events
-
-**Filter:** Agent decision and signal events
-
-The **Agent Events** tab shows events related to agent decision-making and signal generation.
-
-#### agent_decision_made
-
-Emitted when an agent has made a trading decision. This is the primary output event of an AA analysis cycle.
-
-Payload includes:
-- `agent_id`
-- `decision` — BUY, SELL, or HOLD
-- `confidence` — 0–100
-- `entry`, `stop_loss`, `take_profit`
-- `reasoning_summary` — brief text from the LLM
-- `entry_quality`
-
-#### agent_signal_generated
-
-Emitted when a signal (BUY or SELL) is generated and sent to the BA agent. HOLD decisions do not generate signals.
-
-Payload includes:
-- `agent_id` (AA agent)
-- `target_agent_id` (BA agent that will receive the signal)
-- `signal_type` — BUY or SELL
-- `signal_id` — unique identifier for this signal
-
-#### agent_input_built
-
-(Also visible in Core Events.) The assembled snapshot sent to the LLM.
-
-**Agent Events tab is best used for:**
-- Confirming that AA agents are generating decisions.
-- Verifying that BUY/SELL signals are being sent to BA agents.
-- Monitoring confidence levels and decision types over time.
-- Checking whether the agent is consistently choosing HOLD (which means no trades will be placed).
-
-### 3.9 Entity Events
-
-**Filter:** EntityController (EC) run events
-
-The **Entity Events** tab shows the lifecycle of EntityController runs — the structured execution units that process signals and manage trade state.
-
-#### ec_run_started
-
-Emitted when an EntityController run begins. This happens when the BA agent receives a signal and begins processing it.
-
-#### ec_run_completed
-
-Emitted when an EC run completes successfully.
-
-Payload includes:
-- `ec_id`
-- `agent_id`
-- `duration_ms`
-- `output_summary` — brief description of what the EC run produced
-
-#### ec_run_failed
-
-Emitted when an EC run fails. Payload includes the error reason and stack trace summary.
-
-#### ec_run_output
-
-Emitted for the specific output of an EC run (e.g. order placed, order rejected). Payload includes:
-- `output_type` — `order_placed`, `order_rejected`, `position_update`, etc.
-- `details` — specific details of the output
-
-**Entity Events tab is best used for:**
-- Verifying that BA agent signals are being processed.
-- Diagnosing why a trade was or was not executed.
-- Watching the full execution chain for a specific signal.
+**Recommendation:** create a saved filter for every agent you watch regularly (e.g. "EURUSD AA" with the rule `Source contains OXS_T-EURUSD-AA`). Since these filters are visible to everyone, colleagues benefit immediately too — no need to re-explain how to filter down to a specific pair each time. Because the filters live in `system.json5`, check before deleting an unfamiliar saved filter someone else created — it might be actively in use.
 
 ---
 
-## 4. Double-Click Event Detail Window
+## 4. Grouped/Correlated Events
 
-Double-clicking any event row opens the **Event Detail Window** — a floating, draggable, and resizable window that shows the full event data with context.
+Events carrying a `message_id` in their payload are considered **primary** (a standalone request). Events with a `correlation_id` pointing at another event's `message_id` are considered its **response** and are shown indented underneath it by default, once you click the `[N]` badge on the primary row.
 
-### 4.1 Window Layout
+- **`[N]`** next to a primary row — number of correlated response events; click to expand/collapse.
+- **`orphan`** (highlighted orange) — a response event whose associated request event wasn't found in the current buffer (e.g. already evicted, or outside the current filter with `Include responses` disabled).
 
-#### Title Bar
+This grouping replaces the old, separate "Bus Events" concept: request/response pairs (e.g. an `llm_request` and its matching `llm_response`) now appear together in one place, instead of being split across separate tabs.
 
-The title bar shows:
-- **Event type** — the full event name (e.g. `llm_response`)
-- **Timestamp** — HH:MM:SS.mmm
-- **Broker/Pair** — if applicable to this event
-- **Copy button** — copies the full JSON payload to clipboard
-- **Close button** — closes the window (also: press **Escape**)
+**Example:** an agent cycle with three tool calls produces one primary `agent_input_built` event with `[3]` next to it. Clicking it reveals the three matching `tool_call_completed` events indented underneath, in the order they executed — no need to manually hunt through the stream for related events.
 
-#### Context Strip
+**Warning — lots of `orphan` markers right after connecting is usually harmless:** right after opening the Monitor (freshly connected, buffer still empty), the first few response events will almost always show as `orphan`, because their request already happened earlier and isn't in the buffer anymore. That's normal, not a bug. If orphans keep piling up persistently during normal operation, though, that suggests very short gaps between request and eviction (the buffer is filling up very fast) — tighten your filter to push fewer irrelevant events through the buffer.
 
-The context strip is located between the title bar and the JSON payload. It provides human-readable context for the event:
+---
+
+## 5. Pinned Events
+
+A dedicated **"Pinned Events"** section appears above the event list whenever at least one event is pinned (collapsible).
+
+- **Manual pinning:** click a row's pin icon. Pinned events are held in a protected buffer on the backend that is **not** subject to ring-buffer eviction — they stay reachable even after the browser's 500-event buffer has long since moved on. Clicking `PinOff` removes the pin.
+- **Automatic pinning:** certain error/failure event types are auto-pinned by the system itself as soon as they occur — marked with an `auto` badge in the pinned list:
+  - `system_error`
+  - `llm_error`
+  - `llm_turn_failed`
+  - `ec_run_failed`
+  - `tool_call_failed`
+  - `broker_error`
+  - `broker_disconnected`
+
+The pinned section is re-fetched from the backend every 5 seconds (`GET /monitoring/pinned`), independent of the WebSocket stream — so it still shows content even if the live connection was briefly interrupted.
+
+**Recommendation:** pinned events are shared, system-wide state (not just your own browser) — useful for pointing a colleague at a specific problem without exchanging screenshots: just pin it and say "check the Pinned section." Don't forget to unpin (`PinOff`) once resolved — otherwise the pinned section accumulates stale cases over time, unnecessarily burying the ones that actually matter (the auto-pinned failures).
+
+---
+
+## 6. Event Detail Window
+
+Double-clicking a row (including in the pinned section) opens a floating, **draggable and resizable** window with the full event data.
+
+### 6.1 Title Bar
+
+- Event type (color-coded), timestamp, broker/pair (if applicable)
+- **Copy icon** — copies the full JSON payload to the clipboard
+- **Close icon** (also: **Escape** key)
+
+### 6.2 Context Strip
 
 | Field | Content |
 |-------|---------|
-| **What** | Plain-English description of what this event type represents |
-| **Why** | Why this event was emitted and what it triggers or signals next |
-| **Source** | The `source_module` field — which component produced this event (e.g. `agent:OXS_T-EURUSD-AA-ANLYS`, `broker.OXS_T`, `eventbus`) |
-| **Sender** | The bus sender agent ID (if routed via event bus) |
-| **Target** | The bus target agent ID (if this event was directed to a specific agent) |
-| **Broker/Pair** | The broker module and currency pair, if relevant |
+| **What / Why** | Plain-language explanation of what this event type means and why it fired — from a built-in catalogue of the most common event types. Unknown types show a note that no description is available. |
+| **Source** | The triggering module (e.g. `agent:OXS_T-EURUSD-AA-ANLYS`, `broker.OXS_T`). |
+| **Sender / Target** | Bus routing metadata, if present in the payload. |
+| **Broker** | Broker module and pair, if relevant. |
+| **Msg / Corr** | The event's `message_id` or `correlation_id`, if present — useful for manually finding the same chain in the [Event Log](ui.action.event_log.en.md). |
 
-The context strip turns raw technical events into understandable information — you don't need to know every event name by heart. The **What** and **Why** fields explain each event type in plain English.
+### 6.3 Payload
 
-#### JSON Payload
+Full JSON, with `\n` and `\"` escape sequences resolved for readability. Nothing is truncated.
 
-The full event payload is displayed as **pretty-printed JSON**:
-- All fields are expanded (no collapsed objects)
-- `\n` escape sequences are rendered as actual line breaks
-- `\"` escape sequences are rendered as actual quotes
-- Long strings are not truncated — the full payload is always shown
-- Use the **Copy button** in the title bar to copy the entire payload
+### 6.4 Dragging, Resizing, Multiple Windows
 
-### 4.2 Dragging and Resizing
+Click and drag the title bar to move; drag any edge/corner to resize. The window does not auto-refresh — it stays fixed on the event you opened, even as new events keep arriving. The most recently double-clicked row stays highlighted dark orange until another row is clicked.
 
-The detail window is:
-- **Draggable** — click and drag the title bar to reposition
-- **Resizable** — drag any edge or corner to resize
-
-This allows you to position the detail window alongside the event list so you can continue scanning events while reading the detail.
-
-### 4.3 Selected Row Highlight
-
-After you close the detail window, the row you double-clicked remains **highlighted in dark orange** in the event list. This makes it easy to find the event you were inspecting again, even if many new events have arrived.
-
-The highlight persists until you click another row or explicitly clear it.
-
-### 4.4 Keyboard Shortcut
-
-Press **Escape** to close the detail window without using the mouse.
+**Warning:** only **one** detail window can be open at a time — double-clicking another row replaces the currently open window instead of opening a second one alongside it. To directly compare two payloads (e.g. `llm_request` vs. its matching `llm_response`), your best bet is usually: copy the first payload via the copy icon, then open the second event.
 
 ---
 
-## 5. Controls
+## 7. Practical Debug Workflows
 
-### 5.1 Clear Button
+### 7.1 Watching a Full Analysis Cycle for a Pair
 
-The **Clear** button empties the current display. The ring buffer continues to receive new events, and new events will appear immediately after clearing. Clear is useful to get a clean view before triggering a specific action you want to observe.
+1. Filter Builder: add a rule `Source contains OXS_T-EURUSD-AA` (or use `Payload Field` with an appropriate path).
+2. Click `Clear` to start clean.
+3. Wait for the next M5 candle.
+4. Follow the chain: `agent_trigger_received` → `candles_request`/`candles_response` → `agent_input_built` → `llm_request` → `llm_turn_started`/`llm_turn_completed` → `llm_response` → `agent_decision_made` → on BUY/SELL: `agent_signal_generated` → `ec_run_started`/`ec_run_completed`.
+5. Double-click `llm_response` to see token usage and the decision in the detail window.
+6. If you'll need this again, save the filter under a name (e.g. "EURUSD AA cycle").
 
-**Note:** Clear only affects the display. The 10,000-event ring buffer is not reset — it continues accumulating events. If you re-open a tab after clearing, you will not see the old events again.
+### 7.2 Finding Out Why an Agent Isn't Running
 
-### 5.2 Live Indicator
+1. Filter: `Event Type equals agent_trigger_skipped`, optionally `AND Source contains <agent_id>`.
+2. Double-click a matching event and check the `reason` field in the payload:
+   - `"session_filter"` → agent is outside its configured trading session.
+   - `"any_candle_divider"` → the AnyCandle divider hasn't been reached yet.
+   - `"runtime_paused"` → the system is paused.
+   - `"already_running"` → a previous cycle hasn't finished yet.
+   - `"disabled"` → the agent is disabled in configuration.
+3. If no `agent_trigger_skipped` shows up at all: set the filter to `Event Type contains m5_candle` and check whether candles are arriving for this pair at all.
 
-The live indicator shows the WebSocket connection status. If it is not green:
-1. Check if the backend is running (Initial page — system status).
-2. Refresh the page.
-3. If the backend is running and the indicator stays grey: check browser console for WebSocket connection errors.
+### 7.3 Checking LLM Calls and Token Usage
 
----
+1. Filter: `Event Type starts with llm_`.
+2. Start an Execute run in Agent Chat, or wait for a natural cycle.
+3. Double-click `llm_response`; check `input_tokens`/`output_tokens`, `latency_ms`, and `decision` in the payload.
+4. If `llm_turn_failed` appears instead: check the `reason` field for the failure cause — these failures are also auto-pinned (Section 5), so they won't be lost from the buffer.
 
-## 6. LLM Architecture — Event Bus Flow (since v0.7)
+### 7.4 Monitoring Broker Connectivity
 
-Since version 0.7, **all LLM calls are routed through the Event Bus**. This is a significant architectural change that makes the full LLM call chain visible in the Monitor.
+1. Filter: `Event Type contains broker_`.
+2. Watch for `broker_connected` at system startup.
+3. Watch `broker_http_request`/`broker_http_response` pairs (expandable via the `[N]` badge) — check `status_code` in the response payload (`200` ok, `4xx` auth/parameter error, `5xx` server error).
+4. `broker_disconnected` and `broker_error` are auto-pinned — still findable in the Pinned section even after a full ring buffer.
 
-### 6.1 The Complete LLM Call Chain
+### 7.5 Investigating a Rejected Trade
 
-```
-Agent Analysis Cycle
-  → Snapshot built (agent_input_built)
-  → llm_request emitted to Event Bus
-  → Event Bus routes to LLMService (llm:azure_azmin)
-  → LLMService: llm_turn_started
-  → LLMService calls Azure OpenAI API (HTTP)
-  → Azure OpenAI API responds
-  → LLMService: llm_turn_completed
-  → LLMService emits llm_response to Event Bus
-  → Event Bus routes response back to originating Agent
-  → Agent processes LLM response
-  → agent_decision_made emitted
-```
-
-### 6.2 Where to See Each Step in the Monitor
-
-| Step | Tab | Event |
-|------|-----|-------|
-| Snapshot assembled | Core Events | `agent_input_built` |
-| LLM request sent from agent | Bus Events | `llm_request` (sender = agent, target = llm:...) |
-| LLM turn begins | LLM Events | `llm_turn_started` |
-| LLM turn ends | LLM Events | `llm_turn_completed` |
-| LLM response routed back | Bus Events | `llm_response` (sender = llm:..., target = agent) |
-| Decision extracted | Agent Events | `agent_decision_made` |
-
-This means you can trace the **full round-trip** of an LLM call entirely within the Monitor, without needing to check server logs.
-
----
-
-## 7. Practical Debugging Workflows
-
-### 7.1 Watching a Complete EURUSD Analysis Cycle
-
-Goal: Observe a full analysis cycle from M5 trigger to trade signal.
-
-1. Open the Monitor. Switch to **All Events** tab.
-2. Click **Clear** to start fresh.
-3. Wait for the next M5 candle (visible in Data Events or All Events as `m5_candle_update`).
-4. Watch for the following sequence:
-   - `m5_candle_update` (pair: EUR_USD)
-   - `agent_trigger_received` (agent: OXS_T-EURUSD-AA-ANLYS)
-   - Tool calls: `candles_request` / `candles_response` for multiple timeframes
-   - `agent_input_built` — snapshot ready
-   - `llm_request` in Bus Events — sent to LLM
-   - `llm_turn_started` in LLM Events
-   - `llm_turn_completed` in LLM Events
-   - `llm_response` in Bus Events — returned to agent
-   - `agent_decision_made` in Agent Events
-   - (If BUY/SELL:) `agent_signal_generated` → `ec_run_started` → `ec_run_completed`
-5. Double-click `agent_decision_made` to see the full decision in the detail window.
-
-### 7.2 Debugging Why an Agent Is Not Running
-
-Goal: Find out why no agent cycles are occurring.
-
-1. Open the Monitor. Switch to **Core Events** tab.
-2. Wait 5–10 minutes (at least one M5 candle interval).
-3. Look for `agent_trigger_skipped` events for the agent in question.
-4. Double-click the event to open the detail window.
-5. Read the **`reason`** field in the payload:
-   - `"session_filter"` → Agent is outside its configured trading session. Check session configuration.
-   - `"any_candle_divider"` → Agent is configured to run every N candles, and this was not the Nth.
-   - `"runtime_paused"` → System is suspended. Click Continue on the Initial page.
-   - `"already_running"` → Previous cycle is still in progress (slow LLM or many tools).
-   - `"disabled"` → Agent is disabled in config. Check `system.json5`.
-6. If there is no `agent_trigger_skipped` event either: check **Data Events** tab for `m5_candle_update`. Are candles arriving for this pair?
-
-### 7.3 Verifying LLM Calls and Token Consumption
-
-Goal: Confirm LLM calls are working and check token usage.
-
-1. Switch to **LLM Events** tab.
-2. Trigger an Execute run in Agent Chat (or wait for a natural cycle).
-3. Watch for `llm_turn_started` followed by `llm_turn_completed`.
-4. Double-click `llm_response` to see the detail window.
-5. In the payload, check:
-   - `input_tokens` and `output_tokens` — total token usage
-   - `latency_ms` — how long the LLM call took
-   - `decision` — was the decision successfully extracted?
-6. If you see `llm_turn_failed` instead: check the `reason` field for the error.
-
-### 7.4 Checking Broker Connection Health
-
-Goal: Verify the broker is connected and responding correctly.
-
-1. Switch to **Broker Events** tab.
-2. Look for `broker_connected` (should have appeared at system startup).
-3. Watch for `broker_http_request` / `broker_http_response` pairs — these occur during candle polling and sync checks.
-4. In `broker_http_response`: check the `status_code` field.
-   - `200` — all good
-   - `4xx` — authentication or parameter error
-   - `5xx` — broker-side server error
-5. If you see `broker_disconnected` followed by `broker_reconnecting`: the system is attempting auto-recovery. Watch for `broker_connected` to confirm success.
-
-### 7.5 Debugging Event Routing
-
-Goal: Verify that signals are being routed from AA to BA agents correctly.
-
-1. Switch to **Bus Events** tab.
-2. Trigger an Execute run in Agent Chat for the AA agent.
-3. Watch for `agent_signal_generated` in the bus event stream.
-4. Double-click the event. In the context strip:
-   - **Sender** should be the AA agent ID.
-   - **Target** should be the BA agent ID.
-5. If the target is wrong or missing: check the event routing configuration in Config → Event Routing.
-6. After the signal: watch for `ec_run_started` in Entity Events to confirm the BA agent received it.
-
-### 7.6 Investigating a Rejected Trade
-
-Goal: Find out why a trade was rejected.
-
-1. Switch to **Entity Events** tab.
-2. Look for `ec_run_output` with `output_type: "order_rejected"`.
-3. Double-click the event. The payload's `details` field explains the rejection reason:
-   - Risk limit exceeded
-   - Duplicate signal detected
-   - Broker API rejection (with status code)
-   - Invalid SL/TP values
-4. Also check **Broker Events** for the `broker_http_response` around the same timestamp — if the broker rejected the order, the HTTP response will show a 4xx status with an error message.
+1. Filter: `Event Type equals ec_run_output`, `Payload Field` with path `output_type` and value `order_rejected`.
+2. Double-click the match; the `details` field in the payload explains the rejection reason.
+3. For the full, permanent chain (including from the past), search the [Event Log](ui.action.event_log.en.md) with the same `correlation_id`/`message_id` instead — the Monitor only shows what has streamed through live since the page was last loaded.
 
 ---
 
 ## 8. Tips for Effective Monitor Use
 
-**Use the right tab:** All Events is overwhelming in an active system. Use the specific tabs when investigating a particular area. Only fall back to All Events when you need to see cross-category sequences.
+**Filter instead of scrolling:** in an active system with multiple agents, the unfiltered stream gets unwieldy fast. A targeted rule combination is usually faster than manual scrolling.
 
-**Clear before triggering:** If you want to watch a specific action (like an Execute run), clear the display first, then trigger the action. You'll get a clean, focused event stream.
+**Save recurring filters:** a rule combination you need often (e.g. "errors only," "one specific pair") is worth saving under a name — it then appears permanently in the sidebar, for every user of the system.
 
-**Double-click liberally:** The context strip in the detail window explains every event type in plain English. Even if you don't know what an event means, double-clicking it will tell you.
+**Pin important individual events instead of just copying them:** a pinned event stays reachable even after the buffer has long since moved on — better than copying the payload into an external note.
 
-**Keep detail window open:** The detail window doesn't auto-update. You can leave it open while new events arrive — it stays pinned to the event you opened. The dark orange highlight on the selected row ensures you can find it again.
+**Error events are already protected:** the auto-pinned failure types (Section 5) don't need to be manually pinned to avoid losing them.
 
-**Ring buffer fills fast:** In active systems, 10,000 events can accumulate within a few minutes. For long debug sessions, check the most relevant tab frequently rather than relying on scrolling back far.
-
-**Combine with Agent Chat:** For the deepest insight, run an Execute cycle in Agent Chat while monitoring the LLM Events and Core Events tabs. You'll see the snapshot being built (Core Events) and the LLM call being processed (LLM Events) in real time while the Execute result appears in the Chat panel.
+**Monitor for "now," Event Log for "back then":** use the Monitor for anything happening now or about to happen. Use the [Event Log](ui.action.event_log.en.md) for anything that happened more than a few hundred events ago, or before the last page reload.

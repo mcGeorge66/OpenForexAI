@@ -378,11 +378,11 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
   const EVENT_INFO: Record<string, { what: string; why: string }> = {
     // LLM
     llm_request:               { what: 'LLM request sent to bus',              why: 'Agent or EC sends an LLM_REQUEST to an LLMService via the event bus' },
-    llm_response:              { what: 'LLM service returned response',        why: 'LLMService called Azure/Anthropic API and returns the result to the caller' },
+    llm_response:              { what: 'LLM service returned response',        why: 'LLMService called the configured LLM provider API and returns the result to the caller' },
     llm_turn_started:          { what: 'LLM turn started',                     why: 'Agent begins a new turn in the tool-use loop' },
     llm_turn_completed:        { what: 'LLM turn completed',                   why: 'Agent received and processed the LLM response' },
     llm_turn_failed:           { what: 'LLM turn failed',                      why: 'LLM call failed due to timeout or API error' },
-    llm_http_attempt_started:  { what: 'HTTP call to LLM provider started',    why: 'LLM Adapter is sending an HTTP request to Azure/OpenAI' },
+    llm_http_attempt_started:  { what: 'HTTP call to LLM provider started',    why: 'LLM Adapter is sending an HTTP request to the configured LLM provider' },
     llm_http_attempt_completed:{ what: 'HTTP call to LLM provider succeeded',  why: 'LLM provider responded successfully' },
     llm_http_attempt_failed:   { what: 'HTTP call to LLM provider failed',     why: 'LLM provider unreachable or returned an error' },
     // Market data

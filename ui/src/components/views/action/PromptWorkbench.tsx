@@ -1,5 +1,5 @@
 /**
- * PromptWorkbench (APW) — sandbox for testing/tuning an Agent's system prompt
+ * PromptWorkbench (PWB) — sandbox for testing/tuning an Agent's system prompt
  * against historical candle data, independent of the live trading system.
  *
  * Candle loading + numbering, chart, Analyse-tab indicator overlays (reused

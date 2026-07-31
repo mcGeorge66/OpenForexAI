@@ -77,21 +77,18 @@ const HANDBOOK_FILE: Record<string, string> = {
   'action:orderbook':       'ui.action.orderbook',
   'action:chart_analysis':  'ui.action.chart_analysis',
   'action:prompt_workbench': 'ui.action.prompt_workbench',
+  'action:event_log':       'ui.action.event_log',
   'action:llm_checker':     'ui.test.llm_checker',
   'action:tool_exec':       'ui.test.tool_executor',
-  // monitor
-  'monitor:all':       'ui.monitor',
-  'monitor:llm':       'ui.monitor',
-  'monitor:tool':      'ui.monitor',
-  'monitor:bus':       'ui.monitor',
-  'monitor:broker':    'ui.monitor',
-  'monitor:data':      'ui.monitor',
-  'monitor:core':      'ui.monitor',
-  'monitor:agent':     'ui.monitor',
+  // monitor — the sidebar shows user-saved filters with generated ids, not
+  // fixed sub-ids, so there's nothing stable to key on here. Every monitor
+  // sub-id falls through to the `ui.${section}` default below, which already
+  // resolves to `ui.monitor` — intentionally no entries in this section.
   // config
   'config:agent_wizard':   'ui.config.agent_config',
   'config:snapshot_config':'ui.config.snapshot_config',
   'config:decision_prompt':'ui.config.decision_prompt',
+  'config:chartshot_config':'ui.config.chartshot_config',
   'config:bridge_tools':   'ui.config.bridge_tools',
   'config:event_routing':  'ui.config.event_routing',
   'config:system':         'ui.config.system_config',
@@ -99,7 +96,8 @@ const HANDBOOK_FILE: Record<string, string> = {
   'config:package_manager':'ui.config.package_manager',
   'config:broker':         'ui.config.broker_modules',
   'config:llm':            'ui.config.llm_modules',
-  'config:entity_config':  'ui.config.entity_config',
+  'config:ec_wizard':      'ui.config.entity_config',
+  'config:ai_assistant':   'ui.config.ai_assistant',
 }
 
 function resolveHandbookFile(section: TopSection, sub: string, lang: 'en' | 'de'): string {

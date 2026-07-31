@@ -2,660 +2,232 @@
 
 # Monitor — Handbuch
 
-Der **Monitor** ist der Live-Ereignisstrom-Viewer von OpenForexAI. Er zeigt in Echtzeit jeden Vorgang, der durch den Event Bus des Systems fließt — und ist damit das primäre Werkzeug für Laufzeitbeobachtung, Fehlersuche und das Verstehen des Systemverhaltens auf jedem Detailniveau.
+Der **Monitor** ist der Live-Ereignisstrom-Viewer von OpenForexAI. Er zeigt in Echtzeit jeden Vorgang, der durch den Event Bus des Systems fließt — das primäre Werkzeug für Laufzeitbeobachtung, Fehlersuche und das Verstehen des Systemverhaltens auf jedem Detailniveau.
 
-Der Monitor steuert nichts — er beobachtet nur. Betrachten Sie ihn als einen ständig laufenden Log-Viewer mit intelligenter Filterung, reichhaltigen Event-Metadaten und einem strukturierten Detail-Fenster für jedes interessante Ereignis.
+Der Monitor steuert nichts — er beobachtet nur. Anders als das [Event Log](ui.action.event_log.de.md) (durchsuchbares, dauerhaftes Datenbank-Archiv) zeigt der Monitor einen **flüchtigen Live-Strom**: Sein Inhalt geht beim Neuladen der Seite verloren, dafür sieht man Events, sobald sie passieren, ohne auf eine Datenbank-Abfrage zu warten.
 
 ---
 
 ## 1. Grundkonzept
 
-### 1.1 Einmalige Subscription, Client-seitige Filterung
+### 1.1 Eine Subscription, ein Filter Builder
 
-Die UI abonniert den **vollständigen Ereignisstrom genau einmal** über WebSocket. Alle Events fließen in einen gemeinsamen Ring-Buffer. Die Tabs, die Sie sehen, sind **Client-seitige Filter** — das Wechseln des Tabs erstellt keine neue Subscription und lädt keine Daten neu. Es ändert lediglich den Filter, der auf die gepufferten Events angewendet wird.
-
-Das bedeutet:
-- Tab-Wechsel sind sofort (kein Netzwerk-Roundtrip).
-- Während Sie einen anderen Tab lesen, gehen keine Events verloren.
-- Der Ring-Buffer enthält immer die letzten 1.000 Events kategorieübergreifend.
+Die UI abonniert den vollständigen Ereignisstrom **einmal** über WebSocket (`/ws/monitoring`) und hält die letzten **500 Events** im Speicher (Ring-Buffer). Es gibt **keine festen Kategorie-Tabs** mehr — stattdessen filtert ein einziger, frei konfigurierbarer **Filter Builder** direkt im Monitor-Panel den angezeigten Ausschnitt. Das Wechseln oder Ändern eines Filters ist rein clientseitig: kein Netzwerk-Roundtrip, keine neue Subscription, keine verlorenen Events.
 
 ### 1.2 Ring-Buffer
 
-Der Monitor speichert die letzten 1.000 Ereignisse im Arbeitsspeicher und zeigt davon die letzten 1.000 im UI an. Wenn der Buffer voll ist, wird das älteste Ereignis gelöscht, um Platz für das neueste zu schaffen. Dies ist das gleitende Fenster der Systemaktivität.
+Der Browser hält die letzten 500 empfangenen Events im Speicher; ältere Events fallen beim Eintreffen neuer Events aus dem Puffer. Das Backend selbst führt zusätzlich einen eigenen Ring-Puffer von 1.000 Events für Polling-Zwecke, unabhängig vom WebSocket-Strom.
 
-Praktische Auswirkungen:
-- In aktiven Systemen mit mehreren Agents kann sich der Buffer innerhalb von Minuten füllen.
-- Bei ruhigen Systemen oder während des Debuggings können Events stundenlang im Buffer verbleiben.
-- Das Klicken auf **Clear** leert die Anzeige, beeinflusst aber nicht den Ring-Buffer — neue Events kommen weiterhin an.
+**Praktische Auswirkung:** In aktiven Systemen mit mehreren Agenten kann sich der Puffer innerhalb von Minuten komplett füllen und älteste Events verdrängen. Wer ein bestimmtes Event dauerhaft festhalten will, sollte es **anpinnen** (Abschnitt 5) statt sich auf den Puffer zu verlassen.
+
+**Beispiel, wann das relevant wird:** Man beobachtet gerade `agent_trigger_skipped`-Events für einen bestimmten Agenten, wird kurz abgelenkt (Telefonat, anderer Tab), und als man zurückkommt, ist das gesuchte Event bereits aus dem 500er-Puffer herausgefallen, weil in der Zwischenzeit viele andere Agenten weitergelaufen sind. In so einem Fall hilft nur noch das dauerhafte [Event Log](ui.action.event_log.de.md) — für den nächsten Fall lohnt es sich, das nächste Auftreten sofort anzupinnen, statt es „für später" im Kopf zu behalten.
 
 ### 1.3 Live-Indikator
 
-Der **Live-Indikator** (grüner Punkt oben rechts im Monitor-Panel) zeigt den WebSocket-Verbindungsstatus:
+Oben links im Panel:
 
-| Zustand | Bedeutung |
+| Anzeige | Bedeutung |
 |---------|-----------|
-| Grüner Punkt, pulsierend | WebSocket aktiv, Events werden empfangen |
-| Grauer/roter Punkt | WebSocket getrennt — es werden keine Events empfangen |
+| `● Live` (grün) | WebSocket aktiv, Events werden empfangen |
+| `○ Disconnected` (rot) | WebSocket getrennt — es werden keine Events empfangen |
 
-Wenn der Live-Indikator nicht grün ist: Seite neu laden oder prüfen, ob das Backend läuft.
+Bei `Disconnected`: Backend-Status auf der Initial-Seite prüfen, ggf. Seite neu laden.
+
+Daneben werden zwei Zähler angezeigt: **shown** (wie viele Events nach Filterung aktuell in der Liste stehen) und **primary** (wie viele davon eigenständige Anfrage-Events sind, ohne ihre zugehörigen Antwort-Events — siehe Abschnitt 4).
+
+### 1.4 Auto-Scroll und Reihenfolge
+
+Neueste Events erscheinen **oben** in der Liste (nicht unten). Der `Auto`/`Paused`-Button oben rechts steuert, ob die Liste automatisch nach oben scrollt, wenn neue Events eintreffen:
+
+- **Auto** (grün) — die Liste scrollt bei jedem neuen Event automatisch nach oben.
+- **Paused** — Auto-Scroll ist deaktiviert, z. B. weil man gerade weiter unten in der Liste liest. Zurück nach oben scrollen aktiviert Auto automatisch wieder.
+
+**Clear** leert die aktuell im Browser gehaltene Liste (nicht das Backend) — neue Events erscheinen sofort danach wieder normal.
 
 ---
 
 ## 2. Event-Zeilen-Format
 
-Jedes Ereignis erscheint als eine einzelne Zeile in der Monitor-Tabelle. Zeilen sind nach Ereigniskategorie farbcodiert für schnelles visuelles Scannen.
+Jedes Event erscheint als eine Zeile:
 
-### 2.1 Spalten einer Event-Zeile
+| Element | Inhalt |
+|---------|--------|
+| **`[N]`-Button** (falls vorhanden) | Anzahl korrelierter Folge-Events (siehe Abschnitt 4); Klick klappt sie ein-/aus. |
+| **Zeitstempel** | Uhrzeit mit Millisekunden-Präzision. |
+| **`orphan`-Markierung** | Nur bei Antwort-Events ohne sichtbares Eltern-Event im aktuellen Puffer (siehe Abschnitt 4). |
+| **Ereignis-Typ** | Farbcodiert je nach Event-Typ (z. B. LLM-Events in Blautönen, Fehler in Rot, Broker-Events in Grün/Orange). |
+| **`bus`/`agent`-Badge** | Nur bei `llm_request`/`llm_response`: ob das Event vom Event-Bus-Transport oder direkt vom Agent-Monitoring stammt. |
+| **Quelle** | Der auslösende Agent (z. B. `OXS_T-EURUSD-AA-ANLYS`), falls vorhanden. |
+| **Broker/Pair** | In eckigen Klammern, falls zutreffend. |
+| **Payload-Vorschau** | Kompakte, ereignistyp-spezifische Zusammenfassung (z. B. bei `llm_response`: Turn, Stop-Grund, Token-Anzahl, Tool-Aufrufe, Modell) statt rohem JSON. |
+| **Pin-Icon** | Erscheint beim Hover; pinnt/entpinnt dieses Event (Abschnitt 5). |
 
-| Spalte | Inhalt |
-|--------|--------|
-| **Zeitstempel** | HH:MM:SS.mmm — Uhrzeit des Ereignisses mit Millisekunden-Präzision |
-| **Pfeil-Indikator** | Richtungsmarkierung — siehe unten |
-| **Ereignis-Typ** | Der Ereignisname (z. B. `llm_request`, `m5_candle_update`) |
-| **Quell-Modul** | Welche Komponente dieses Ereignis ausgelöst hat |
-| **Payload-Vorschau** | Erste ~80 Zeichen des JSON-Payloads, abgeschnitten |
-
-### 2.2 Pfeil-Indikatoren
-
-| Pfeil | Bedeutung |
-|-------|-----------|
-| `<` (links, blau) | **Eingehende Daten** — Daten, die von einer externen Quelle ankommen (Broker, LLM-Antwort) |
-| `>` (rechts, grün) | **Ausgehende Aktion** — Aktion oder Signal, das nach außen gesendet wird (LLM-Anfrage, Order an Broker) |
-| `!` (Ausrufezeichen, rot/orange) | **Fehler oder Warnung** — etwas ist fehlgelaufen oder erfordert Aufmerksamkeit |
-
-### 2.3 Farbcodierung nach Kategorie
-
-Zeilen sind farbig markiert, entsprechend ihrer Ereigniskategorie:
-- **LLM-Events** — violett/lila Töne
-- **Tool-Events** — blau Töne
-- **Broker-Events** — orange Töne
-- **Data-Events** — türkis/cyan Töne
-- **Core-Events** — grau/weiß
-- **Bus-Events** — gelb/gold Töne
-- **Agent-Events** — grün Töne
-- **Entity-Events** — indigo/dunkelblau
+Ein Doppelklick auf eine Zeile öffnet das [Event-Detail-Fenster](#6-event-detail-fenster) (Abschnitt 6).
 
 ---
 
-## 3. Ereignis-Tabs — Alle neun erklärt
+## 3. Filter Builder
 
-### 3.1 All Events (Alle Ereignisse)
+Der Filter Builder ersetzt die früheren festen Kategorie-Tabs durch frei kombinierbare Regeln.
 
-**Filter:** Kein Filter — zeigt jedes Ereignis von jeder Komponente.
+### 3.1 Regeln (Rules)
 
-Der **All Events**-Tab ist der ungefilterte Vollstrom. Verwenden Sie ihn, wenn Sie das vollständige Bild dessen sehen möchten, was das System gerade tut, ohne auf eine bestimmte Kategorie einzuschränken.
+Jede Regel besteht aus:
 
-**Am besten geeignet für:**
-- Ersten Überblick über die Systemaktivität gewinnen.
-- Einen vollständigen Analyse-Zyklus vom Trigger bis zum Signal beobachten.
-- Unerwartete Ereignismuster identifizieren.
-- Einer Ereigniskette folgen, die mehrere Kategorien umfasst.
+| Teil | Optionen |
+|------|---------|
+| **Verknüpfung** | `Start` (nur bei der ersten Regel), `AND`, `AND NOT`, `OR`, `OR NOT` |
+| **Feld** | `Event Type`, `Source`, `Broker`, `Pair`, `Sender`, `Target`, `Message ID`, `Correlation ID`, `Payload Field` |
+| **Operator** | `contains`, `equals`, `starts with`, `ends with`, `exists` |
+| **Pfad** (nur bei `Payload Field`) | Punkt-getrennter Pfad in das Payload-JSON, z. B. `decision.confidence` |
+| **Wert** | Vergleichswert (entfällt bei `exists`) |
 
-**Vorsicht:** In aktiven Systemen mit mehreren Agents kann All Events sehr schnell scrollen. Verwenden Sie die spezifischen Tabs für fokussierte Untersuchungen.
+Regeln werden **von oben nach unten** ausgewertet, in der Reihenfolge, in der sie hinzugefügt wurden — die Verknüpfung jeder Regel bezieht sich auf das bisherige Zwischenergebnis. `+ Rule` fügt eine neue Regel hinzu, `Remove` entfernt sie, `New` setzt den gesamten Filter zurück (keine Regeln = alle primären Events sichtbar).
 
-### 3.2 LLM Events
+**Beispiel:** „Alle Fehler außer für das Test-Pair GBPUSD" — zwei Regeln: `Start: Event Type contains error`, dann `AND NOT: Pair equals GBPUSD`. Ein häufiger Denkfehler ist, stattdessen `OR NOT` zu wählen — das würde das Ergebnis wieder aufweiten (jedes Event, das *nicht* GBPUSD ist, würde zusätzlich durchkommen, unabhängig vom Fehler-Kriterium), da `OR` die Regel unabhängig vom bisherigen Zwischenergebnis hinzufügt.
 
-**Filter:** `llm_request`, `llm_response`, `llm_turn_started`, `llm_turn_completed`, `llm_turn_failed`, `llm_error`
+### 3.2 Include responses / Show orphans
 
-Der **LLM Events**-Tab zeigt die gesamte Kommunikation mit dem LLM-Dienst.
+- **Include responses** — wenn aktiv, werden zu einer sichtbaren primären Anfrage auch ihre korrelierten Antwort-Events mit angezeigt, selbst wenn diese selbst nicht auf die Filterregeln passen (siehe Abschnitt 4).
+- **Show orphans** — wenn aktiv, werden Antwort-Events angezeigt, deren zugehöriges Anfrage-Event nicht (mehr) im Puffer ist (z. B. weil es bereits verdrängt wurde).
 
-#### llm_request
+**Empfehlung:** Beide Optionen im Regelfall aktiviert lassen — sonst sieht man z. B. bei einem Filter auf `llm_request` nur die Anfragen, aber nicht mehr die dazugehörigen Antworten, und verliert damit genau den Teil, der meist am interessantesten ist (Tokens, Ergebnis, Fehler). `Include responses` nur deaktivieren, wenn man bewusst ausschließlich die Anfrage-Seite sehen will, z. B. um zu zählen, wie oft ein bestimmter Tool-Aufruf pro Minute passiert, ohne durch die Antwort-Zeilen abgelenkt zu werden.
 
-Wird ausgelöst, wenn ein Agent eine Anfrage an das LLM über den Event Bus sendet. Das Ereignis wird an das LLMService-Modul weitergeleitet (z. B. `llm:azure_azmin`).
+### 3.3 Gespeicherte Filter
 
-Payload enthält:
-- `agent_id` — welcher Agent die Anfrage initiiert hat
-- `prompt_length` — ungefähre Größe des Prompts in Tokens
-- `model` — welches LLM-Modell angesprochen wird
-- `request_id` — eindeutige Kennung für diese Anfrage
+Ein konfigurierter Filter kann unter einem Namen gespeichert werden:
 
-#### llm_response
+| Element | Funktion |
+|---------|---------|
+| **Namensfeld + Save New** | Speichert die aktuelle Regel-Kombination samt `Include responses`/`Show orphans`-Einstellung unter diesem Namen. |
+| **Update** | Überschreibt den aktuell geladenen gespeicherten Filter mit dem aktuellen Stand. |
+| **Delete** | Löscht den aktuell geladenen gespeicherten Filter. |
 
-Wird ausgelöst, wenn der LLMService eine vollständige Antwort vom LLM-Anbieter empfangen hat und diese zurück an den anfragenden Agent sendet.
+Gespeicherte Filter werden zentral in `system.json5` (`system.ui.monitor.saved_filters`) abgelegt — sie sind also **für alle Nutzer des Systems sichtbar**, nicht nur lokal im eigenen Browser. Jeder gespeicherte Filter erscheint automatisch als Eintrag in der **linken Seitenleiste** des Monitor-Bereichs; ein Klick darauf lädt seine Regeln in den Filter Builder. Ohne gespeicherte Filter zeigt die Seitenleiste „No saved filters".
 
-Payload enthält:
-- `agent_id` — welcher Agent die Antwort empfängt
-- `input_tokens` — verbrauchte Tokens für den Prompt
-- `output_tokens` — Tokens in der Antwort
-- `latency_ms` — Gesamtdauer des LLM-Aufrufs in Millisekunden
-- `decision` — extrahiertes Entscheidungs-Objekt (wenn Parsing erfolgreich)
-- `request_id` — entspricht dem ursprünglichen `llm_request`
-
-#### llm_turn_started
-
-Wird zu Beginn eines LLM-Turns innerhalb eines Agent-Zyklus ausgelöst. Nützlich für Timing: Dieses Ereignis markiert, wann der Agent tatsächlich anfängt, auf eine LLM-Antwort zu warten.
-
-#### llm_turn_completed
-
-Wird ausgelöst, wenn ein LLM-Turn erfolgreich abgeschlossen wurde. Bildet mit `llm_turn_started` ein Paar für die Dauermessung.
-
-#### llm_turn_failed
-
-Wird ausgelöst, wenn ein LLM-Turn fehlschlägt — Timeout, API-Fehler, Netzwerkfehler oder Parsing-Fehler. Payload enthält:
-- `reason` — den Fehlergrund
-- `error_code` — HTTP-Status oder Fehlerkategorie
-- `retry_count` — wie viele Wiederholungsversuche unternommen wurden
-
-#### llm_error
-
-Generisches LLM-Fehlerereignis für Fehler, die außerhalb eines spezifischen Turns auftreten (z. B. Verbindungsfehler, Authentifizierungsfehler).
-
-**LLM Events-Tab am besten geeignet für:**
-- Diagnose von LLM-Verbindungsproblemen.
-- Überprüfen des Token-Verbrauchs pro Agent-Zyklus.
-- Verifizieren, dass Anfragen gesendet und Antworten empfangen werden.
-- Untersuchen der LLM-Latenz (Zeitstempel in `llm_response`).
-- Prüfen, ob das Entscheidungs-Parsing erfolgreich ist oder fehlschlägt.
-
-### 3.3 Tool Events
-
-**Filter:** `tool_call_started`, `tool_call_completed`, `tool_call_failed`
-
-Der **Tool Events**-Tab verfolgt alle Tool-Aufrufe, die vom ToolDispatcher während Agent-Zyklen ausgeführt werden.
-
-#### tool_call_started
-
-Wird unmittelbar vor der Ausführung einer Tool-Funktion ausgelöst.
-
-Payload enthält:
-- `tool_name` — welches Tool aufgerufen wird (z. B. `get_candles`, `calculate_indicator`)
-- `agent_id` — welcher Agent den Tool-Aufruf initiiert hat
-- `parameters` — die übergebenen Eingabeparameter
-- `call_id` — eindeutige Kennung für diesen Aufruf
-
-#### tool_call_completed
-
-Wird nach einer erfolgreichen Tool-Ausführung ausgelöst.
-
-Payload enthält:
-- `tool_name`
-- `agent_id`
-- `call_id`
-- `duration_ms` — Ausführungszeit in Millisekunden
-- `result_summary` — kurze Beschreibung des Ergebnisses
-
-#### tool_call_failed
-
-Wird ausgelöst, wenn eine Tool-Ausführung fehlschlägt.
-
-Payload enthält:
-- `tool_name`
-- `agent_id`
-- `call_id`
-- `error` — Fehlerbeschreibung
-- `duration_ms`
-
-**Tool Events-Tab am besten geeignet für:**
-- Verifizieren, dass alle Tool-Aufrufe während eines Zyklus erfolgreich abgeschlossen wurden.
-- Langsame Tools identifizieren, die die Zyklusdauer erhöhen.
-- Fehlerhafte Tool-Aufrufe diagnostizieren, die leere oder unvollständige Snapshots verursachen könnten.
-- Verstehen, welche Tools ein Agent in welcher Reihenfolge aufruft.
-
-### 3.4 Broker Events
-
-**Filter:** Broker-Konnektivität, HTTP-Traffic, Sync-Events, Kontostatus-Events
-
-Der **Broker Events**-Tab zeigt alle Interaktionen zwischen OpenForexAI und den verbundenen Broker-Adaptern.
-
-#### broker_connected
-
-Wird ausgelöst, wenn ein Broker-Adapter erfolgreich eine Verbindung herstellt. Payload enthält die Broker-Modul-ID und Kontodetails.
-
-#### broker_disconnected
-
-Wird ausgelöst, wenn eine Broker-Verbindung verloren geht. Payload enthält den Grund, falls bekannt.
-
-#### broker_reconnecting
-
-Wird ausgelöst, wenn der Broker-Adapter einen automatischen Wiederverbindungsversuch startet. Payload enthält die Versuchsnummer und Wartezeit.
-
-#### broker_http_request
-
-Wird für jede HTTP-Anfrage ausgelöst, die an die Broker-API gesendet wird. Payload enthält:
-- `method` (GET/POST/PUT/PATCH)
-- `endpoint` — der API-Endpunkt
-- `broker_id` — welches Broker-Modul
-- `body` (bei POST/PUT-Anfragen)
-
-#### broker_http_response
-
-Wird für jede HTTP-Antwort der Broker-API ausgelöst. Payload enthält:
-- `status_code` — HTTP-Status (200, 400, 401, 500 usw.)
-- `broker_id`
-- `response_time_ms` — Dauer des API-Aufrufs
-- `body_summary` — partieller Antwort-Body
-
-#### sync_check_started
-
-Wird ausgelöst, wenn ein BA-Agent einen Sync-Check beginnt — Überprüfung, ob lokal gespeicherte Positionen mit dem übereinstimmen, was der Broker als offen hat.
-
-#### sync_check_completed
-
-Wird ausgelöst, wenn der Sync-Check abgeschlossen ist. Wenn eine Diskrepanz gefunden wurde:
-- `sync_detected: true` — eine Position wurde beim Broker als geschlossen gefunden, war lokal aber noch offen
-- `position_id` — welche Position
-- `action_taken` — was OpenForexAI unternommen hat
-
-**Broker Events-Tab am besten geeignet für:**
-- Diagnose von Broker-Verbindungsproblemen.
-- Beobachten von API-Aufrufen für eine bestimmte Trade-Ausführung.
-- Verifizieren, dass Sync-Checks laufen und abgeschlossen werden.
-- Untersuchen von 4xx/5xx HTTP-Fehlern der Broker-API.
-
-### 3.5 Data Events
-
-**Filter:** Kerzen-Pipeline-Events, Indikator-Berechnungs-Events
-
-Der **Data Events**-Tab zeigt den Fluss von Marktdaten durch das System.
-
-#### m5_candle_update
-
-Wird jedes Mal ausgelöst, wenn eine neue M5-Kerze vom Broker-Kerzen-Polling-Dienst empfangen wird. Dies ist der primäre System-Herzschlag — alle Agent-Trigger entstammen diesem Event.
-
-Payload enthält:
-- `pair` — welches Währungspaar
-- `broker_id`
-- `candle` — die neuen Kerzendaten (Zeitstempel, Open, High, Low, Close, Volume)
-- `is_new` — ob dies eine neu geschlossene Kerze oder ein partielles Update ist
-
-#### m5_candle_saved
-
-Wird ausgelöst, nachdem eine neue M5-Kerze in der Datenbank gespeichert wurde.
-
-#### candles_request
-
-Wird ausgelöst, wenn ein Agent oder Tool Kerzen-Daten anfordert (z. B. während des Snapshot-Aufbaus).
-
-#### candles_response
-
-Wird ausgelöst, wenn die Kerzen-Daten-Anfrage erfüllt wurde.
-
-#### indicator_request
-
-Wird ausgelöst, wenn eine Indikator-Berechnung angefordert wird.
-
-#### indicator_response
-
-Wird ausgelöst, wenn die Indikator-Berechnung abgeschlossen ist.
-
-**Data Events-Tab am besten geeignet für:**
-- Verifizieren, dass M5-Kerzen konsistent ankommen (System-Herzschlag-Check).
-- Prüfen, ob Kerzen in der Datenbank gespeichert werden.
-- Diagnosieren von Datenlücken oder fehlenden Kerzen.
-- Beobachten von Indikator-Berechnungen während Agent-Zyklen.
-
-### 3.6 Core Events
-
-**Filter:** Agent-Trigger-Events, Snapshot-Build-Events, Agent-Backlog-Events
-
-Der **Core Events**-Tab zeigt den Lebenszyklus von Agent-Zyklen — vom Trigger bis zum Signal.
-
-#### agent_trigger_received
-
-Wird ausgelöst, wenn die Trigger-Bedingung eines Agents erfüllt ist und ein Zyklus beginnt. Dies ist der Startpunkt jedes Analyse-Zyklus.
-
-Payload enthält:
-- `agent_id`
-- `trigger_type` — was den Agent ausgelöst hat (z. B. `m5_candle`)
-- `pair`
-- `candle_timestamp` — die Kerze, die diesen Zyklus ausgelöst hat
-
-#### agent_trigger_skipped
-
-Wird ausgelöst, wenn ein Trigger empfangen wurde, der Agent aber keinen Zyklus gestartet hat. **Dies ist das Schlüsselereignis zum Debuggen, warum ein Agent nicht läuft.**
-
-Payload enthält:
-- `agent_id`
-- `reason` — warum der Trigger übersprungen wurde. Mögliche Werte:
-  - `"session_filter"` — aktuelle Uhrzeit liegt außerhalb der konfigurierten Handelssession des Agents
-  - `"any_candle_divider"` — der Agent ist so konfiguriert, dass er nur jede N-te Kerze läuft, und dies war nicht die N-te
-  - `"runtime_paused"` — das System befindet sich im Suspend-Modus
-  - `"already_running"` — ein vorheriger Zyklus ist noch nicht abgeschlossen
-  - `"disabled"` — der Agent ist in der Konfiguration deaktiviert
-
-#### agent_backlog_detected
-
-Wird ausgelöst, wenn die Trigger-Warteschlange eines Agents mehr unverarbeitete Trigger enthält als ein konfigurierter Schwellenwert. Dies zeigt an, dass der Agent hinterherhinkt.
-
-Payload enthält:
-- `agent_id`
-- `backlog_size` — Anzahl der ausstehenden Trigger
-- `oldest_pending_ms` — wie alt der älteste ausstehende Trigger ist
-
-#### agent_input_built
-
-Wird ausgelöst, wenn der vollständige Agent-Input (Snapshot) zusammengestellt wurde und bereit ist, an das LLM gesendet zu werden. Dies markiert das Ende der Datenbeschaffungsphase.
-
-Payload enthält:
-- `agent_id`
-- `snapshot_size_bytes` — Größe des zusammengestellten Snapshots
-- `build_duration_ms` — wie lange der Snapshot-Aufbau gedauert hat
-
-#### agent_decision_snapshot_built
-
-Wird ausgelöst, wenn der Decision-Snapshot (strukturierter Output) erfolgreich aus der LLM-Antwort aufgebaut wurde.
-
-#### agent_decision_snapshot_invalid
-
-Wird ausgelöst, wenn die LLM-Antwort nicht in einen gültigen Decision-Snapshot geparst werden konnte. Das LLM hat etwas zurückgegeben, das nicht der erwarteten JSON-Struktur entspricht.
-
-Payload enthält:
-- `agent_id`
-- `reason` — warum die Validierung fehlschlug
-- `raw_response_preview` — erste 200 Zeichen der rohen LLM-Antwort
-
-**Core Events-Tab am besten geeignet für:**
-- Bestätigen, dass Agents wie erwartet getriggert werden.
-- Herausfinden, warum ein Agent nicht läuft (Prüfen von `agent_trigger_skipped` und dessen `reason`-Feld).
-- Beobachten des Snapshot-Aufbauprozesses.
-- Identifizieren von LLM-Antwort-Parsing-Fehlern.
-
-### 3.7 Bus Events
-
-**Filter:** Alle Event-Bus-Routing-Events
-
-Der **Bus Events**-Tab zeigt jede Nachricht, die durch den internen Event Bus geroutet wird, mit vollständigen Sender- und Ziel-Informationen.
-
-Bus Events sind die Infrastruktur-Schicht: jede `llm_request`, jedes Signal, jeder Trigger und jede Antwort wird über den Bus geroutet, und Bus Events zeigt die Routing-Metadaten.
-
-Jede Bus-Event-Zeile enthält:
-- `sender` — der Agent oder das Modul, das die Nachricht gesendet hat (z. B. `agent:OXS_T-EURUSD-AA-ANLYS`)
-- `target` — der beabsichtigte Empfänger (z. B. `llm:azure_azmin`, `agent:OXS_T-EURUSD-BA-TRADE`)
-- `event_type` — der Typ der gerouteten Nachricht
-- `routing_rule` — welche Routing-Regel gematcht hat (falls zutreffend)
-
-**Bus Events-Tab am besten geeignet für:**
-- Verifizieren, dass Signale korrekt von AA- zu BA-Agents geroutet werden.
-- Beobachten der vollständigen LLM-Aufrufkette (Anfrage von Agent → LLMService → Antwort zurück zum Agent).
-- Diagnosieren von Routing-Fehlkonfigurationen, bei denen Signale ihre Ziele nicht erreichen.
-- Verstehen des Nachrichtenflusses zwischen Systemkomponenten.
-
-### 3.8 Agent Events
-
-**Filter:** Agent-Entscheidungs- und Signal-Events
-
-Der **Agent Events**-Tab zeigt Events im Zusammenhang mit der Entscheidungsfindung und Signalgenerierung von Agents.
-
-#### agent_decision_made
-
-Wird ausgelöst, wenn ein Agent eine Handelsentscheidung getroffen hat. Dies ist das primäre Output-Ereignis eines AA-Analyse-Zyklus.
-
-Payload enthält:
-- `agent_id`
-- `decision` — BUY, SELL oder HOLD
-- `confidence` — 0–100
-- `entry`, `stop_loss`, `take_profit`
-- `reasoning_summary` — kurzer Text aus der LLM-Antwort
-- `entry_quality`
-
-#### agent_signal_generated
-
-Wird ausgelöst, wenn ein Signal (BUY oder SELL) generiert und an den BA-Agent gesendet wird. HOLD-Entscheidungen erzeugen kein Signal.
-
-Payload enthält:
-- `agent_id` (AA-Agent)
-- `target_agent_id` (BA-Agent, der das Signal empfängt)
-- `signal_type` — BUY oder SELL
-- `signal_id` — eindeutige Kennung für dieses Signal
-
-**Agent Events-Tab am besten geeignet für:**
-- Bestätigen, dass AA-Agents Entscheidungen generieren.
-- Verifizieren, dass BUY/SELL-Signale an BA-Agents gesendet werden.
-- Überwachen von Konfidenz-Levels und Entscheidungstypen über Zeit.
-- Prüfen, ob der Agent konsistent HOLD wählt (was bedeutet, dass keine Trades platziert werden).
-
-### 3.9 Entity Events
-
-**Filter:** EntityController (EC) Run-Events
-
-Der **Entity Events**-Tab zeigt den Lebenszyklus von EntityController-Runs — den strukturierten Ausführungseinheiten, die Signale verarbeiten und den Trade-Zustand verwalten.
-
-#### ec_run_started
-
-Wird ausgelöst, wenn ein EntityController-Run beginnt. Dies passiert, wenn der BA-Agent ein Signal empfängt und beginnt, es zu verarbeiten.
-
-#### ec_run_completed
-
-Wird ausgelöst, wenn ein EC-Run erfolgreich abgeschlossen wird.
-
-Payload enthält:
-- `ec_id`
-- `agent_id`
-- `duration_ms`
-- `output_summary` — kurze Beschreibung, was der EC-Run produziert hat
-
-#### ec_run_failed
-
-Wird ausgelöst, wenn ein EC-Run fehlschlägt. Payload enthält den Fehlergrund.
-
-#### ec_run_output
-
-Wird für den spezifischen Output eines EC-Runs ausgelöst. Payload enthält:
-- `output_type` — `order_placed`, `order_rejected`, `position_update` usw.
-- `details` — spezifische Details des Outputs
-
-**Entity Events-Tab am besten geeignet für:**
-- Verifizieren, dass BA-Agent-Signale verarbeitet werden.
-- Diagnostizieren, warum ein Trade ausgeführt wurde oder nicht.
-- Beobachten der vollständigen Ausführungskette für ein bestimmtes Signal.
+**Empfehlung:** Für jeden Agenten, den man regelmäßig beobachtet, einen eigenen gespeicherten Filter anlegen (z. B. „EURUSD AA" mit der Regel `Source contains OXS_T-EURUSD-AA`). Da diese Filter für alle Nutzer sichtbar sind, profitieren auch Kollegen sofort davon — man muss sich nicht gegenseitig erklären, wie man auf ein bestimmtes Pair filtert. Weil die Filter in `system.json5` liegen, sollte man vor dem Löschen eines fremden, unbekannten Filters kurz nachfragen — er könnte für jemand anderen aktiv im Gebrauch sein.
 
 ---
 
-## 4. Doppelklick — Event-Detail-Fenster
+## 4. Gruppierte/korrelierte Events
 
-Ein Doppelklick auf eine Event-Zeile öffnet das **Event-Detail-Fenster** — ein schwebendes, ziehbares und in der Größe veränderbares Fenster, das die vollständigen Event-Daten mit Kontext zeigt.
+Events, die eine `message_id` in ihrem Payload tragen, gelten als **primär** (eigenständige Anfrage). Events mit einer `correlation_id`, die auf die `message_id` eines anderen Events verweist, gelten als deren **Antwort** und werden standardmäßig darunter eingerückt angezeigt, sobald man auf das `[N]`-Badge der primären Zeile klickt.
 
-### 4.1 Fenster-Layout
+- **`[N]`** neben einer primären Zeile — Anzahl korrelierter Antwort-Events; Klick klappt sie auf/zu.
+- **`orphan`** (orange markiert) — ein Antwort-Event, dessen zugehöriges Anfrage-Event nicht im aktuellen Puffer gefunden wurde (z. B. bereits verdrängt, oder außerhalb des aktuellen Filters und `Include responses` ist deaktiviert).
 
-#### Titelleiste
+Dieses Gruppieren ersetzt das frühere, separate „Bus Events"-Konzept: Anfrage/Antwort-Paare (z. B. ein `llm_request` und das zugehörige `llm_response`) erscheinen jetzt direkt zusammen an einer Stelle, statt über getrennte Tabs verteilt zu sein.
 
-Die Titelleiste zeigt:
-- **Ereignis-Typ** — den vollständigen Event-Namen (z. B. `llm_response`)
-- **Zeitstempel** — HH:MM:SS.mmm
-- **Broker/Pair** — falls auf dieses Ereignis zutreffend
-- **Kopieren-Button** — kopiert das vollständige JSON-Payload in die Zwischenablage
-- **Schließen-Button** — schließt das Fenster (auch: **Escape**-Taste)
+**Beispiel:** Ein Agent-Zyklus mit drei Tool-Aufrufen erzeugt ein primäres `agent_input_built`-Event mit `[3]` daneben. Klickt man darauf, erscheinen die drei zugehörigen `tool_call_completed`-Events eingerückt darunter, in der Reihenfolge, in der sie ausgeführt wurden — ohne dass man den Strom manuell nach zusammengehörigen Events absuchen muss.
 
-#### Kontext-Leiste
+**Achtung — viele `orphan`-Markierungen sind meist harmlos:** Direkt nach dem Öffnen des Monitors (frisch verbunden, Puffer noch leer) erscheinen die ersten paar Antwort-Events fast immer als `orphan`, weil ihre Anfrage bereits vorher passiert ist und nicht mehr im Puffer steht. Das ist normal und kein Fehler. Häufen sich Orphans aber dauerhaft mitten im laufenden Betrieb, deutet das eher auf sehr kurze Zeitabstände zwischen Anfrage und Verdrängung hin (Puffer läuft sehr schnell voll) — dann eher einen engeren Filter setzen, um weniger irrelevante Events durch den Puffer zu jagen.
 
-Die Kontext-Leiste befindet sich zwischen der Titelleiste und dem JSON-Payload. Sie bietet menschenlesbare Kontextinformationen für das Ereignis:
+---
+
+## 5. Pinned Events
+
+Über der Event-Liste erscheint ein eigener **„Pinned Events"**-Bereich, sobald mindestens ein Event angepinnt ist (auf-/zuklappbar).
+
+- **Manuelles Anpinnen:** Pin-Icon einer Zeile anklicken. Angepinnte Events werden im Backend in einem geschützten Puffer gehalten, der **nicht** von der Ring-Buffer-Verdrängung betroffen ist — sie bleiben erhalten, auch wenn der 500er-Puffer im Browser längst weitergerückt ist. Ein `PinOff`-Klick entfernt die Markierung wieder.
+- **Automatisches Anpinnen:** Bestimmte Fehler-/Abbruch-Ereignistypen werden vom System selbst automatisch angepinnt, sobald sie auftreten — erkennbar am `auto`-Badge in der Pinned-Liste:
+  - `system_error`
+  - `llm_error`
+  - `llm_turn_failed`
+  - `ec_run_failed`
+  - `tool_call_failed`
+  - `broker_error`
+  - `broker_disconnected`
+
+Der Pinned-Bereich wird alle 5 Sekunden vom Backend nachgeladen (`GET /monitoring/pinned`), unabhängig vom WebSocket-Strom — er zeigt also auch dann noch etwas, wenn die Live-Verbindung kurz unterbrochen war.
+
+**Empfehlung:** Angepinnte Events sind ein gemeinsamer, geteilter Zustand des ganzen Systems (nicht nur des eigenen Browsers) — nützlich, um einem Kollegen gezielt auf ein bestimmtes Problem hinzuweisen, ohne Screenshots hin- und herzuschicken: einfach pinnen und sagen „schau dir den Pinned-Bereich an". Nach der Klärung nicht vergessen, wieder zu entpinnen (`PinOff`) — sonst sammeln sich im Pinned-Bereich über die Zeit viele nicht mehr relevante Altfälle an, die die eigentlich wichtigen (automatisch angepinnten Fehler) unnötig verdecken.
+
+---
+
+## 6. Event-Detail-Fenster
+
+Ein Doppelklick auf eine Zeile (auch im Pinned-Bereich) öffnet ein schwebendes, **ziehbares und in der Größe veränderbares** Fenster mit den vollständigen Event-Daten.
+
+### 6.1 Titelleiste
+
+- Ereignis-Typ (farbcodiert), Zeitstempel, Broker/Pair (falls zutreffend)
+- **Kopieren-Icon** — kopiert das vollständige JSON-Payload in die Zwischenablage
+- **Schließen-Icon** (auch: **Escape**-Taste)
+
+### 6.2 Kontext-Leiste
 
 | Feld | Inhalt |
 |------|--------|
-| **Was** | Klartextbeschreibung, was dieser Ereignis-Typ bedeutet |
-| **Warum** | Warum dieses Ereignis ausgelöst wurde und was es als Nächstes triggert oder signalisiert |
-| **Quelle** | Das `source_module`-Feld — welche Komponente dieses Ereignis erzeugt hat (z. B. `agent:OXS_T-EURUSD-AA-ANLYS`, `broker.OXS_T`, `eventbus`) |
-| **Sender** | Die Bus-Sender-Agent-ID (wenn über Event Bus geroutet) |
-| **Ziel** | Die Bus-Ziel-Agent-ID (wenn dieses Ereignis an einen bestimmten Agent gerichtet war) |
-| **Broker/Pair** | Das Broker-Modul und Währungspaar, falls relevant |
+| **What / Why** | Klartext-Erklärung, was dieser Ereignistyp bedeutet und warum er ausgelöst wurde — aus einem eingebauten Katalog der häufigsten Ereignistypen. Für unbekannte Typen erscheint ein Hinweis, dass keine Beschreibung hinterlegt ist. |
+| **Source** | Das auslösende Modul (z. B. `agent:OXS_T-EURUSD-AA-ANLYS`, `broker.OXS_T`). |
+| **Sender / Target** | Bus-Routing-Metadaten, falls im Payload vorhanden. |
+| **Broker** | Broker-Modul und Pair, falls relevant. |
+| **Msg / Corr** | `message_id` bzw. `correlation_id` des Events, falls vorhanden — nützlich, um dieselbe Kette manuell im [Event Log](ui.action.event_log.de.md) wiederzufinden. |
 
-Die Kontext-Leiste verwandelt rohe technische Events in verständliche Informationen — Sie müssen nicht jeden Event-Namen auswendig kennen. Die Felder **Was** und **Warum** erklären jeden Ereignis-Typ in klarem Deutsch.
+### 6.3 Payload
 
-#### JSON-Payload
+Vollständiges JSON, mit aufgelösten `\n`- und `\"`-Escape-Sequenzen für bessere Lesbarkeit. Nichts wird abgeschnitten.
 
-Das vollständige Event-Payload wird als **formatiertes JSON** angezeigt:
-- Alle Felder sind aufgeklappt (keine kollabierten Objekte)
-- `\n`-Escape-Sequenzen werden als echte Zeilenumbrüche gerendert
-- `\"`-Escape-Sequenzen werden als echte Anführungszeichen gerendert
-- Lange Strings werden nicht abgeschnitten — das vollständige Payload wird immer angezeigt
-- Verwenden Sie den **Kopieren-Button** in der Titelleiste, um das gesamte Payload zu kopieren
+### 6.4 Ziehen, Größe ändern, mehrere Fenster
 
-### 4.2 Ziehen und Größe ändern
+Titelleiste klicken und ziehen zum Verschieben; jeder Rand/jede Ecke zum Vergrößern/Verkleinern. Das Fenster aktualisiert sich nicht automatisch — es bleibt auf das Event fixiert, das man geöffnet hat, auch wenn währenddessen neue Events eintreffen. Die zuletzt doppelt geklickte Zeile bleibt dunkelorange markiert, bis eine andere Zeile angeklickt wird.
 
-Das Detail-Fenster ist:
-- **Ziehbar** — Klicken und Ziehen der Titelleiste zum Verschieben
-- **In der Größe veränderbar** — Ziehen eines beliebigen Randes oder einer Ecke zum Vergrößern/Verkleinern
-
-Dies ermöglicht es, das Detail-Fenster neben der Ereignisliste zu positionieren, um weiterhin Events zu scannen während Sie die Details lesen.
-
-### 4.3 Selektierte Zeile bleibt markiert (dunkelorange)
-
-Nachdem Sie das Detail-Fenster schließen, bleibt die Zeile, die Sie doppelgeklickt haben, **dunkelorange markiert** in der Ereignisliste. Dies erleichtert das Wiederfinden des inspektierten Events, auch wenn viele neue Events eingetroffen sind.
-
-Die Markierung bleibt bestehen, bis Sie eine andere Zeile anklicken oder sie explizit löschen.
-
-### 4.4 Tastaturkürzel
-
-Drücken Sie **Escape**, um das Detail-Fenster ohne Maus zu schließen.
-
----
-
-## 5. Steuerung
-
-### 5.1 Clear-Button
-
-Der **Clear**-Button leert die aktuelle Anzeige. Der Ring-Buffer empfängt weiterhin neue Events, und neue Events erscheinen sofort nach dem Löschen. Clear ist nützlich, um eine saubere Ansicht zu bekommen, bevor eine bestimmte Aktion ausgelöst wird, die beobachtet werden soll.
-
-**Hinweis:** Clear betrifft nur die Anzeige. Der 10.000-Events-Ring-Buffer wird nicht zurückgesetzt — er sammelt weiterhin Events. Wenn Sie nach dem Löschen einen anderen Tab öffnen, sehen Sie die alten Events nicht mehr.
-
-### 5.2 Live-Indikator
-
-Der Live-Indikator zeigt den WebSocket-Verbindungsstatus. Wenn er nicht grün ist:
-1. Prüfen Sie, ob das Backend läuft (Initial-Seite — System-Status).
-2. Seite neu laden.
-3. Wenn das Backend läuft und der Indikator grau bleibt: Browser-Konsole auf WebSocket-Verbindungsfehler prüfen.
-
----
-
-## 6. LLM-Architektur-Hinweis: Event-Bus-Durchlauf (seit v0.7)
-
-Seit Version 0.7 laufen **alle LLM-Aufrufe über den Event Bus**. Dies ist eine wichtige Architekturänderung, die die vollständige LLM-Aufrufkette im Monitor sichtbar macht.
-
-### 6.1 Die vollständige LLM-Aufrufkette
-
-```
-Agent-Analyse-Zyklus
-  → Snapshot aufgebaut (agent_input_built)
-  → llm_request an Event Bus gesendet
-  → Event Bus routet zu LLMService (llm:azure_azmin)
-  → LLMService: llm_turn_started
-  → LLMService ruft Azure OpenAI API auf (HTTP)
-  → Azure OpenAI API antwortet
-  → LLMService: llm_turn_completed
-  → LLMService sendet llm_response an Event Bus
-  → Event Bus routet Antwort zurück zum originierenden Agent
-  → Agent verarbeitet LLM-Antwort
-  → agent_decision_made ausgelöst
-```
-
-### 6.2 Wo jeder Schritt im Monitor sichtbar ist
-
-| Schritt | Tab | Ereignis |
-|---------|-----|---------|
-| Snapshot zusammengestellt | Core Events | `agent_input_built` |
-| LLM-Anfrage von Agent gesendet | Bus Events | `llm_request` (Sender = Agent, Ziel = llm:...) |
-| LLM-Turn beginnt | LLM Events | `llm_turn_started` |
-| LLM-Turn endet | LLM Events | `llm_turn_completed` |
-| LLM-Antwort zurückgeroutet | Bus Events | `llm_response` (Sender = llm:..., Ziel = Agent) |
-| Entscheidung extrahiert | Agent Events | `agent_decision_made` |
-
-Das bedeutet: Sie können den **vollständigen Hin- und Rückweg** eines LLM-Aufrufs vollständig im Monitor verfolgen, ohne Server-Logs prüfen zu müssen.
+**Achtung:** Es kann immer nur **ein** Detail-Fenster gleichzeitig offen sein — ein erneuter Doppelklick auf eine andere Zeile ersetzt das aktuell geöffnete Fenster, statt ein zweites daneben zu öffnen. Für einen direkten Payload-Vergleich zweier Events (z. B. `llm_request` vs. das zugehörige `llm_response`) bleibt daher meist nur: Payload per Kopieren-Icon sichern, dann das zweite Event öffnen.
 
 ---
 
 ## 7. Praktische Debug-Workflows
 
-### 7.1 Vollständigen EURUSD-Analyse-Zyklus beobachten
+### 7.1 Vollständigen Analyse-Zyklus für ein Pair beobachten
 
-Ziel: Einen kompletten Analyse-Zyklus vom M5-Trigger bis zum Handelssignal beobachten.
-
-1. Monitor öffnen. Auf **All Events**-Tab wechseln.
-2. **Clear** klicken, um sauber zu starten.
-3. Auf die nächste M5-Kerze warten (sichtbar in Data Events oder All Events als `m5_candle_update`).
-4. Folgende Sequenz beobachten:
-   - `m5_candle_update` (Pair: EUR_USD)
-   - `agent_trigger_received` (Agent: OXS_T-EURUSD-AA-ANLYS)
-   - Tool-Aufrufe: `candles_request` / `candles_response` für mehrere Timeframes
-   - `agent_input_built` — Snapshot bereit
-   - `llm_request` in Bus Events — an LLM gesendet
-   - `llm_turn_started` in LLM Events
-   - `llm_turn_completed` in LLM Events
-   - `llm_response` in Bus Events — zurück zum Agent
-   - `agent_decision_made` in Agent Events
-   - (Bei BUY/SELL:) `agent_signal_generated` → `ec_run_started` → `ec_run_completed`
-5. `agent_decision_made` doppelklicken, um die vollständige Entscheidung im Detail-Fenster zu sehen.
+1. Filter Builder: eine Regel `Source contains OXS_T-EURUSD-AA` hinzufügen (oder `Payload Field` mit passendem Pfad).
+2. `Clear` klicken, um sauber zu starten.
+3. Auf die nächste M5-Kerze warten.
+4. Die Kette verfolgen: `agent_trigger_received` → `candles_request`/`candles_response` → `agent_input_built` → `llm_request` → `llm_turn_started`/`llm_turn_completed` → `llm_response` → `agent_decision_made` → bei BUY/SELL: `agent_signal_generated` → `ec_run_started`/`ec_run_completed`.
+5. `llm_response` doppelklicken, um Token-Verbrauch und Entscheidung im Detail-Fenster zu sehen.
+6. Bei wiederkehrendem Bedarf: den Filter unter einem Namen speichern (z. B. „EURUSD AA Zyklus").
 
 ### 7.2 Herausfinden, warum ein Agent nicht läuft
 
-Ziel: Den Grund finden, warum keine Agent-Zyklen stattfinden.
-
-1. Monitor öffnen. Auf **Core Events**-Tab wechseln.
-2. 5–10 Minuten warten (mindestens ein M5-Kerzen-Intervall).
-3. Nach `agent_trigger_skipped`-Events für den betreffenden Agent suchen.
-4. Das Ereignis doppelklicken, um das Detail-Fenster zu öffnen.
-5. Das **`reason`**-Feld im Payload lesen:
-   - `"session_filter"` → Agent liegt außerhalb seiner konfigurierten Handelssession. Session-Konfiguration prüfen.
-   - `"any_candle_divider"` → Agent ist so konfiguriert, dass er nur jede N-te Kerze läuft, und dies war nicht die N-te.
-   - `"runtime_paused"` → System ist pausiert. Continue auf der Initial-Seite klicken.
-   - `"already_running"` → Vorheriger Zyklus ist noch nicht abgeschlossen (langsames LLM oder viele Tools).
-   - `"disabled"` → Agent ist in der Konfiguration deaktiviert. `system.json5` prüfen.
-6. Wenn es kein `agent_trigger_skipped`-Event gibt: **Data Events**-Tab auf `m5_candle_update` für dieses Pair prüfen. Kommen überhaupt Kerzen an?
+1. Filter: `Event Type equals agent_trigger_skipped`, optional zusätzlich `AND Source contains <agent_id>`.
+2. Ein passendes Event doppelklicken und das `reason`-Feld im Payload prüfen:
+   - `"session_filter"` → Agent liegt außerhalb seiner Handelssession.
+   - `"any_candle_divider"` → AnyCandle-Teiler noch nicht erreicht.
+   - `"runtime_paused"` → System ist pausiert.
+   - `"already_running"` → vorheriger Zyklus noch nicht abgeschlossen.
+   - `"disabled"` → Agent in der Konfiguration deaktiviert.
+3. Erscheint gar kein `agent_trigger_skipped`: Filter auf `Event Type contains m5_candle` setzen und prüfen, ob überhaupt Kerzen für dieses Pair ankommen.
 
 ### 7.3 LLM-Aufrufe und Token-Verbrauch prüfen
 
-Ziel: Bestätigen, dass LLM-Aufrufe funktionieren, und den Token-Verbrauch überprüfen.
-
-1. Auf **LLM Events**-Tab wechseln.
-2. Einen Execute-Lauf im Agent Chat starten (oder auf einen natürlichen Zyklus warten).
-3. Nach `llm_turn_started` gefolgt von `llm_turn_completed` Ausschau halten.
-4. `llm_response` doppelklicken, um das Detail-Fenster zu sehen.
-5. Im Payload prüfen:
-   - `input_tokens` und `output_tokens` — Gesamt-Token-Verbrauch
-   - `latency_ms` — wie lange der LLM-Aufruf gedauert hat
-   - `decision` — wurde die Entscheidung erfolgreich extrahiert?
-6. Falls stattdessen `llm_turn_failed` erscheint: `reason`-Feld auf den Fehler prüfen.
+1. Filter: `Event Type starts with llm_`.
+2. Einen Execute-Lauf im Agent Chat starten oder auf einen natürlichen Zyklus warten.
+3. `llm_response` doppelklicken; im Payload `input_tokens`/`output_tokens`, `latency_ms` und `decision` prüfen.
+4. Erscheint stattdessen `llm_turn_failed`: `reason`-Feld auf den Fehlergrund prüfen — solche Fehler werden zusätzlich automatisch angepinnt (Abschnitt 5), gehen also nicht im Puffer verloren.
 
 ### 7.4 Broker-Verbindung überwachen
 
-Ziel: Sicherstellen, dass der Broker verbunden ist und korrekt antwortet.
+1. Filter: `Event Type contains broker_`.
+2. Nach `broker_connected` beim Systemstart Ausschau halten.
+3. `broker_http_request`/`broker_http_response`-Paare beobachten (per `[N]`-Badge aufklappbar) — `status_code` im Antwort-Payload prüfen (`200` ok, `4xx` Auth/Parameter-Fehler, `5xx` Server-Fehler).
+4. `broker_disconnected` und `broker_error` werden automatisch angepinnt — auch nach einem vollen Ring-Buffer im Pinned-Bereich noch auffindbar.
 
-1. Auf **Broker Events**-Tab wechseln.
-2. Nach `broker_connected` suchen (sollte beim System-Start erschienen sein).
-3. `broker_http_request` / `broker_http_response`-Paare beobachten — diese entstehen beim Kerzen-Polling und bei Sync-Checks.
-4. In `broker_http_response`: das `status_code`-Feld prüfen.
-   - `200` — alles in Ordnung
-   - `4xx` — Authentifizierungs- oder Parameter-Fehler
-   - `5xx` — Server-seitiger Broker-Fehler
-5. Wenn `broker_disconnected` gefolgt von `broker_reconnecting` erscheint: Das System versucht automatische Wiederherstellung. Auf `broker_connected` warten, um Erfolg zu bestätigen.
+### 7.5 Abgelehnten Trade untersuchen
 
-### 7.5 Routing debuggen
-
-Ziel: Verifizieren, dass Signale korrekt von AA- zu BA-Agents geroutet werden.
-
-1. Auf **Bus Events**-Tab wechseln.
-2. Einen Execute-Lauf im Agent Chat für den AA-Agent starten.
-3. Nach `agent_signal_generated` im Bus-Ereignisstrom Ausschau halten.
-4. Ereignis doppelklicken. In der Kontext-Leiste:
-   - **Sender** sollte die AA-Agent-ID sein.
-   - **Ziel** sollte die BA-Agent-ID sein.
-5. Falls das Ziel falsch oder fehlend ist: Event-Routing-Konfiguration unter Config → Event Routing prüfen.
-6. Nach dem Signal: in **Entity Events** auf `ec_run_started` warten, um zu bestätigen, dass der BA-Agent es empfangen hat.
-
-### 7.6 Abgelehnten Trade untersuchen
-
-Ziel: Herausfinden, warum ein Trade abgelehnt wurde.
-
-1. Auf **Entity Events**-Tab wechseln.
-2. Nach `ec_run_output` mit `output_type: "order_rejected"` suchen.
-3. Ereignis doppelklicken. Das `details`-Feld im Payload erklärt den Ablehnungsgrund:
-   - Risikolimit überschritten
-   - Duplikat-Signal erkannt
-   - Broker-API-Ablehnung (mit Status-Code)
-   - Ungültige SL/TP-Werte
-4. Auch **Broker Events** auf `broker_http_response` um denselben Zeitstempel prüfen — wenn der Broker die Order abgelehnt hat, zeigt die HTTP-Antwort einen 4xx-Status mit Fehlermeldung.
+1. Filter: `Event Type equals ec_run_output`, `Payload Field` mit Pfad `output_type` und Wert `order_rejected`.
+2. Treffer doppelklicken; das `details`-Feld im Payload erklärt den Ablehnungsgrund.
+3. Für die vollständige, dauerhafte Kette (auch aus der Vergangenheit) stattdessen das [Event Log](ui.action.event_log.de.md) mit derselben `correlation_id`/`message_id` durchsuchen — der Monitor zeigt nur, was seit dem letzten Neuladen der Seite live durchgelaufen ist.
 
 ---
 
 ## 8. Tipps für effektive Monitor-Nutzung
 
-**Den richtigen Tab verwenden:** All Events ist in einem aktiven System überwältigend. Verwenden Sie die spezifischen Tabs für Untersuchungen eines bestimmten Bereichs. Nur für kategorienübergreifende Sequenzen auf All Events zurückgreifen.
+**Filter statt scrollen:** In einem aktiven System mit mehreren Agenten ist der ungefilterte Strom schnell unübersichtlich. Eine gezielte Regel-Kombination ist meist schneller als manuelles Scrollen.
 
-**Vor dem Triggern löschen:** Wenn Sie eine bestimmte Aktion beobachten möchten (z. B. einen Execute-Lauf), zuerst die Anzeige löschen, dann die Aktion auslösen. Das ergibt einen sauberen, fokussierten Ereignisstrom.
+**Wiederkehrende Filter speichern:** Eine Regel-Kombination, die man öfter braucht (z. B. „nur Fehler", „nur ein bestimmtes Pair"), unter einem Namen speichern — sie erscheint dann dauerhaft in der Seitenleiste, für alle Nutzer des Systems.
 
-**Großzügig doppelklicken:** Die Kontext-Leiste im Detail-Fenster erklärt jeden Ereignis-Typ in klarem Deutsch. Auch wenn Sie einen Event-Namen nicht kennen — ein Doppelklick verrät Ihnen, was er bedeutet.
+**Wichtige Einzelevents anpinnen statt nur zu kopieren:** Ein angepinntes Event bleibt erreichbar, auch wenn der Puffer längst weitergerückt ist — besser als das Payload in eine externe Notiz zu kopieren.
 
-**Detail-Fenster offen lassen:** Das Detail-Fenster wird nicht automatisch aktualisiert. Sie können es offen lassen, während neue Events eintreffen — es bleibt auf dem Event fixiert, den Sie geöffnet haben. Die dunkelorange Markierung der selektierten Zeile stellt sicher, dass Sie es wiederfinden.
+**Fehler-Events sind bereits gesichert:** Die automatisch angepinnten Fehlertypen (Abschnitt 5) muss man nicht zusätzlich manuell pinnen, um sie nicht zu verlieren.
 
-**Ring-Buffer füllt sich schnell:** In aktiven Systemen können sich 10.000 Events innerhalb weniger Minuten ansammeln. Für lange Debug-Sessions den relevantesten Tab regelmäßig prüfen, anstatt weit zurückzuscrollen.
-
-**Mit Agent Chat kombinieren:** Für tiefste Einblicke führen Sie einen Execute-Zyklus im Agent Chat durch, während Sie gleichzeitig die LLM Events- und Core Events-Tabs im Monitor beobachten. Sie sehen den Snapshot-Aufbau (Core Events) und die LLM-Verarbeitung (LLM Events) in Echtzeit, während das Execute-Ergebnis im Chat-Panel erscheint.
+**Monitor für „jetzt", Event Log für „damals":** Für alles, was gerade passiert oder gleich passieren wird, den Monitor nutzen. Für alles, was vor mehr als ein paar hundert Events oder vor einem Seiten-Neuladen passiert ist, das [Event Log](ui.action.event_log.de.md) verwenden.

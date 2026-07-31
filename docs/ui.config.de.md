@@ -9,32 +9,34 @@ Der Bereich `Config` ist die Hauptoberfläche für Profile, Routing und Modul-De
 | Seite | Zweck |
 |-------|-------|
 | [Agent Config](ui.config.agent_config.de.md) | Agenten-Definitionen, Handelspaare, LLM-Bindungen, Risiko-Einstellungen |
-| [Entity Config](ui.config.entity_config.de.md) | Handelbare Entitäten (Symbole) definieren — NEU |
+| [Entity Config](ui.config.entity_config.de.md) | Event Composer (ECs) erstellen, konfigurieren und testen |
 | [Snapshot Config](ui.config.snapshot_config.de.md) | Markt-Snapshot-Assembly; welche Daten das LLM erhält |
 | [Decision Prompt](ui.config.decision_prompt.de.md) | LLM-System-Prompts; Selector-Scripts; Platzhalter-Substitution |
-| [Event Routing](ui.config.event_routing.de.md) | Regeln, die bestimmen, welche Agenten welche Events empfangen |
-| [System Config](ui.config.system_config.de.md) | Zentrale system.json5 globale Parameter |
-| [LLM Modules](ui.config.llm_modules.de.md) | LLM-Provider-Verbindungen (Azure OpenAI / Anthropic) |
-| [Broker Modules](ui.config.broker_modules.de.md) | Broker-Adapter-Verbindungen (MT5 / OANDA) |
-| [Information](ui.config.information.de.md) | Editierbarer README-artiger Informationsinhalt |
+| [Chartshot Config](ui.config.chartshot_config.de.md) | Vorlagen für Chart-Screenshot-Bilder, die dem LLM übergeben werden |
 | [Bridge Tools](ui.config.bridge_tools.de.md) | Tool-Freigaben und Bridge-artige Tool-Konfigurationen |
+| [Event Routing](ui.config.event_routing.de.md) | Regeln, die bestimmen, welche Agenten welche Events empfangen |
+| [AI-Assistant](ui.config.ai_assistant.de.md) | Kontext-Dateien für den eingebetteten AI-Assistant-Chat in den Config-Editoren |
+| [System Config](ui.config.system_config.de.md) | Zentrale system.json5 globale Parameter |
 | [Helper Config](ui.config.helper_config.de.md) | Python-Hilfsfunktionen für Snapshot-Transform-Scripts |
 | [Package Manager](ui.config.package_manager.de.md) | Konfigurationspakete exportieren und importieren |
+| [Broker Modules](ui.config.broker_modules.de.md) | Broker-Adapter-Verbindungen (MT5 / OANDA) |
+| [LLM Modules](ui.config.llm_modules.de.md) | LLM-Provider-Verbindungen (OpenAI-kompatibel: OpenAI, Azure AI Foundry, LM Studio, Ollama / Anthropic) |
 
 Aktuelle Menü-Reihenfolge in der UI:
 
-1. `Information`
-2. `Agent Config`
+1. `Agent Config`
+2. `Entity Config`
 3. `Snapshot Config`
 4. `Decision Prompt`
-5. `Entity Config`
+5. `Chartshot Config`
 6. `Bridge Tools`
 7. `Event Routing`
-8. `System Config`
-9. `Helper Config`
-10. `Package Manager`
-11. `Broker Modules`
-12. `LLM Modules`
+8. `AI-Assistant`
+9. `System Config`
+10. `Helper Config`
+11. `Package Manager`
+12. `Broker Modules`
+13. `LLM Modules`
 
 Vorgesehener Screenshot:
 - [Config-Menüreihenfolge](image/ui-13-config-menu-overview.png)

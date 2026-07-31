@@ -81,6 +81,8 @@ export default defineConfig({
       '/tools': httpTarget,
       '/config': httpTarget,
       '/runtime': httpTarget,
+      '/docs': httpTarget,
+      '/chartshots': httpTarget,
       '/ws': {
         target: wsTarget,
         ws: true,

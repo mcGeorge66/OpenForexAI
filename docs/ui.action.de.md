@@ -10,6 +10,8 @@ Der Bereich `Action` ist der operative Arbeitsbereich von OpenForexAI. Er ist di
 - [Agent Chat](ui.action.chat.de.md) — Direkte KI-Agenten-Interaktion und Inspect-Runs
 - [Orderbook](ui.action.orderbook.de.md) — Offene Positionen, Trade-Verlauf und P&L
 - [Chart Analysis](ui.action.chart_analysis.de.md) — Visueller Chart mit KI-Analyse-Overlay
+- [Prompt Workbench](ui.action.prompt_workbench.de.md) — Sandbox zum Testen von Agent-Prompts gegen historische Kerzendaten
+- [Event Log](ui.action.event_log.de.md) — Durchsuchbares Archiv aller persistierten Events mit Trace-Ansicht
 
 ---
 
