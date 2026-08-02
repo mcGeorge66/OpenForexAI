@@ -20,6 +20,8 @@ EC entities are configured in `config/system.json5` under `event_composers`.
   "script": "...",                       // Python script (main logic)
   "config": {...},                       // JSON config available to the script as `cfg`
   "tools": ["tool_name", ...],           // Tools available to the script
+  "snapshot_profile": "my_profile",      // optional — name of a snapshot_profiles entry;
+                                          // injects a pre-built `snapshot` global (see below)
   "disable": false
 }
 ```
@@ -90,6 +92,17 @@ present and always has a usable `instrument`:
 Note: the entity's own `pair`/`broker` fields (top-level in the entity config, not
 `config_json`) never reach the script directly — `config` is `config_json` only. They just
 feed the fallback above. Always read the pair via `message`, never via `config`.
+
+**`snapshot`** — `dict`, **only injected when this EC has a `snapshot_profile` configured**
+(top-level field, a name from `snapshot_profiles` — same mechanism Agents use). When present,
+it's the fully assembled snapshot (`tool_blocks` → `calculation_blocks` →
+`assembly_transform_script`) for this EC's own `pair`, built fresh before every run — the exact
+same pipeline and shape an Agent with that profile gets. Referencing `snapshot` when no profile
+is configured raises `NameError` (it is never `None`) — guard with
+`snap = globals().get("snapshot")` if a script must run both with and without a profile. If the
+assembly script sets `cancel = True` on the snapshot, this run's `main()` is skipped entirely
+(counted as a successful, output-less cycle) — check `script_snapshot_assembly_context.md` for
+the full field list and `snapshot_config_assistant.md` for how to build a profile.
 
 **`log(message: str, level: str = "info", pin: bool = False)`** — synchronous, writes to the
 monitoring bus (`EC_SCRIPT_LOG`, filterable in Monitor by that event type). `pin=True` keeps it

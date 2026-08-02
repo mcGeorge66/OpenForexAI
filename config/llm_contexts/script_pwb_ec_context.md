@@ -40,7 +40,11 @@ pasted into a real EC's `script` field unchanged, and vice versa.
   (unlike the BA-tab script, which gets `config["memory_key"]` added automatically) — if you want
   a persistence key, put it in this JSON yourself.
 - `tools` — call `await tools.call("tool_name", **kwargs)`, restricted to whatever is checked under
-  "EC Tool Access".
+  "EC Tool Access". `get_candles`, `calculate_indicator`, and `get_swing_levels` are silently
+  anchored (`start` forced to the currently visible candle's timestamp) so they only ever see the
+  frozen window you're looking at — never live/future data — exactly like the AA-under-test's own
+  tool loop in the Prompt tab. You never pass `start` yourself; it's overridden server-side either
+  way.
 - Return value — any dict (or `None`). Becomes `input["decision"]` for the BA-tab script if one is
   configured; otherwise it's just shown in the "Letzter Step" viewer in the BA tab.
 
@@ -83,6 +87,19 @@ Not a function — a dict describing the "triggering event" for this step, built
 The real production `EC-RELAY` script reads `message.get("instrument")` — that pattern works
 unchanged here. Only `event_type`, `instrument`, and `payload` carry real workbench data; the
 other fields are always `None`/`[]` since there's no real upstream AgentMessage to describe.
+
+```python
+snapshot: dict
+```
+**Only present when the Snapshot tab has `tool_blocks` configured.** Same mechanism a
+production EC's `snapshot_profile` field gives it: the assembled snapshot from that tab's
+tool_blocks → calculation_blocks → assembly_transform_script pipeline, anchored to the currently
+visible candle (not live data) — the exact `ctx["snapshot"]` `_build_prompt_workbench_context`
+builds, reused as-is. If the Snapshot tab is empty, `snapshot` **does not exist** in the
+namespace — referencing it raises `NameError`, it's never `None`. A script meant to work either
+way should guard: `snap = globals().get("snapshot")`. This is available to both the EC-tab
+script (Step 1) and the BA-tab `decision_script` (Step 2) — same object, built once per
+Step/Run.
 
 ```python
 def debug(message: Any) -> None

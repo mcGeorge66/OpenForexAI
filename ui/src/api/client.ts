@@ -905,6 +905,11 @@ export interface PromptWorkbenchChatResponse {
   script_input?: Record<string, unknown> | null
   script_result?: Record<string, unknown> | null
   script_error?: string | null
+  // step1_mode='ec' only: the exact `input` dict passed to the EC-tab script's main() this step.
+  ec_input?: Record<string, unknown> | null
+  // The assembled Snapshot-tab snapshot injected as the `snapshot` global this step (both the
+  // EC-tab script and decision_script share this same object) — null when the Snapshot tab is empty.
+  snapshot?: Record<string, unknown> | null
   error?: string
 }
 
@@ -923,7 +928,9 @@ export interface PromptWorkbenchSavedConfig {
   fifo_enabled: boolean
   allow_trade_delete: boolean
   left_tab: 'chat' | 'prompt' | 'ec'
-  tool_tab: 'analyse' | 'simulation' | 'ba'
+  // 'snapshot' as of the Simulation->Snapshot rename — old saved configs may still contain
+  // the legacy 'simulation' string; callers must map it when loading (see PromptWorkbench.tsx).
+  tool_tab: 'analyse' | 'snapshot' | 'ba'
   system_prompt: string
   llm_name: string
   reasoning_effort: string

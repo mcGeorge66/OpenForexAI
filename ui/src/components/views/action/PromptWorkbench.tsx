@@ -3,7 +3,7 @@
  * against historical candle data, independent of the live trading system.
  *
  * Candle loading + numbering, chart, Analyse-tab indicator overlays (reused
- * Chart-Analysis pattern), Simulation-tab position/step/run mechanics, and
+ * Chart-Analysis pattern), Snapshot-tab position/step/run mechanics, and
  * the Agent Prompt editor. Chat/Step/Run call `POST /prompt-workbench/chat`,
  * which runs the prompt through a detached (non-registered) `Agent` instance
  * reusing `Agent._run_with_tools` — the same LLM/tool-use loop real agents
@@ -18,9 +18,10 @@
  * drawings (reusing the existing rect/trendline DrawingManager primitives,
  * not a new chart feature). Annotations accumulate client-side across
  * turns and are sent back on every request as `existing_annotations`, since
- * the backend keeps no session state of its own. The real tool_blocks/
- * calculation_blocks Simulation pipeline (mini Snapshot Designer) is not
- * built yet.
+ * the backend keeps no session state of its own. The tool_blocks/
+ * calculation_blocks Snapshot pipeline (mini Snapshot Designer, in the
+ * Snapshot tab) feeds the exact same assembled snapshot the agent/EC would
+ * get in production, anchored to the last visible candle instead of live data.
  *
  * Position semantics (as specified): candles count down from `total`
  * (oldest, at the edge of the loaded window) to `0` (newest / fully
@@ -29,8 +30,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Check, Copy, Play, RefreshCcw, RotateCcw, Square, StepForward, Trash2 } from 'lucide-react'
 import { LineStyle, type UTCTimestamp } from 'lightweight-charts'
-import { JsonView, darkStyles } from 'react-json-view-lite'
-import 'react-json-view-lite/dist/index.css'
 import {
   api,
   type CalculationBlock,
@@ -64,6 +63,7 @@ import {
 import { SwingLevelsPanel, type SwingResult } from '@/components/charts/SwingLevelsPanel'
 import { PlainTextMonacoEditor } from '@/components/common/PlainTextMonacoEditor'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
+import { JsonViewer } from '@/components/common/JsonViewer'
 import {
   CalculationBlocksPanel,
   ToolBlocksPanel,
@@ -144,7 +144,7 @@ const TIMEFRAMES = Object.keys(TF_MINUTES).filter(tf => tf !== 'M1')
 const REASONING_EFFORTS = ['none', 'low', 'medium', 'high']
 const DEFAULT_ANNOTATION_COLOR = '#f59e0b'
 
-type ToolTab = 'analyse' | 'simulation' | 'ba' | 'context'
+type ToolTab = 'analyse' | 'snapshot' | 'ba' | 'context'
 
 interface ChatMessage {
   id: string
@@ -580,8 +580,26 @@ export function PromptWorkbench() {
     scriptResult?: Record<string, unknown> | null
     scriptError?: string | null
   } | null>(null)
-  const [simPreview, setSimPreview] = useState<string | null>(null)
+  const [simPreview, setSimPreview] = useState<
+    { kind: 'notice'; text: string } | { kind: 'result'; snapshot: Record<string, unknown>; errors: string[] } | null
+  >(null)
   const [simPreviewLoading, setSimPreviewLoading] = useState(false)
+  // "Letzter Input" viewer at the bottom of the EC tab — the exact `input`/`snapshot` the EC-tab
+  // script received, so both the user and the LLM Script Assistant see the real shape instead of
+  // guessing. Populated by a Step/Run in EC mode (both fields) and by the Snapshot tab's
+  // Test/Preview button (snapshot only, ahead of ever running a step — see handlePreview).
+  const [lastEcInput, setLastEcInput] = useState<Record<string, unknown> | null>(null)
+  const [lastEcSnapshot, setLastEcSnapshot] = useState<Record<string, unknown> | null>(null)
+  // Fed into the EC-tab ScriptEditor's LLM Script Assistant as contextData, so it sees the
+  // real input/snapshot shape instead of guessing — same idea as EntityAssistantPanel's
+  // testInput/testResult props in the production Entity Config Wizard.
+  const ecScriptContextData = useMemo(() => {
+    if (!lastEcInput && !lastEcSnapshot) return undefined
+    const parts: string[] = []
+    if (lastEcInput) parts.push(`=== Letzter Input ('input' param) ===\n${JSON.stringify(lastEcInput, null, 2)}`)
+    if (lastEcSnapshot) parts.push(`=== 'snapshot' global ===\n${JSON.stringify(lastEcSnapshot, null, 2)}`)
+    return parts.join('\n\n')
+  }, [lastEcInput, lastEcSnapshot])
 
   // Simulation tab: mini Snapshot Designer — same tool_blocks/calculation_blocks/
   // assembly_transform_script editing UI as the real Snapshot Designer
@@ -709,7 +727,7 @@ export function PromptWorkbench() {
   )
 
   const boundaryMarkers: ForexChartMarker[] = useMemo(() => {
-    if ((toolTab !== 'simulation' && toolTab !== 'ba') || total === 0 || position <= 0 || position >= total) return []
+    if ((toolTab !== 'snapshot' && toolTab !== 'ba') || total === 0 || position <= 0 || position >= total) return []
     const boundaryCandle = candles[visibleCount - 1]
     if (!boundaryCandle) return []
     return [{
@@ -882,6 +900,51 @@ export function PromptWorkbench() {
     return `Currently open simulated trades:\n${lines.join('\n')}`
   }, [openTrades])
 
+  // One row per trade_id (open+close legs merged), for the BA tab's "Trades" viewer — same
+  // pips calculation already used for the chart's closed-trade trendline label (see the
+  // annotations-diffing effect above), just surfaced as a list with a running total instead
+  // of only drawn on the chart.
+  const tradeRows = useMemo(() => {
+    const opensByTradeId = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
+    const closesByTradeId = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
+    for (const a of annotations) {
+      if (a.kind !== 'trade') continue
+      if (a.action === 'open') opensByTradeId.set(a.trade_id, a)
+      else closesByTradeId.set(a.trade_id, a)
+    }
+    const rows = [...opensByTradeId.values()].map(openAnn => {
+      const closeAnn = closesByTradeId.get(openAnn.trade_id)
+      const pips = closeAnn
+        ? (openAnn.direction === 'short' ? openAnn.price - closeAnn.price : closeAnn.price - openAnn.price) / pipSize(closeAnn.price)
+        : undefined
+      return {
+        tradeId: openAnn.trade_id,
+        direction: openAnn.direction,
+        openCandle: openAnn.candle_number,
+        openPrice: openAnn.price,
+        closeCandle: closeAnn?.candle_number,
+        closePrice: closeAnn?.price,
+        pips,
+        note: closeAnn?.note ?? openAnn.note,
+      }
+    })
+    // Chronological (oldest first) — candle numbering is #1=newest .. #total=oldest.
+    rows.sort((a, b) => b.openCandle - a.openCandle)
+    return rows
+  }, [annotations])
+
+  const tradeSummary = useMemo(() => {
+    const closed = tradeRows.filter(r => r.pips !== undefined)
+    const totalPips = closed.reduce((sum, r) => sum + (r.pips ?? 0), 0)
+    return {
+      openCount: tradeRows.length - closed.length,
+      closedCount: closed.length,
+      totalPips,
+      wins: closed.filter(r => (r.pips ?? 0) > 0).length,
+      losses: closed.filter(r => (r.pips ?? 0) < 0).length,
+    }
+  }, [tradeRows])
+
   // ── Agent Prompt column ──────────────────────────────────────────────────
   const [promptText, setPromptText] = useState('')
   const [loadFromAgentId, setLoadFromAgentId] = useState('')
@@ -986,7 +1049,7 @@ export function PromptWorkbench() {
     const transcript = messages
       .map(m => `## ${m.role === 'user' ? 'User' : 'Assistant'} (${m.timestamp})\n${m.content}`)
       .join('\n\n')
-    const md = `# Prompt Workbench Chat — ${pair} / ${timeframe}
+    const md = `# Simulation Chat — ${pair} / ${timeframe}
 
 **Broker:** ${brokerName ?? '–'} · **Messages:** ${messages.length}
 
@@ -1004,7 +1067,7 @@ ${transcript}`
   // Only sent when the Simulation/BA tabs have tool_blocks configured — otherwise
   // the agent keeps getting raw candle text, unchanged from before.
   const snapshotPipelineFields = useCallback(() => {
-    if ((toolTab !== 'simulation' && toolTab !== 'ba') || toolBlocksState.length === 0) return {}
+    if ((toolTab !== 'snapshot' && toolTab !== 'ba') || toolBlocksState.length === 0) return {}
     return {
       tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
       calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
@@ -1081,7 +1144,7 @@ ${transcript}`
         timeframe,
         candle_count: candleCount,
         candle_anchor: candleAnchorRef.current,
-        visible_count: (toolTab === 'simulation' || toolTab === 'ba') ? visibleCount : undefined,
+        visible_count: (toolTab === 'snapshot' || toolTab === 'ba') ? visibleCount : undefined,
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
         allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
@@ -1191,6 +1254,8 @@ ${transcript}`
         decisionDiscarded: resp.decision_discarded, scriptInput: resp.script_input,
         scriptResult: resp.script_result, scriptError: resp.script_error,
       })
+      if (resp.ec_input) setLastEcInput(resp.ec_input)
+      if (resp.snapshot) setLastEcSnapshot(resp.snapshot)
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
       applyAnnotationUpdates(resp)
     } catch (err) {
@@ -1229,9 +1294,9 @@ ${transcript}`
   }
 
   const handlePreview = async () => {
-    if (total === 0) { setSimPreview('Keine Kerzen geladen.'); return }
+    if (total === 0) { setSimPreview({ kind: 'notice', text: 'Keine Kerzen geladen.' }); return }
     if (toolBlocksState.length === 0) {
-      setSimPreview('Keine tool_blocks konfiguriert — Profil laden oder Tool hinzufügen.')
+      setSimPreview({ kind: 'notice', text: 'Keine tool_blocks konfiguriert — Profil laden oder Tool hinzufügen.' })
       return
     }
     setSimPreviewLoading(true)
@@ -1244,12 +1309,12 @@ ${transcript}`
         calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
         assembly_transform_script: assemblyScriptText,
       })
-      const body = resp.errors.length
-        ? `${JSON.stringify(resp.snapshot, null, 2)}\n\n=== Errors ===\n${resp.errors.join('\n')}`
-        : JSON.stringify(resp.snapshot, null, 2)
-      setSimPreview(body)
+      setSimPreview({ kind: 'result', snapshot: resp.snapshot, errors: resp.errors })
+      // Pre-fills the EC tab's "Letzter Input" viewer with the snapshot half even before any
+      // Step/Run happened — see that viewer's comment for why this button can do that.
+      setLastEcSnapshot(resp.snapshot)
     } catch (err) {
-      setSimPreview(`Error: ${String(err)}`)
+      setSimPreview({ kind: 'notice', text: `Error: ${String(err)}` })
     } finally {
       setSimPreviewLoading(false)
     }
@@ -1293,7 +1358,9 @@ ${transcript}`
     setEcScriptConfigText(JSON.stringify(found.ec_script_config ?? {}, null, 2))
     setEcScriptAllowedTools(found.ec_script_allowed_tools ?? [])
     setLeftTab(found.left_tab)
-    setToolTab(found.tool_tab)
+    // Backward-compat: configs saved before the Simulation->Snapshot rename still contain
+    // the literal string "simulation" on disk (JSON5, not type-checked at runtime).
+    setToolTab((found.tool_tab as string) === 'simulation' ? 'snapshot' : found.tool_tab)
     setPromptText(found.system_prompt)
     setLlmName(found.llm_name)
     setReasoningEffort(found.reasoning_effort)
@@ -1845,6 +1912,7 @@ ${transcript}`
                   minHeight={180}
                   snippetScope="ec"
                   contextFile="script_pwb_ec_context.md"
+                  contextData={ecScriptContextData}
                 />
               </div>
               <div className="space-y-1">
@@ -1857,9 +1925,12 @@ ${transcript}`
                   className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono"
                 />
               </div>
-              <div className="space-y-1">
-                <span className="text-white">EC Tool Access</span>
-                <div className="flex flex-wrap gap-1">
+              <details className="space-y-1">
+                <summary className="text-white cursor-pointer select-none">
+                  EC Tool Access
+                  {ecScriptAllowedTools.length > 0 && ` (${ecScriptAllowedTools.length})`}
+                </summary>
+                <div className="flex flex-wrap gap-1 mt-1">
                   {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
                     <button
                       key={t.name}
@@ -1878,15 +1949,48 @@ ${transcript}`
                     </button>
                   ))}
                 </div>
-              </div>
+              </details>
+
+              {(lastEcInput || lastEcSnapshot) ? (
+                <div className="space-y-1 border-t border-gray-800 pt-2">
+                  <span className="text-white">Letzter Input</span>
+                  {lastEcInput && (
+                    <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2" open>
+                      <summary
+                        className="cursor-pointer select-none text-gray-400 hover:text-white"
+                        title="Das exakte 'input'-JSON, das dem EC-Script im letzten Step/Run übergeben wurde — backend-erzeugt, nicht editierbar"
+                      >
+                        input
+                      </summary>
+                      <JsonViewer data={lastEcInput} defaultExpandLevel={2} className="mt-1" />
+                    </details>
+                  )}
+                  {lastEcSnapshot && (
+                    <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2">
+                      <summary
+                        className="cursor-pointer select-none text-gray-400 hover:text-white"
+                        title="Der `snapshot`-Global, den das EC-Script bekommt, wenn im Snapshot-Tab tool_blocks konfiguriert sind — via Step/Run oder Test/Preview im Snapshot-Tab befüllt"
+                      >
+                        snapshot
+                      </summary>
+                      <JsonViewer data={lastEcSnapshot} defaultExpandLevel={2} className="mt-1" />
+                    </details>
+                  )}
+                </div>
+              ) : (
+                <p className="text-white italic text-xs border-t border-gray-800 pt-2">
+                  Noch kein Input — erscheint hier nach dem ersten Step/Run (EC-Modus) oder nach
+                  "Test / Preview" im Snapshot-Tab.
+                </p>
+              )}
             </div>
           )}
         </section>
 
-        {/* Tools — [Analyse] / [Simulation] */}
+        {/* Tools — [Analyse] / [Snapshot] */}
         <section className="flex flex-col min-h-0 w-1/2">
           <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
-            {(['analyse', 'simulation', 'ba', 'context'] as ToolTab[]).map(tab => (
+            {(['analyse', 'snapshot', 'ba', 'context'] as ToolTab[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setToolTab(tab)}
@@ -1895,7 +1999,7 @@ ${transcript}`
                   toolTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
                 ].join(' ')}
               >
-                {tab === 'analyse' ? 'Analyse' : tab === 'simulation' ? 'Simulation' : tab === 'ba' ? 'BA' : 'LLM Context'}
+                {tab === 'analyse' ? 'Analyse' : tab === 'snapshot' ? 'Snapshot' : tab === 'ba' ? 'BA' : 'LLM Context'}
               </button>
             ))}
           </div>
@@ -1937,10 +2041,10 @@ ${transcript}`
                   lines={swingLines}
                 />
               </>
-            ) : toolTab === 'simulation' ? (
+            ) : toolTab === 'snapshot' ? (
               <>
                 <p className="text-white">
-                  Simulation: [Step]/[Run] und Chat schicken dem Agenten den echten, per
+                  Snapshot: [Step]/[Run] und Chat schicken dem Agenten den echten, per
                   tool_blocks/calculation_blocks/assembly_transform_script assemblierten Snapshot (gleiche Pipeline
                   wie im Snapshot Designer), verankert auf die zuletzt sichtbare Kerze (#{position || total}) statt
                   auf Live-Daten — sobald hier tool_blocks eingetragen sind. Leer lassen, um weiterhin die rohen
@@ -2002,10 +2106,21 @@ ${transcript}`
                 >
                   {simPreviewLoading ? 'Testing…' : 'Test / Preview'}
                 </button>
-                {simPreview && (
-                  <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
-                    {simPreview}
-                  </pre>
+                {simPreview?.kind === 'notice' && (
+                  <p className="whitespace-pre-wrap break-words text-[11px] text-gray-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
+                    {simPreview.text}
+                  </p>
+                )}
+                {simPreview?.kind === 'result' && (
+                  <div className="bg-gray-900/60 border border-gray-800 rounded p-2">
+                    {simPreview.errors.length > 0 && (
+                      <div className="mb-1.5 pb-1.5 border-b border-gray-800 text-[11px] text-red-400 whitespace-pre-wrap break-words">
+                        === Errors ===
+                        {'\n'}{simPreview.errors.join('\n')}
+                      </div>
+                    )}
+                    <JsonViewer data={simPreview.snapshot} defaultExpandLevel={2} />
+                  </div>
                 )}
               </>
             ) : toolTab === 'ba' ? (
@@ -2125,6 +2240,46 @@ ${transcript}`
                   </pre>
                 )}
 
+                {tradeRows.length > 0 && (
+                  <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2 border-t border-gray-800 pt-2" open>
+                    <summary
+                      className="cursor-pointer select-none text-gray-400 hover:text-white"
+                      title="Alle in dieser Session gesetzten Trades (offen + geschlossen), mit Pips-Ergebnis für bereits geschlossene — dieselbe Berechnung wie am Trendline-Label im Chart."
+                    >
+                      Trades — {tradeSummary.closedCount} geschlossen, {tradeSummary.openCount} offen
+                      {tradeSummary.closedCount > 0 && (
+                        <span className={tradeSummary.totalPips >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                          {` · ${tradeSummary.totalPips >= 0 ? '+' : ''}${tradeSummary.totalPips.toFixed(1)} pips`}
+                          {` (${tradeSummary.wins}W/${tradeSummary.losses}L)`}
+                        </span>
+                      )}
+                    </summary>
+                    <div className="mt-1 space-y-0.5">
+                      {tradeRows.map(row => (
+                        <div key={row.tradeId} className="flex items-center gap-2 flex-wrap">
+                          <span className="text-gray-500">[{row.tradeId}]</span>
+                          <span className={row.direction === 'short' ? 'text-red-400' : 'text-emerald-400'}>
+                            {(row.direction ?? '?').toUpperCase()}
+                          </span>
+                          <span className="text-gray-400">#{row.openCandle} @ {row.openPrice}</span>
+                          <span className="text-gray-600">→</span>
+                          {row.pips !== undefined ? (
+                            <>
+                              <span className="text-gray-400">#{row.closeCandle} @ {row.closePrice}</span>
+                              <span className={row.pips >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                {row.pips >= 0 ? '+' : ''}{row.pips.toFixed(1)} pips
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-amber-400">offen</span>
+                          )}
+                          {row.note && <span className="text-gray-600 italic truncate">— {row.note}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
                 {lastStepResult ? (
                   <div className="space-y-1 border-t border-gray-800 pt-2">
                     <span className="text-white">Letzter Step</span>
@@ -2137,11 +2292,11 @@ ${transcript}`
                         {(lastStepResult.decisionRetries ?? 0) > 0 && ` — ${lastStepResult.decisionRetries}× retried`}
                         {lastStepResult.decisionValid === false && ' — INVALID after all retries'}
                       </summary>
-                      <pre className="mt-1 whitespace-pre-wrap break-all">
-                        {lastStepResult.decision
-                          ? JSON.stringify(lastStepResult.decision, null, 2)
-                          : '(invalid — no JSON could be parsed)'}
-                      </pre>
+                      {lastStepResult.decision ? (
+                        <JsonViewer data={lastStepResult.decision} defaultExpandLevel={2} className="mt-1" />
+                      ) : (
+                        <p className="mt-1 text-gray-500">(invalid — no JSON could be parsed)</p>
+                      )}
                       {(lastStepResult.decisionDiscarded?.length ?? 0) > 0 && (
                         <div className="mt-1.5 pt-1.5 border-t border-gray-800 space-y-1">
                           <div className="text-gray-500">Discarded attempts:</div>
@@ -2161,7 +2316,7 @@ ${transcript}`
                         >
                           Script Input
                         </summary>
-                        <pre className="mt-1 whitespace-pre-wrap break-all">{JSON.stringify(lastStepResult.scriptInput, null, 2)}</pre>
+                        <JsonViewer data={lastStepResult.scriptInput} defaultExpandLevel={2} className="mt-1" />
                       </details>
                     )}
                     {lastStepResult.scriptResult && (
@@ -2169,7 +2324,7 @@ ${transcript}`
                         <summary className="cursor-pointer select-none text-gray-400 hover:text-white">
                           Script Result
                         </summary>
-                        <pre className="mt-1 whitespace-pre-wrap break-all">{JSON.stringify(lastStepResult.scriptResult, null, 2)}</pre>
+                        <JsonViewer data={lastStepResult.scriptResult} defaultExpandLevel={2} className="mt-1" />
                       </details>
                     )}
                     {lastStepResult.scriptError && (
@@ -2196,15 +2351,9 @@ ${transcript}`
                 ) : contextPreviewError ? (
                   <span className="text-red-400">Error: {contextPreviewError}</span>
                 ) : contextPreview ? (
-                  <div className="bg-gray-900/60 border border-gray-800 rounded p-2 overflow-x-auto">
+                  <div className="bg-gray-900/60 border border-gray-800 rounded p-2">
                     {contextPreviewLoading && <div className="text-white mb-1">Aktualisiere…</div>}
-                    <JsonView
-                      data={contextPreview}
-                      style={darkStyles}
-                      shouldExpandNode={(level, _value, field) =>
-                        level === 0 || (level === 1 && field !== 'candles')
-                      }
-                    />
+                    <JsonViewer data={contextPreview} defaultExpandLevel={1} />
                   </div>
                 ) : (
                   <p className="text-white italic">{contextPreviewLoading ? 'Lädt…' : 'Kein Preview verfügbar.'}</p>

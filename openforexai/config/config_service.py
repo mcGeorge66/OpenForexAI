@@ -206,13 +206,28 @@ class ConfigService:
             _log.info("ConfigService: config for disabled EC %r ignored", ec_id)
             return
 
+        response_cfg = dict(ec_cfg)
+        # Mirror _handle_request's Agent-side resolution: a named snapshot_profile
+        # resolves to its full tool_blocks/calculation_blocks/assembly_transform_script
+        # dict here, so EventComposer._execute doesn't need its own config lookup.
+        snapshot_profiles = self._cfg.get("snapshot_profiles", {})
+        selected_snapshot_profile = response_cfg.get("snapshot_profile")
+        if (
+            isinstance(selected_snapshot_profile, str)
+            and isinstance(snapshot_profiles, dict)
+            and isinstance(snapshot_profiles.get(selected_snapshot_profile), dict)
+        ):
+            resolved_snapshot = dict(snapshot_profiles[selected_snapshot_profile])
+            resolved_snapshot.setdefault("name", selected_snapshot_profile)
+            response_cfg["snapshot_profile_config"] = resolved_snapshot
+
         response = AgentMessage(
             event_type=EventType.EC_CONFIG_RESPONSE,
             source_agent_id=CONFIG_SERVICE_ID,
             target_agent_id=ec_id,
             payload={
                 "ec_id": ec_id,
-                "config": dict(ec_cfg),
+                "config": response_cfg,
             },
             correlation_id=str(msg.id),
         )

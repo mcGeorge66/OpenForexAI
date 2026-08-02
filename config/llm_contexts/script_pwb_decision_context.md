@@ -1,6 +1,8 @@
 # Prompt Workbench — BA Decision Script
 
-This assistant helps write the **BA-simulation script** in the Prompt Workbench's Simulation tab.
+This assistant helps write the **BA-simulation script** in the Prompt Workbench's BA tab. It can
+optionally receive a pre-built `snapshot` global, configured via the Snapshot tab (formerly named
+"Simulation tab" — renamed since that's what it actually configures: a Snapshot Profile).
 
 ## What this script is for
 
@@ -37,7 +39,7 @@ async def main(input, config, tools):
   - `candle`: `{timestamp, open, high, low, close}` for that candle.
   - `existing_annotations`: every annotation (zones/trades/markers) accumulated so far this session — filter for `kind == "trade"` to see currently open/closed simulated trades yourself if you don't want to rely on `assessment_memory`.
 - `config` — your own JSON from the "Script Config" field, with one key always injected: `config["memory_key"]` (the value of the "Memory Key" field).
-- `tools` — call `await tools.call("tool_name", **kwargs)`, restricted to whatever is checked under "BA Script Tool Access" (default: `assessment_memory`, `trade_marker`).
+- `tools` — call `await tools.call("tool_name", **kwargs)`, restricted to whatever is checked under "BA Script Tool Access" (default: `assessment_memory`, `trade_marker`). If `get_candles`, `calculate_indicator`, or `get_swing_levels` are enabled here too, they're silently anchored (`start` forced to the currently visible candle's timestamp) so this script can never accidentally pull live/future data — same mechanism as the AA-under-test's and EC-tab's tool loops.
 - Return value — whatever dict you want; it's shown in the chat under the step's answer. It has no required shape (unlike `input["decision"]`, nothing here is parsed by the Workbench itself) — this is not what actually draws to the chart. The chart is drawn by whatever `trade_marker` calls your script makes.
 
 ## Globals injected into the script namespace
@@ -70,6 +72,15 @@ Not a function — a dict describing the "triggering event" for this step, built
 ```
 Only `event_type`, `instrument`, and `payload` carry real workbench data — `id`/`source_agent_id`/
 `correlation_id`/`chain` are always `None`/`[]` since there's no real upstream AgentMessage here.
+
+```python
+snapshot: dict
+```
+**Only present when the Snapshot tab has `tool_blocks` configured** — the same object the EC-tab
+script gets (see `script_pwb_ec_context.md`), built once per Step/Run and shared by both script
+phases. If the Snapshot tab is empty, `snapshot` does not exist in the namespace at all —
+referencing it raises `NameError`, never `None`. Guard with `globals().get("snapshot")` if this
+script must work both with and without a configured profile.
 
 ```python
 def debug(message: Any) -> None

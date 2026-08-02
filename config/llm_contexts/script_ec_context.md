@@ -68,6 +68,36 @@ Real production usage (from the `EC-RELAY` script, which sits between AA and BA)
 symbol = message.get("instrument")
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+### `snapshot` — dict, only present when a Snapshot Profile is configured
+
+If this EC's `snapshot_profile` field (top-level, next to `pair`/`broker` — not
+inside `config_json`) names an entry in `snapshot_profiles`, the container builds
+the exact same assembled snapshot an Agent with that profile would get (running
+the profile's `tool_blocks` → `calculation_blocks` → `assembly_transform_script`
+pipeline against this EC's own `pair`) **before** calling `main()`, and injects
+the result as `snapshot`. This lets a script consume pre-aggregated market
+context directly instead of calling `tools.call(...)` itself — useful when the
+same profile already feeds an AA and you want an EC to react to identical data
+without duplicating tool_blocks logic in Python.
+
+**If no `snapshot_profile` is configured, `snapshot` does not exist in the
+namespace at all** — referencing it raises `NameError`, it is never `None`.
+Always check your own config before assuming it's there; a script meant to run
+both with and without a profile should do so explicitly, e.g.
+`snapshot = globals().get("snapshot")`.
+
+Shape: `{"assembled": {...} | None, "timestamp": "...", "current_price": ...,
+"spread": ..., "tool_outputs": {...}, "raw_tool_outputs": {...}, "errors": [...],
+"cancel": bool, "cancel_reason": str, "snapshot_profile_name": "...", ...}` — see
+`script_snapshot_assembly_context.md` for the full field list produced by the
+assembly transform script (`assembled`) and `snapshot_config_assistant.md` for
+how to build the profile itself. If the assembly script set `cancel = True`,
+this EC's `main()` is **not called at all** for this cycle (same semantics as an
+Agent's decision cycle cancelling itself) — the run still counts as successful,
+just with no output. If the profile's tool_blocks/assembly script raise
+validation errors, the whole run fails closed (`EC_RUN_FAILED`) rather than
+silently handing `main()` a broken snapshot.
+
 ### `config` — dict
 
 The EC instance configuration — the JSON you entered in the **Config** tab. Use

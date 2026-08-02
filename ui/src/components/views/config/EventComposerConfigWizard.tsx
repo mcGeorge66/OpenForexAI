@@ -23,6 +23,7 @@ type SystemConfig = Record<string, unknown> & {
   modules?: { llm?: Record<string, string>; broker?: Record<string, string> }
   agents?: Record<string, Record<string, unknown>>
   event_composers?: Record<string, Record<string, unknown>>
+  snapshot_profiles?: Record<string, Record<string, unknown>>
 }
 
 type ECForm = {
@@ -42,6 +43,10 @@ type ECForm = {
   script: string
   config_json: string
   pass_trigger: boolean
+  // Optional named snapshot_profiles entry — when set, the script gets a pre-built
+  // `snapshot` global (same assembled snapshot an Agent would get), instead of/in
+  // addition to calling tools itself.
+  snapshot_profile: string
 }
 
 type ECRow = {
@@ -79,6 +84,7 @@ const EMPTY_FORM: ECForm = {
   script: 'async def main(input, config, tools):\n    # EC script\n    return None\n',
   config_json: '{}',
   pass_trigger: false,
+  snapshot_profile: '',
 }
 
 function toText(v: unknown): string {
@@ -140,6 +146,7 @@ function rawToForm(ec_id: string, raw: Record<string, unknown>): ECForm {
     script: toText(raw.script),
     config_json: config_json_str,
     pass_trigger: toBool(raw.pass_trigger, false),
+    snapshot_profile: toText(raw.snapshot_profile),
   }
 }
 
@@ -150,6 +157,7 @@ function formToRaw(form: ECForm): Record<string, unknown> {
     enable: form.enable,
     ...(form.broker ? { broker: form.broker } : {}),
     ...(form.pair ? { pair: form.pair } : {}),
+    ...(form.snapshot_profile.trim() ? { snapshot_profile: form.snapshot_profile.trim() } : {}),
     timer: {
       enabled: form.timer_enabled,
       interval_seconds: form.timer_interval_seconds,
@@ -186,6 +194,7 @@ export function EventComposerConfigWizard() {
   // Script/Config tab state
   const [activeTab, setActiveTab] = useState<'script' | 'config' | 'test'>('script')
   const [triggersOpen, setTriggersOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [configJsonError, setConfigJsonError] = useState<string | null>(null)
 
   // Test panel
@@ -233,6 +242,7 @@ export function EventComposerConfigWizard() {
   }, [])
 
   const brokerNames = useMemo(() => Object.keys(systemConfig?.modules?.broker ?? {}), [systemConfig])
+  const snapshotProfileNames = useMemo(() => Object.keys(systemConfig?.snapshot_profiles ?? {}), [systemConfig])
   const pairNames = useMemo(() => {
     const pairs = new Set<string>()
     for (const cfg of Object.values(systemConfig?.agents ?? {})) {
@@ -570,6 +580,20 @@ export function EventComposerConfigWizard() {
                   <p className="text-xs text-white mt-1">Fallback when not in input JSON</p>
                 </div>
               </div>
+              <div>
+                <label className="block text-xs text-white mb-1" title="Optional named snapshot_profiles entry. When set, the script receives a pre-built `snapshot` global — the same assembled snapshot (tool_blocks/calculation_blocks/assembly_transform_script) an Agent would get, instead of/in addition to calling tools itself.">
+                  Snapshot Profile
+                </label>
+                <select
+                  value={editForm.snapshot_profile}
+                  onChange={e => setField('snapshot_profile', e.target.value)}
+                  className="w-1/2 bg-gray-800 text-gray-200 text-xs font-mono px-2 py-1.5 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">— none —</option>
+                  {snapshotProfileNames.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <p className="text-xs text-white mt-1">Injects a `snapshot` global into the script — see Snapshot Config.</p>
+              </div>
               <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
                 <input
                   type="checkbox"
@@ -716,50 +740,70 @@ export function EventComposerConfigWizard() {
               )}
             </section>
 
-            {/* Tools */}
-            <section className="space-y-3">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-wide">Allowed Tools</h3>
-              <div className="flex flex-wrap gap-2">
-                {allTools.map(t => (
-                  <button
-                    key={t.name}
-                    type="button"
-                    onClick={() => toggleTool(t.name)}
-                    title={t.description}
-                    className={[
-                      'px-2 py-1 text-xs rounded border transition-colors',
-                      editForm.allowed_tools.includes(t.name)
-                        ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
-                        : 'text-white border-gray-700 hover:text-gray-300',
-                    ].join(' ')}
-                  >
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-white">Max tool turns</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={editForm.max_tool_turns}
-                    onChange={e => setField('max_tool_turns', Number(e.target.value))}
-                    className="w-20 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
-                  />
+            {/* Tools — collapsible, takes a lot of vertical space when tool count grows */}
+            <section className="border border-gray-700 rounded">
+              <button
+                type="button"
+                onClick={() => setToolsOpen(v => !v)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-white hover:text-gray-200 hover:bg-gray-800/60 transition-colors select-none"
+              >
+                {toolsOpen
+                  ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
+                  : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
+                }
+                <span className="font-semibold uppercase tracking-wide flex-1 text-left">Allowed Tools</span>
+                {!toolsOpen && (
+                  <span className="text-gray-600 font-mono normal-case tracking-normal">
+                    {editForm.allowed_tools.length > 0 ? `${editForm.allowed_tools.length} selected` : '—'}
+                  </span>
+                )}
+              </button>
+
+              {toolsOpen && (
+                <div className="px-3 pb-4 space-y-3 border-t border-gray-700 pt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {allTools.map(t => (
+                      <button
+                        key={t.name}
+                        type="button"
+                        onClick={() => toggleTool(t.name)}
+                        title={t.description}
+                        className={[
+                          'px-2 py-1 text-xs rounded border transition-colors',
+                          editForm.allowed_tools.includes(t.name)
+                            ? 'bg-emerald-900/40 text-emerald-300 border-emerald-600'
+                            : 'text-white border-gray-700 hover:text-gray-300',
+                        ].join(' ')}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-white">Max tool turns</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editForm.max_tool_turns}
+                        onChange={e => setField('max_tool_turns', Number(e.target.value))}
+                        className="w-20 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-white">Script timeout (s)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={editForm.script_timeout_seconds}
+                        onChange={e => setField('script_timeout_seconds', Number(e.target.value))}
+                        className="w-20 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
+                      />
+                      <span className="text-xs text-white">0 = no timeout</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-white">Script timeout (s)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={editForm.script_timeout_seconds}
-                    onChange={e => setField('script_timeout_seconds', Number(e.target.value))}
-                    className="w-20 bg-gray-800 text-gray-200 text-xs px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500"
-                  />
-                  <span className="text-xs text-white">0 = no timeout</span>
-                </div>
-              </div>
+              )}
             </section>
 
 
@@ -770,6 +814,7 @@ export function EventComposerConfigWizard() {
               allowedTools={editForm.allowed_tools}
               testInput={testInput}
               testResult={testResult}
+              snapshotProfile={editForm.snapshot_profile}
               onApplyScript={v => setField('script', v)}
               onApplyConfig={v => setField('config_json', v)}
               onRunTest={handleTest}

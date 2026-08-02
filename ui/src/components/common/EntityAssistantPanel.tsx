@@ -29,6 +29,9 @@ export interface EntityAssistantPanelProps {
   testInput: string
   testResult: ECExecuteResponse | null
   contextFile?: string
+  // Name of the snapshot_profiles entry this EC is wired to (if any) — tells the assistant
+  // whether the `snapshot` global actually exists in this script's namespace.
+  snapshotProfile?: string
   onApplyScript: (code: string) => void
   onApplyConfig: (json: string) => void
   onRunTest: () => Promise<ECExecuteResponse | null>
@@ -46,6 +49,7 @@ export function EntityAssistantPanel({
   testInput,
   testResult,
   contextFile = CONTEXT_FILE_DEFAULT,
+  snapshotProfile,
   onApplyScript,
   onApplyConfig,
   onRunTest,
@@ -66,6 +70,7 @@ export function EntityAssistantPanel({
   const scriptRef = useRef(script); scriptRef.current = script
   const configJsonRef = useRef(configJson); configJsonRef.current = configJson
   const testInputRef = useRef(testInput); testInputRef.current = testInput
+  const snapshotProfileRef = useRef(snapshotProfile); snapshotProfileRef.current = snapshotProfile
   const autoWriteRef = useRef(autoWrite); autoWriteRef.current = autoWrite
   const canTestRef = useRef(canTest); canTestRef.current = canTest
   const onApplyScriptRef = useRef(onApplyScript); onApplyScriptRef.current = onApplyScript
@@ -87,6 +92,11 @@ export function EntityAssistantPanel({
       `=== Script (Python, with line numbers) ===\n\`\`\`\n${numbered}\n\`\`\``,
       `=== Config JSON ===\n\`\`\`json\n${configJsonRef.current}\n\`\`\``,
       `=== Allowed Tools ===\n${allowedTools.length ? allowedTools.join(', ') : '(none)'}`,
+      `=== Snapshot Profile ===\n${
+        snapshotProfileRef.current
+          ? `"${snapshotProfileRef.current}" — the \`snapshot\` global IS available in this script.`
+          : '(none) — the `snapshot` global does NOT exist; referencing it raises NameError.'
+      }`,
     ]
     const ti = testInputRef.current?.trim()
     if (ti) parts.push(`=== Test Input ===\n\`\`\`json\n${ti}\n\`\`\``)

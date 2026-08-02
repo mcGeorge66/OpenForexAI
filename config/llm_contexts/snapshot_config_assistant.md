@@ -12,6 +12,19 @@ The snapshot is passed to the AA (Analysis Agent) as the complete market context
 LLM call — either as the user message (normal analysis cycle) or, for a decision-only call,
 merged into what the selector script / decision-prompt placeholders see.
 
+**EventComposer (EC) entities can consume the same named profile too** — set the EC's top-level
+`snapshot_profile` field (a name from `snapshot_profiles`, same as an Agent) and the container
+builds this exact snapshot before every run, injecting it as a `snapshot` global into the EC's
+own script (see `entity_config_assistant.md`/`script_ec_context.md`). One profile can feed both
+an AA and an EC without duplicating tool_blocks logic. If the assembly transform script sets
+`cancel = True`, an Agent skips its LLM call for that cycle and an EC skips calling `main()` —
+same semantics, no output either way.
+
+In the **Prompt Workbench**, the equivalent is the Snapshot tab: configuring `tool_blocks` there
+builds the same kind of snapshot (anchored to the currently visible candle instead of live data)
+and makes it available as `snapshot` to both the EC-tab script and the BA-tab script — see
+`script_pwb_ec_context.md`/`script_pwb_decision_context.md`.
+
 ## Snapshot Profile Structure
 
 ```json5

@@ -18,7 +18,7 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'orderbook',      label: 'Orderbook'       },
     { id: 'chart_analysis', label: 'Chart Analysis'  },
     { id: 'event_log',      label: 'Event Log'       },
-    { id: 'prompt_workbench', label: 'Prompt Workbench' },
+    { id: 'prompt_workbench', label: 'Simulation' },
     { id: '__div_test',     label: '', divider: true },
     { id: 'llm_checker',    label: 'LLM Checker'      },
     { id: 'tool_exec',      label: 'Tool Executor'    },

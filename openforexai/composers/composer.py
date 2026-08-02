@@ -237,6 +237,8 @@ class EventComposer:
         self._any_candle: int = 1
         self._compiled: Any = None  # compiled script code object
         self._running: bool = False
+        self._snapshot_profile_name: str | None = None
+        self._snapshot_profile_config: dict = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -306,6 +308,19 @@ class EventComposer:
         self._timer_interval = int(timer_cfg.get("interval_seconds", 60)) or 60
         self._session_filter = cfg.get("session_filter", []) if isinstance(cfg.get("session_filter"), list) else []
         self._any_candle = max(1, int(cfg.get("AnyCandle", 1)))
+
+        # Resolved by ConfigService._handle_ec_request from the named `snapshot_profile`
+        # (same mechanism as Agent) — a dict, never a bare name, by the time it reaches here.
+        self._snapshot_profile_name = (
+            str(cfg.get("snapshot_profile")).strip()
+            if isinstance(cfg.get("snapshot_profile"), str) and str(cfg.get("snapshot_profile")).strip()
+            else None
+        )
+        self._snapshot_profile_config = (
+            dict(cfg.get("snapshot_profile_config"))
+            if isinstance(cfg.get("snapshot_profile_config"), dict)
+            else {}
+        )
 
         # Pre-compile script for reuse
         try:
@@ -462,6 +477,7 @@ class EventComposer:
             "payload": input_json,
         }
 
+        skip_script = False
         try:
             ns: dict[str, Any] = {
                 "ask_llm": ask_llm_fn,
@@ -470,24 +486,58 @@ class EventComposer:
                 "debug": debug_fn,
                 "message": message_ctx,
             }
+
+            if self._snapshot_profile_config:
+                if not self._pair:
+                    raise RuntimeError(
+                        "snapshot_profile is configured but this EC has no pair set - "
+                        "Snapshot Profiles need a pair to build tool_blocks against."
+                    )
+                from openforexai.agents.analysis_snapshot import build_analysis_snapshot
+                snapshot, snapshot_errors = await build_analysis_snapshot(
+                    broker_name=self._broker_name,
+                    pair=self._pair,
+                    trigger_payload=input_json,
+                    profile=self._snapshot_profile_config,
+                    strategy_aggressiveness=str(config_snapshot.get("strategy_aggressiveness", "BALANCED")),
+                    agent_id=self.ec_id,
+                    repository=None,
+                    broker=None,
+                    monitoring_bus=self._monitoring_bus,
+                    event_bus=self._bus,
+                )
+                if snapshot_errors:
+                    raise RuntimeError("Snapshot invalid: " + "; ".join(snapshot_errors))
+                ns["snapshot"] = snapshot
+                if snapshot.get("cancel"):
+                    # Assembly transform script asked to skip this cycle — same semantics
+                    # as an Agent decision cycle cancelling itself; not an error.
+                    skip_script = True
+                    log_fn(
+                        f"EC cycle cancelled by snapshot assembly script: "
+                        f"{snapshot.get('cancel_reason', '') or '(no reason given)'}",
+                        level="info", pin=True,
+                    )
+
             exec(self._compiled, ns)  # noqa: S102
             main_fn = ns.get("main")
             if not callable(main_fn):
                 raise RuntimeError("EC script must define 'async def main(input, config, tools)'")
 
-            timeout_s = self._tool_config.get("script_timeout_seconds", 60)
-            if timeout_s and timeout_s > 0:
-                result = await asyncio.wait_for(
-                    main_fn(input_json, config_snapshot, tools_proxy),
-                    timeout=float(timeout_s),
-                )
-            else:
-                result = await main_fn(input_json, config_snapshot, tools_proxy)
+            if not skip_script:
+                timeout_s = self._tool_config.get("script_timeout_seconds", 60)
+                if timeout_s and timeout_s > 0:
+                    result = await asyncio.wait_for(
+                        main_fn(input_json, config_snapshot, tools_proxy),
+                        timeout=float(timeout_s),
+                    )
+                else:
+                    result = await main_fn(input_json, config_snapshot, tools_proxy)
 
-            if result is not None:
-                if not isinstance(result, dict):
-                    result = {"value": result}
-                output = result
+                if result is not None:
+                    if not isinstance(result, dict):
+                        result = {"value": result}
+                    output = result
 
         except asyncio.TimeoutError:
             success = False

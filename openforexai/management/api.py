@@ -2629,6 +2629,18 @@ class PromptWorkbenchChatResponse(BaseModel):
         description="/prompt-workbench/simulate-step only: set if the decision script raised or timed "
                     "out. The step's decision/annotations are still returned even if the script failed.",
     )
+    ec_input: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only, step1_mode='ec': the exact 'input' dict "
+                    "passed to the EC-tab script's main(input, config, tools) this step — pair, "
+                    "candle_number, candle, existing_annotations. None when step1_mode='agent'.",
+    )
+    snapshot: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: the assembled Snapshot-tab snapshot (if "
+                    "tool_blocks are configured) injected as the `snapshot` global into the EC-tab "
+                    "and/or decision_script namespaces this step. None when the Snapshot tab is empty.",
+    )
     error: str | None = None
 
 
@@ -2933,6 +2945,7 @@ async def _run_ec_style_script(
     pair: str | None,
     message_ctx: dict[str, Any],
     timeout: float,
+    snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Run a user-authored script (Step-1 EC-simulation or BA-simulation) with the EXACT same
     execution namespace real Event Composer scripts get (see composer.py's `_run_cycle`:
@@ -2940,6 +2953,11 @@ async def _run_ec_style_script(
     builtins). A script that uses `message.get(...)` or `log(...)` — like the real production
     `EC-RELAY` script does — behaves identically here, so a script written/tested in the
     Workbench can be pasted into a real EC config unchanged.
+
+    `snapshot`, when given, mirrors a production EC's `snapshot_profile` global: the assembled
+    snapshot built from the Snapshot tab's tool_blocks/calculation_blocks/assembly_transform_script.
+    Omitted from the namespace entirely (not just `None`) when not configured, matching production
+    (`NameError` on reference, never a `None` value a script could misread as "profile ran but empty").
     """
     from openforexai.composers.composer import _make_debug_fn, _make_emit_fn, _make_log_fn
     from openforexai.messaging.llm_helpers import make_ask_llm
@@ -2951,6 +2969,8 @@ async def _run_ec_style_script(
         "debug": _make_debug_fn(_monitoring_bus, entity_id, broker_name, pair, is_test=False, start_monotonic=0.0),
         "message": message_ctx,
     }
+    if snapshot is not None:
+        ns["snapshot"] = snapshot
     compiled = compile(script, f"workbench_ec_script:{entity_id}", "exec")
     exec(compiled, ns)  # noqa: S102
     main_fn = ns.get("main")
@@ -2988,6 +3008,10 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
     visible_count = ctx["visible_count"]
     snapshot_errors = ctx["snapshot_errors"]
     user_message = ctx["user_message"]
+    # Same assembled snapshot the Snapshot tab's "Test / Preview" button computes — reused here
+    # so EC/BA scripts see the identical `snapshot` global a production EC with this profile
+    # would get, anchored to the same frozen candle window (see _build_prompt_workbench_context).
+    snapshot = ctx["snapshot"]
 
     llm_name = _resolve_workbench_llm_name(req)
     llm_temperature, llm_max_tokens, llm_reasoning_effort = _resolve_workbench_llm_settings(llm_name, req.reasoning_effort)
@@ -3054,6 +3078,19 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
     # elsewhere (a stale view here would repeat the AA/BA trade-id bug fixed earlier).
     effective_existing_annotations = req.existing_annotations
 
+    # Anchor every candle-consuming tool (get_candles/calculate_indicator/get_swing_levels) to
+    # the frozen simulation position, for ALL script/agent phases below — EC (Step 1), the
+    # AA's own tool loop, and the BA decision script. Without this, a script calling
+    # get_candles would silently receive LIVE data instead of the static window the user is
+    # looking at, violating "PWB candles must be static" for every non-agent code path.
+    pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
+    forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
+    forced_candle_arguments = {
+        "calculate_indicator": forced_start_args,
+        "get_candles": forced_start_args,
+        "get_swing_levels": forced_start_args,
+    }
+
     try:
         if req.step1_mode == "ec":
             # Step 1 as a plain script — mirrors a production EC wired directly to the raw
@@ -3071,7 +3108,10 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                 },
             )
             ec_dispatcher = ToolDispatcher(
-                DEFAULT_REGISTRY, ec_tool_context, {"allowed_tools": req.ec_script_allowed_tools},
+                DEFAULT_REGISTRY, ec_tool_context, {
+                    "allowed_tools": req.ec_script_allowed_tools,
+                    "forced_arguments": forced_candle_arguments,
+                },
             )
             ec_tools_proxy = ToolsProxy(ec_dispatcher, [])
             step1_input = {
@@ -3082,6 +3122,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                 req.ec_script, step1_input, req.ec_script_config, ec_tools_proxy,
                 entity_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 message_ctx=_message_ctx("m5_candle_trigger", step1_input), timeout=req.timeout,
+                snapshot=snapshot,
             )
             final_text = json.dumps(decision) if decision is not None else ""
             new_annotations.extend(ec_tool_context.extra.get("workbench_annotations", []))
@@ -3099,8 +3140,6 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             if req.allowed_tools:
                 # AA-under-test has configured tool access — real tool loop, for testing an AA
                 # variant that fetches its own context instead of receiving a pre-built snapshot.
-                pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
-                forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
                 aa_tool_context = ToolContext(
                     agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                     monitoring_bus=_monitoring_bus, event_bus=_bus,
@@ -3109,11 +3148,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                 agent._tool_dispatcher = ToolDispatcher(
                     DEFAULT_REGISTRY, aa_tool_context, {
                         "allowed_tools": req.allowed_tools,
-                        "forced_arguments": {
-                            "calculate_indicator": forced_start_args,
-                            "get_candles": forced_start_args,
-                            "get_swing_levels": forced_start_args,
-                        },
+                        "forced_arguments": forced_candle_arguments,
                     },
                 )
                 final_text, total_tokens, _executed = await asyncio.wait_for(
@@ -3148,8 +3183,10 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                 },
             )
             script_dispatcher = ToolDispatcher(
-                DEFAULT_REGISTRY, script_tool_context,
-                {"allowed_tools": req.decision_script_allowed_tools},
+                DEFAULT_REGISTRY, script_tool_context, {
+                    "allowed_tools": req.decision_script_allowed_tools,
+                    "forced_arguments": forced_candle_arguments,
+                },
             )
             tools_proxy = ToolsProxy(script_dispatcher, [])
             script_input = {
@@ -3166,6 +3203,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                     req.decision_script, script_input, script_config, tools_proxy,
                     entity_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                     message_ctx=_message_ctx("analysis_result", script_input), timeout=req.timeout,
+                    snapshot=snapshot,
                 )
             except Exception as exc:  # noqa: BLE001
                 script_error = f"{type(exc).__name__}: {exc}"
@@ -3178,6 +3216,8 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             decision=decision, decision_valid=decision is not None,
             decision_retries=decision_retries, decision_discarded=decision_discarded,
             script_input=script_input, script_result=script_result, script_error=script_error,
+            ec_input=step1_input if req.step1_mode == "ec" else None,
+            snapshot=snapshot,
             annotations=new_annotations,
             removed_annotation_ids=removed_annotation_ids,
             snapshot_errors=snapshot_errors,
