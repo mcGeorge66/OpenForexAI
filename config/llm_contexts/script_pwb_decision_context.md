@@ -6,8 +6,20 @@ This assistant helps write the **BA-simulation script** in the Prompt Workbench'
 
 The Prompt Workbench's Step/Run loop mirrors the real AA→BA production split:
 
-- The **AA-under-test** (the LLM, configured via the Prompt tab and "AA Tool Access") produces only a decision each step — a directional market read, not a trade instruction. If "AA Tool Access" is left empty, the AA call runs via `Agent._run_decision_only_cycle`, the exact method real production AA agents use for their decision (no tools offered at all — the LLM's only job is to return strict JSON).
-- This script plays the **BA role**: given the AA's decision, it deterministically decides whether/how to act, and draws the outcome on the chart. It is plain Python, not a second LLM call — fast, cheap, and fully under your control.
+- **Step 1** produces a decision each step — a directional market read, not a trade instruction.
+  By default this is the **AA-under-test** (the LLM, configured via the Prompt tab and "AA Tool
+  Access"; empty tool access runs it via `Agent._run_decision_only_cycle`, the exact method real
+  production AA agents use for their decision). The Prompt/EC toggle at the top-right of the tab
+  bar can switch Step 1 to a deterministic **EC script** instead (no LLM at all) — see
+  `script_pwb_ec_context.md` for that contract. Either way, this script (Step 2) receives the
+  result identically: a `decision` dict, whichever kind of Step 1 produced it.
+- This script plays the **BA role**: given Step 1's decision, it deterministically decides
+  whether/how to act, and draws the outcome on the chart. It is plain Python, not a second LLM
+  call — fast, cheap, and fully under your control.
+- This runs with the *exact same* execution environment a real Event Composer script gets in
+  production (see `openforexai/composers/composer.py`) — `log`/`emit`/`debug`/`message`/`ask_llm`
+  globals included (documented below), not just `input`/`config`/`tools`. A script written and
+  tested here can be pasted into a real EC's `script` field unchanged.
 
 ## Contract
 
@@ -27,6 +39,55 @@ async def main(input, config, tools):
 - `config` — your own JSON from the "Script Config" field, with one key always injected: `config["memory_key"]` (the value of the "Memory Key" field).
 - `tools` — call `await tools.call("tool_name", **kwargs)`, restricted to whatever is checked under "BA Script Tool Access" (default: `assessment_memory`, `trade_marker`).
 - Return value — whatever dict you want; it's shown in the chat under the step's answer. It has no required shape (unlike `input["decision"]`, nothing here is parsed by the Workbench itself) — this is not what actually draws to the chart. The chart is drawn by whatever `trade_marker` calls your script makes.
+
+## Globals injected into the script namespace
+
+Identical to a real EC — these are available as bare names, not parameters:
+
+```python
+log(message: str, level: str = "info", pin: bool = False) -> None
+```
+Synchronous. Emits a structured message to the monitoring bus (`level`: `"info"` / `"warning"` /
+`"error"`; `pin=True` marks it as pinned so monitors keep it visible).
+
+```python
+async def emit(event_type: str, payload: dict | None = None, instrument: str | None = None) -> None
+```
+Publishes an event to the EventBus, `source_agent_id` set to this simulated entity's temporary ID.
+
+```python
+message: dict
+```
+Not a function — a dict describing the "triggering event" for this step, built the same way
+`EventComposer._run_cycle` builds it for a real EC:
+```python
+{
+    "id": None, "event_type": "analysis_result", "source_agent_id": None,
+    "instrument": "EURUSD",   # the configured pair
+    "chain": [], "correlation_id": None,
+    "payload": { ... },       # identical to the `input` dict above
+}
+```
+Only `event_type`, `instrument`, and `payload` carry real workbench data — `id`/`source_agent_id`/
+`correlation_id`/`chain` are always `None`/`[]` since there's no real upstream AgentMessage here.
+
+```python
+def debug(message: Any) -> None
+```
+In production this streams live to an EC's Test-tab when triggered via its "Test" button, and is a
+true no-op otherwise. **In the Workbench it is always a no-op** — safe to call, but use `log(...)`
+if you want to actually see output.
+
+```python
+async def ask_llm(llm_name, messages=None, *, system_prompt="", tools=None, temperature=None, max_tokens=None, timeout=...) -> LLMResponseWithTools
+```
+Lets this script make its own ad-hoc LLM call, separate from the Step-1 AA-under-test:
+```python
+response = await ask_llm("azure_azmin", "Given this setup, is it a high-quality entry?")
+print(response.content)
+```
+`response.content` (text, may be `None` if the model only called tools), `response.tool_calls`
+(list, may be empty), `response.stop_reason` (`"end_turn"` | `"tool_use"` | `"error"`).
 
 ## Persisting state across steps and sessions
 

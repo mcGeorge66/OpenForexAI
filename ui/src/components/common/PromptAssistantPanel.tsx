@@ -14,7 +14,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Bot, Check, CornerDownLeft, Loader2, Pencil, Search, Trash2, X } from 'lucide-react'
-import { api, type EntityHistoryEntry } from '@/api/client'
+import { api, type AgentLastInputResponse, type EntityHistoryEntry } from '@/api/client'
 import {
   applyPatch,
   parseResponse,
@@ -92,6 +92,7 @@ export function PromptAssistantPanel({
   const [selectedAnalysis, setSelectedAnalysis] = useState<EntityHistoryEntry | null>(null)
   const [includeSnapshot, setIncludeSnapshot] = useState(true)
   const [includeAgentConfig, setIncludeAgentConfig] = useState(false)
+  const [lastInput, setLastInput] = useState<AgentLastInputResponse | null>(null)
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const historyRef = useRef(history); historyRef.current = history
@@ -113,6 +114,15 @@ export function PromptAssistantPanel({
       .finally(() => setAnalysesLoading(false))
   }, [agentId])
 
+  // Live, in-RAM-only on the backend — whatever this agent (AA/BA/GA) most recently
+  // actually received, e.g. a BA's upstream AA output. Always mixed into the LLM's
+  // context below (not opt-in) so prompt/output-format mismatches surface immediately.
+  useEffect(() => {
+    api.getAgentLastInput(agentId)
+      .then(setLastInput)
+      .catch(() => setLastInput(null))
+  }, [agentId])
+
   const filteredAnalyses = useMemo(() => {
     const q = analysisFilter.trim().toLowerCase()
     if (!q) return analyses
@@ -132,6 +142,15 @@ export function PromptAssistantPanel({
     }
     if (includeAgentConfig) {
       parts.push(`=== Agent Configuration ===\n\`\`\`json\n${JSON.stringify(agentConfig, null, 2)}\n\`\`\``)
+    }
+    if (lastInput?.available) {
+      parts.push(
+        `=== Last Received Input (live, ${lastInput.timestamp ?? '?'}) ===\n` +
+        `The exact text this agent's LLM most recently received as its user message — check whether ` +
+        `the prompt above actually handles/expects this, e.g. field names it references.\n` +
+        `Trigger: ${lastInput.trigger ?? '(unknown)'} · Source: ${lastInput.source ?? '(unknown)'}\n` +
+        (lastInput.user_message ?? '(empty)'),
+      )
     }
     if (selectedAnalysis) {
       parts.push(
@@ -303,6 +322,16 @@ export function PromptAssistantPanel({
               />
               Include agent configuration
             </label>
+            <span
+              className={lastInput?.available ? 'text-emerald-400' : 'text-gray-600'}
+              title={
+                lastInput?.available
+                  ? `Zuletzt empfangener Input (${lastInput.timestamp}, Trigger: ${lastInput.trigger}) wird automatisch mitgegeben`
+                  : 'Dieser Agent hat seit dem letzten Start noch keinen Zyklus verarbeitet — kein Input verfügbar'
+              }
+            >
+              {lastInput?.available ? '✓ Last input included' : '(no last input yet)'}
+            </span>
 
             <label className="flex items-center gap-1.5 cursor-pointer select-none ml-auto"
               title="Apply code blocks and patches to Prompt/Context immediately">

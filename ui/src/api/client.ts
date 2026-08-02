@@ -92,6 +92,8 @@ export const api = {
   pauseRuntime: () => post<{ status: string; runtime_paused: boolean }>('/system/runtime/pause', {}),
   resumeRuntime: () => post<{ status: string; runtime_paused: boolean }>('/system/runtime/resume', {}),
   getAgents:      () => get<AgentInfo[]>('/agents'),
+  getAgentLastInput: (agentId: string) =>
+                    get<AgentLastInputResponse>(`/agents/${encodeURIComponent(agentId)}/last-input`),
   getComposers:   () => get<{ ec_id: string }[]>('/composers'),
   executeComposer: (ecId: string, input: Record<string, unknown>) =>
                     post<ECExecuteResponse>(`/composers/${encodeURIComponent(ecId)}/execute`, { input }),
@@ -393,6 +395,17 @@ export interface AgentInfo {
   agent_id: string
   queue_size: number
   queue_maxsize: number
+}
+
+export interface AgentLastInputResponse {
+  agent_id: string
+  // False if the agent hasn't processed any cycle yet since it started (or isn't active).
+  available: boolean
+  trigger?: string | null
+  source?: string | null
+  timestamp?: string | null
+  // The exact text this agent's LLM most recently received as its user message.
+  user_message?: string | null
 }
 
 export interface AgentQueryResponse {
@@ -775,6 +788,13 @@ export interface PromptWorkbenchChatRequest {
   decision_script_config?: Record<string, unknown>
   decision_script_allowed_tools?: string[]
   memory_key?: string
+  // 'agent' (default) runs the LLM-under-test as usual. 'ec' skips the LLM entirely and runs
+  // ec_script instead — mirrors a production Event Composer wired directly to the raw trigger,
+  // with no upstream AA at all. Either way the result feeds decision_script identically.
+  step1_mode?: 'agent' | 'ec'
+  ec_script?: string
+  ec_script_config?: Record<string, unknown>
+  ec_script_allowed_tools?: string[]
   timeout?: number
 }
 
@@ -875,6 +895,13 @@ export interface PromptWorkbenchChatResponse {
   snapshot_errors?: string[]
   // /prompt-workbench/simulate-step only — undefined when returned by /prompt-workbench/chat.
   decision?: Record<string, unknown> | null
+  // True if `decision` parsed successfully — false means all retries (see decision_retries)
+  // were exhausted without the AA producing valid JSON.
+  decision_valid?: boolean
+  // How many times the AA had to be re-prompted after an invalid-JSON answer (0 = first try).
+  decision_retries?: number
+  // Raw text of each rejected invalid-JSON attempt, oldest first.
+  decision_discarded?: string[]
   script_input?: Record<string, unknown> | null
   script_result?: Record<string, unknown> | null
   script_error?: string | null
@@ -895,11 +922,17 @@ export interface PromptWorkbenchSavedConfig {
   step_size: number
   fifo_enabled: boolean
   allow_trade_delete: boolean
-  left_tab: 'chat' | 'prompt'
+  left_tab: 'chat' | 'prompt' | 'ec'
   tool_tab: 'analyse' | 'simulation' | 'ba'
   system_prompt: string
   llm_name: string
   reasoning_effort: string
+  // 'agent' (default) or 'ec' — which one Step/Run actually executes, independent of
+  // which of the Prompt/EC tabs is currently being viewed/edited.
+  step1_mode: 'agent' | 'ec'
+  ec_script: string
+  ec_script_config: Record<string, unknown>
+  ec_script_allowed_tools: string[]
   // Analyse tab — chart indicator overlays (config only, not their computed values;
   // those get recalculated against whatever candles this config loads).
   indicators: Record<string, unknown>[]

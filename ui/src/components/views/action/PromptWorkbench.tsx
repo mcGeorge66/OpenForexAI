@@ -156,6 +156,9 @@ interface ChatMessage {
   toolEvents?: PromptWorkbenchToolEvent[]
   // Simulation-step only (AA-decision + BA-script input/result), assistant messages only.
   decision?: Record<string, unknown> | null
+  decisionValid?: boolean
+  decisionRetries?: number
+  decisionDiscarded?: string[]
   scriptInput?: Record<string, unknown> | null
   scriptResult?: Record<string, unknown> | null
   scriptError?: string | null
@@ -532,7 +535,13 @@ export function PromptWorkbench() {
   useEffect(() => { void loadSwingLevels() }, [loadSwingLevels])
 
   // ── Left column tab — [Chat] / [Prompt] ─────────────────────────────────
-  const [leftTab, setLeftTab] = useState<'chat' | 'prompt'>('chat')
+  const [leftTab, setLeftTab] = useState<'chat' | 'prompt' | 'ec'>('chat')
+  // Which one Step/Run actually executes — independent of which of the Prompt/EC tabs is
+  // currently being viewed, so you can review the prompt while EC mode is what's running.
+  const [step1Mode, setStep1Mode] = useState<'agent' | 'ec'>('agent')
+  const [ecScript, setEcScript] = useState('')
+  const [ecScriptConfigText, setEcScriptConfigText] = useState('{}')
+  const [ecScriptAllowedTools, setEcScriptAllowedTools] = useState<string[]>([])
 
   // ── Tools tab ────────────────────────────────────────────────────────────
   const [toolTab, setToolTab] = useState<ToolTab>('analyse')
@@ -559,6 +568,18 @@ export function PromptWorkbench() {
   // simulated position) across steps and sessions — the script controls the actual
   // get/set calls, this is just the key it's told to use.
   const [memoryKey, setMemoryKey] = useState('')
+  // Latest simulate-step result, shown as a persistent viewer in the BA tab itself
+  // (not just buried per-message in the chat) — always reflects the most recent
+  // Step/Run tick, so it's visible right next to the script you're editing.
+  const [lastStepResult, setLastStepResult] = useState<{
+    decision?: Record<string, unknown> | null
+    decisionValid?: boolean
+    decisionRetries?: number
+    decisionDiscarded?: string[]
+    scriptInput?: Record<string, unknown> | null
+    scriptResult?: Record<string, unknown> | null
+    scriptError?: string | null
+  } | null>(null)
   const [simPreview, setSimPreview] = useState<string | null>(null)
   const [simPreviewLoading, setSimPreviewLoading] = useState(false)
 
@@ -941,6 +962,9 @@ export function PromptWorkbench() {
     extra?: {
       toolEvents?: PromptWorkbenchToolEvent[]
       decision?: Record<string, unknown> | null
+      decisionValid?: boolean
+      decisionRetries?: number
+      decisionDiscarded?: string[]
       scriptInput?: Record<string, unknown> | null
       scriptResult?: Record<string, unknown> | null
       scriptError?: string | null
@@ -1114,6 +1138,12 @@ ${transcript}`
       } catch (err) {
         pushMessage('assistant', `Script Config ist kein gültiges JSON, wird als {} behandelt: ${String(err)}`)
       }
+      let ecScriptConfig: Record<string, unknown> = {}
+      try {
+        ecScriptConfig = step1Mode === 'ec' ? JSON.parse(ecScriptConfigText) : {}
+      } catch (err) {
+        pushMessage('assistant', `EC Script Config ist kein gültiges JSON, wird als {} behandelt: ${String(err)}`)
+      }
       const resp = await api.promptWorkbenchSimulateStep({
         system_prompt: promptText,
         question,
@@ -1144,10 +1174,21 @@ ${transcript}`
         decision_script_config: decisionScriptConfig,
         decision_script_allowed_tools: decisionScriptAllowedTools,
         memory_key: memoryKey,
+        step1_mode: step1Mode,
+        ec_script: ecScript,
+        ec_script_config: ecScriptConfig,
+        ec_script_allowed_tools: ecScriptAllowedTools,
         ...snapshotPipelineFields(),
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'), {
-        toolEvents: resp.tool_events, decision: resp.decision, scriptInput: resp.script_input,
+        toolEvents: resp.tool_events, decision: resp.decision,
+        decisionValid: resp.decision_valid, decisionRetries: resp.decision_retries,
+        decisionDiscarded: resp.decision_discarded, scriptInput: resp.script_input,
+        scriptResult: resp.script_result, scriptError: resp.script_error,
+      })
+      setLastStepResult({
+        decision: resp.decision, decisionValid: resp.decision_valid, decisionRetries: resp.decision_retries,
+        decisionDiscarded: resp.decision_discarded, scriptInput: resp.script_input,
         scriptResult: resp.script_result, scriptError: resp.script_error,
       })
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
@@ -1164,6 +1205,7 @@ ${transcript}`
     total, stepSize, fifoEnabled, allowTradeDelete, simulationAllowedTools, decisionScript, decisionScriptConfigText,
     decisionScriptAllowedTools, memoryKey, promptText, pair, brokerName, timeframe, candleCount, llmName,
     reasoningEffort, applyAnnotationUpdates, indicators, swingEnabled, swingLines, snapshotPipelineFields,
+    step1Mode, ecScript, ecScriptConfigText, ecScriptAllowedTools,
   ])
 
   const handleStep = () => { void stepOnce() }
@@ -1246,6 +1288,10 @@ ${transcript}`
     setDecisionScriptConfigText(JSON.stringify(found.decision_script_config ?? {}, null, 2))
     setDecisionScriptAllowedTools(found.decision_script_allowed_tools ?? ['assessment_memory', 'trade_marker'])
     setMemoryKey(found.memory_key ?? '')
+    setStep1Mode(found.step1_mode ?? 'agent')
+    setEcScript(found.ec_script ?? '')
+    setEcScriptConfigText(JSON.stringify(found.ec_script_config ?? {}, null, 2))
+    setEcScriptAllowedTools(found.ec_script_allowed_tools ?? [])
     setLeftTab(found.left_tab)
     setToolTab(found.tool_tab)
     setPromptText(found.system_prompt)
@@ -1291,6 +1337,10 @@ ${transcript}`
       decision_script_config: (() => { try { return JSON.parse(decisionScriptConfigText) } catch { return {} } })(),
       decision_script_allowed_tools: decisionScriptAllowedTools,
       memory_key: memoryKey,
+      step1_mode: step1Mode,
+      ec_script: ecScript,
+      ec_script_config: (() => { try { return JSON.parse(ecScriptConfigText) } catch { return {} } })(),
+      ec_script_allowed_tools: ecScriptAllowedTools,
     }
     const next = [...savedConfigs.filter(c => c.name !== name), entry]
     try {
@@ -1332,6 +1382,7 @@ ${transcript}`
     setPosition(0)
     setStepSize(3)
     setRunning(false)
+    setLastStepResult(null)
     setLeftTab('chat')
     setToolTab('analyse')
     setFifoEnabled(false)
@@ -1341,6 +1392,10 @@ ${transcript}`
     setDecisionScriptConfigText('{}')
     setDecisionScriptAllowedTools(['assessment_memory', 'trade_marker'])
     setMemoryKey('')
+    setStep1Mode('agent')
+    setEcScript('')
+    setEcScriptConfigText('{}')
+    setEcScriptAllowedTools([])
     setSimPreview(null)
     setSnapshotProfileName('')
     setToolBlocksState([])
@@ -1577,19 +1632,38 @@ ${transcript}`
       <div className="flex-1 min-h-0 flex">
         {/* Left column — [Chat] / [Prompt] */}
         <section className="flex flex-col min-h-0 w-1/2 border-r border-gray-700">
-          <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
-            {(['chat', 'prompt'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setLeftTab(tab)}
-                className={[
-                  'px-3 py-1.5 text-xs transition-colors capitalize',
-                  leftTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
-                ].join(' ')}
-              >
-                {tab}
-              </button>
-            ))}
+          <div className="flex items-center justify-between border-b border-gray-800 bg-gray-900 flex-shrink-0">
+            <div className="flex items-center">
+              {(['chat', 'prompt', 'ec'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setLeftTab(tab)}
+                  className={[
+                    'px-3 py-1.5 text-xs transition-colors uppercase',
+                    leftTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
+                  ].join(' ')}
+                >
+                  {tab === 'chat' ? 'Chat' : tab === 'prompt' ? 'Prompt' : 'EC'}
+                </button>
+              ))}
+            </div>
+            <div
+              className="flex items-center gap-0.5 mr-2 rounded border border-gray-700 overflow-hidden"
+              title="Was Step/Run tatsächlich ausführt — unabhängig davon, welcher Tab links gerade angezeigt wird. Agent = LLM (Prompt-Tab), EC = deterministisches Skript (EC-Tab), kein LLM."
+            >
+              {(['agent', 'ec'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setStep1Mode(mode)}
+                  className={[
+                    'px-2 py-1 text-[10px] transition-colors',
+                    step1Mode === mode ? 'bg-emerald-700 text-white' : 'bg-gray-950 text-white hover:text-gray-200',
+                  ].join(' ')}
+                >
+                  {mode === 'agent' ? 'Prompt' : 'EC'}
+                </button>
+              ))}
+            </div>
           </div>
 
           {leftTab === 'chat' ? (
@@ -1654,6 +1728,31 @@ ${transcript}`
                           Tools: {toolLines.join(', ')}
                         </div>
                       )}
+                      {msg.decision !== undefined && (
+                        <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
+                          <summary
+                            className="cursor-pointer select-none text-gray-400 hover:text-white"
+                            title="Die geparste AA-Entscheidung dieses Schritts — inkl. Retry-Info, falls die Antwort erst nach Korrektur valides JSON war"
+                          >
+                            Decision
+                            {(msg.decisionRetries ?? 0) > 0 && ` — ${msg.decisionRetries}× retried`}
+                            {msg.decisionValid === false && ' — INVALID after all retries'}
+                          </summary>
+                          <pre className="mt-1 whitespace-pre-wrap break-all">
+                            {msg.decision ? JSON.stringify(msg.decision, null, 2) : '(invalid — no JSON could be parsed)'}
+                          </pre>
+                          {(msg.decisionDiscarded?.length ?? 0) > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-gray-800 space-y-1">
+                              <div className="text-gray-500">Discarded attempts:</div>
+                              {msg.decisionDiscarded!.map((text, i) => (
+                                <pre key={i} className="whitespace-pre-wrap break-all text-red-300/80 bg-gray-900/50 rounded px-1 py-0.5 mb-1">
+                                  {text}
+                                </pre>
+                              ))}
+                            </div>
+                          )}
+                        </details>
+                      )}
                       {msg.scriptInput && (
                         <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
                           <summary
@@ -1701,7 +1800,7 @@ ${transcript}`
                 </button>
               </div>
             </>
-          ) : (
+          ) : leftTab === 'prompt' ? (
             <>
               <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900 border-b border-gray-800 flex-shrink-0 gap-2 flex-wrap">
                 <div className="flex items-center gap-1">
@@ -1729,6 +1828,58 @@ ${transcript}`
                 <PlainTextMonacoEditor value={promptText} onChange={setPromptText} language="plaintext" />
               </div>
             </>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-xs">
+              <p className="text-white">
+                Step 1 als Event Composer statt Agent — inhaltlich und technisch identisch mit einer echten
+                EC-Entity (siehe Config → Entity Config): gleicher Vertrag (<code>async def main(input, config,
+                tools)</code>), gleiche injizierte Globals (<code>log</code>, <code>emit</code>, <code>debug</code>,
+                <code>message</code>, <code>ask_llm</code>). Bekommt kein <code>decision</code>/<code>raw_response</code> —
+                das hier ist der erste Schritt, ohne vorgeschaltete AA. Aktiv nur, wenn oben rechts "EC" gewählt ist.
+              </p>
+              <div className="space-y-1">
+                <span className="text-white">EC Script (async def main(input, config, tools))</span>
+                <ScriptEditor
+                  value={ecScript}
+                  onChange={setEcScript}
+                  minHeight={180}
+                  snippetScope="ec"
+                  contextFile="script_pwb_ec_context.md"
+                />
+              </div>
+              <div className="space-y-1">
+                <span className="text-white">Script Config (JSON)</span>
+                <textarea
+                  value={ecScriptConfigText}
+                  onChange={e => setEcScriptConfigText(e.target.value)}
+                  rows={4}
+                  spellCheck={false}
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <span className="text-white">EC Tool Access</span>
+                <div className="flex flex-wrap gap-1">
+                  {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      title={t.description}
+                      onClick={() => setEcScriptAllowedTools(prev =>
+                        prev.includes(t.name) ? prev.filter(n => n !== t.name) : [...prev, t.name],
+                      )}
+                      className={`px-2 py-0.5 rounded border text-xs ${
+                        ecScriptAllowedTools.includes(t.name)
+                          ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
+                          : 'bg-gray-900 border-gray-700 text-white hover:text-gray-200'
+                      }`}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </section>
 
@@ -1965,6 +2116,65 @@ ${transcript}`
                   <pre className="whitespace-pre-wrap break-words text-[11px] text-emerald-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
                     {tradeStatusText()}
                   </pre>
+                )}
+
+                {lastStepResult ? (
+                  <div className="space-y-1 border-t border-gray-800 pt-2">
+                    <span className="text-white">Letzter Step</span>
+                    <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2" open>
+                      <summary
+                        className="cursor-pointer select-none text-gray-400 hover:text-white"
+                        title="Die geparste AA-Entscheidung des letzten Step/Run-Ticks — inkl. Retry-Info, falls die Antwort erst nach Korrektur valides JSON war"
+                      >
+                        Decision
+                        {(lastStepResult.decisionRetries ?? 0) > 0 && ` — ${lastStepResult.decisionRetries}× retried`}
+                        {lastStepResult.decisionValid === false && ' — INVALID after all retries'}
+                      </summary>
+                      <pre className="mt-1 whitespace-pre-wrap break-all">
+                        {lastStepResult.decision
+                          ? JSON.stringify(lastStepResult.decision, null, 2)
+                          : '(invalid — no JSON could be parsed)'}
+                      </pre>
+                      {(lastStepResult.decisionDiscarded?.length ?? 0) > 0 && (
+                        <div className="mt-1.5 pt-1.5 border-t border-gray-800 space-y-1">
+                          <div className="text-gray-500">Discarded attempts:</div>
+                          {lastStepResult.decisionDiscarded!.map((text, i) => (
+                            <pre key={i} className="whitespace-pre-wrap break-all text-red-300/80 bg-gray-950/60 rounded px-1 py-0.5 mb-1">
+                              {text}
+                            </pre>
+                          ))}
+                        </div>
+                      )}
+                    </details>
+                    {lastStepResult.scriptInput && (
+                      <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2">
+                        <summary
+                          className="cursor-pointer select-none text-gray-400 hover:text-white"
+                          title="Das exakte 'input'-JSON, das an das BA Decision Script übergeben wurde — backend-erzeugt, nicht editierbar"
+                        >
+                          Script Input
+                        </summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all">{JSON.stringify(lastStepResult.scriptInput, null, 2)}</pre>
+                      </details>
+                    )}
+                    {lastStepResult.scriptResult && (
+                      <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2">
+                        <summary className="cursor-pointer select-none text-gray-400 hover:text-white">
+                          Script Result
+                        </summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all">{JSON.stringify(lastStepResult.scriptResult, null, 2)}</pre>
+                      </details>
+                    )}
+                    {lastStepResult.scriptError && (
+                      <pre className="whitespace-pre-wrap break-words text-[11px] text-red-400 bg-gray-900/60 border border-red-900/50 rounded p-2">
+                        Script Error: {lastStepResult.scriptError}
+                      </pre>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-white italic text-xs border-t border-gray-800 pt-2">
+                    Noch kein Step gelaufen — Decision/Script Input erscheinen hier nach dem ersten Step/Run.
+                  </p>
                 )}
               </>
             ) : (

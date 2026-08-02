@@ -5,60 +5,111 @@ The user will share their current snapshot profile configuration (JSON) with you
 
 ## What is a Snapshot Profile?
 
-A Snapshot Profile defines the market data package that gets assembled before each LLM analysis cycle.
-It is configured in `config/system.json5` under `snapshot_profiles`.
+A Snapshot Profile defines the market data package that gets assembled before each LLM
+analysis cycle. It is configured in `config/system.json5` under `snapshot_profiles`.
 
-The snapshot is passed to the AA (Analysis Agent) as the complete market context for its LLM call.
+The snapshot is passed to the AA (Analysis Agent) as the complete market context for its
+LLM call — either as the user message (normal analysis cycle) or, for a decision-only call,
+merged into what the selector script / decision-prompt placeholders see.
 
 ## Snapshot Profile Structure
 
 ```json5
 {
-  "name": "profile_name",
   "description": "...",
-  "short_timeframe": "M30",       // primary short timeframe (M5/M15/M30/H1)
-  "long_timeframe": "H4",         // primary long timeframe (H1/H4/D1)
-  "decision_input_prefix": "...", // prefix text injected before the snapshot in the LLM prompt
-  "strategy_aggressiveness": "BALANCED",  // CONSERVATIVE / BALANCED / AGGRESSIVE
-  "tool_blocks": [...],           // tools called to gather data (get_candles, calculate_indicator, etc.)
-  "calculation_blocks": [...],    // Python scripts that post-process tool results
-  "assembly_transform_script": "..."  // final Python script that assembles the snapshot text
+  "short_timeframe": "M15",       // resolves any tool_block argument literally set to "SHORT_TF"
+  "long_timeframe": "H1",         // resolves any tool_block argument literally set to "LONG_TF"
+  "decision_input_prefix": "...", // prefix text before the snapshot JSON in the LLM's user message
+  "strategy_aggressiveness": "CONSERVATIVE",  // CONSERVATIVE / BALANCED / AGGRESSIVE
+  "tool_blocks": [...],           // tool calls that gather raw data (get_candles, calculate_indicator, ...)
+  "calculation_blocks": [...],    // Python scripts that post-process tool_block outputs
+  "assembly_transform_script": "..."  // final Python script that builds the dict sent to the LLM
 }
 ```
+
+There is no `name` field on the profile itself — it's keyed by name in `snapshot_profiles`.
 
 ## Tool Blocks
 
-Each tool block calls one tool and stores the result under an `output_key`:
+Each tool block calls one tool and stores the (transformed) result under `output_key`:
 ```json5
 {
+  "id": "m5_recent",
   "tool_name": "get_candles",
-  "output_key": "candles_h4",
+  "output_key": "m5_recent",       // falls back to `id` if omitted
   "enabled": true,
-  "arguments": { "pair": "{pair}", "timeframe": "H4", "count": "50" },
-  "transform_script": ""  // optional Python to post-process the result
+  "arguments": { "timeframe": "SHORT_TF", "count": "20" },
+  "transform_script": "result = normalize_candle_tool_output(tool_output, timeframe=tool_input.get(\"timeframe\"))"
 }
 ```
 
-Available template variables in arguments: `{pair}`, `{broker}`, `{agent_id}`.
+Argument values are **not** curly-brace-templated (no `{pair}`/`{broker}`/`{agent_id}` — that
+templating mechanism exists in `openforexai/tools/argument_templates.py` but is only used for
+Bridge Tools, not for snapshot tool_blocks). The only special value is the literal string
+`"SHORT_TF"` / `"LONG_TF"` in a `timeframe` argument, resolved from the profile's own
+`short_timeframe`/`long_timeframe`. A block *can* set `"pair"`/`"broker"` explicitly in its
+own `arguments` to override the agent's own pair/broker for that one call (e.g. to pull a
+correlated pair's candles) — everything else comes from the triggering agent's context.
+
+Blocks run in parallel, then their `transform_script`s run in original declaration order (so
+a later transform can read an earlier block's already-transformed output via `all_outputs`).
+See `script_snapshot_transform_context.md` for the transform script's full contract
+(`tool_input`, `tool_output`, `all_outputs`, `in_`/`out`/`result`, and the 5 helper functions
+from `config/snapshot_helpers.py`).
 
 ## Calculation Blocks
 
-Python scripts that run after all tool blocks complete. They receive a `context` dict with all tool results and can compute derived values (indicators, summaries, regime detection, etc.).
+Python scripts (`"type": "script"`) that run after all tool blocks (and their transforms)
+complete, in declaration order. Each receives `tool_outputs` — **not** `context` — containing
+every tool block's output keyed by `output_key`, **plus** every earlier calculation block's own
+result keyed by its `id` (merged into the same dict). Also receives `strategy_aggressiveness`,
+`short_timeframe`, `long_timeframe`. Must write its output dict into `result`. See
+`script_snapshot_calculation_context.md` for the full contract and worked examples.
+
+Results are stored under `snapshot["calculations"][<group>][<block_id>]`, where `<group>` is
+`"global"` for script blocks (always) or the primary candle source for other calc types — no
+other calc `type` is currently implemented besides `"script"`.
 
 ## Assembly Transform Script
 
-The final Python script that assembles all collected data into the snapshot text string.
-It receives `context` (all tool/calc results) and `pair`, `broker`, `agent_id` variables.
-It must write to `result["snapshot_text"]`.
+The final Python script that builds the dict actually sent to the LLM. It does **not** receive
+a `context` variable or flat `pair`/`broker`/`agent_id` variables — the real contract is:
+
+| Variable | Content |
+|---|---|
+| `tool_outputs` | dict — all tool block outputs after transform, keyed by `output_key` |
+| `raw_tool_outputs` | dict — tool block outputs **before** transform scripts |
+| `snapshot` | dict — full snapshot incl. `symbol`/`timestamp`/`latest_price`/`latest_spread`/`strategy_aggressiveness`/`trigger_candle`/`tool_outputs`/`calculations` |
+| `profile` | dict — this entire snapshot profile config |
+| `agent_context` | dict — `{agent_id, broker_name, pair, strategy_aggressiveness}` |
+| `in_` / `out` | aliases, both pre-populated with a copy of `snapshot` |
+| `result` | **write here** — becomes `snapshot["assembled"]`, the dict the LLM actually receives |
+| `cancel` | bool, default `False` — set `True` to abort this snapshot cycle entirely |
+| `cancel_reason` | str — required context when `cancel = True` |
+
+Minimal form: `result = tool_outputs`. A realistic one merges in metadata and calc results:
+
+```python
+calcs = snapshot.get("calculations", {})
+global_calcs = calcs.get("global", {})
+result = {
+    "symbol": snapshot.get("symbol"),
+    "timestamp": snapshot.get("timestamp"),
+    "strategy_aggressiveness": snapshot.get("strategy_aggressiveness"),
+}
+if "trend" in global_calcs:
+    result["trend"] = global_calcs["trend"]
+```
+
+See `script_snapshot_assembly_context.md` for the full contract, builtins, and more examples.
 
 ## Your Role
 
 Help the user:
 - Design effective snapshot profiles for their trading strategy
-- Write calculation blocks and assembly scripts
+- Write tool blocks, transform scripts, calculation blocks, and the assembly script
 - Choose the right timeframes and indicators
 - Debug issues with tool block arguments or script errors
 - Optimize the snapshot for token efficiency and LLM clarity
 
 Reference the user's current profile configuration (provided below) when giving advice.
-

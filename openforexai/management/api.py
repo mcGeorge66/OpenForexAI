@@ -1518,6 +1518,21 @@ class AgentInfo(BaseModel):
     queue_maxsize: int
 
 
+class AgentLastInputResponse(BaseModel):
+    agent_id: str
+    available: bool = Field(
+        description="False if the agent hasn't processed any cycle yet since it started (or isn't active).",
+    )
+    trigger: str | None = None
+    source: str | None = None
+    timestamp: str | None = None
+    user_message: str | None = Field(
+        default=None,
+        description="The exact text this agent's LLM most recently received as its user message — "
+                    "e.g. for a BA, the upstream AA's (possibly EC-relayed) raw decision text.",
+    )
+
+
 class RoutingRuleInfo(BaseModel):
     id: str
     description: str
@@ -2041,6 +2056,29 @@ async def get_agent(agent_id: str) -> AgentInfo:
     return AgentInfo(agent_id=agent_id, queue_size=q.qsize(), queue_maxsize=q.maxsize)
 
 
+@router.get("/agents/{agent_id}/last-input", response_model=AgentLastInputResponse)
+async def get_agent_last_input(agent_id: str) -> AgentLastInputResponse:
+    """Live, in-RAM only — the exact text this agent's LLM most recently received, for whichever
+
+    trigger last fired (analysis_result, ec_output, timer, ...). Meant for the Agent Config
+    Wizard's Prompt Assistant: showing what a BA/AA/GA actually receives, next to the prompt
+    being edited, surfaces prompt/output-format mismatches (e.g. a BA prompt expecting fields
+    an upstream AA prompt doesn't produce) immediately instead of only after a live failure.
+    Not persisted — resets whenever the agent restarts.
+    """
+    agent = _resolve_active_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} is not active")
+    last = getattr(agent, "_last_received_input", None)
+    if not isinstance(last, dict):
+        return AgentLastInputResponse(agent_id=agent_id, available=False)
+    return AgentLastInputResponse(
+        agent_id=agent_id, available=True,
+        trigger=last.get("trigger"), source=last.get("source"),
+        timestamp=last.get("timestamp"), user_message=last.get("user_message"),
+    )
+
+
 @router.post("/config/snapshots/preview", response_model=SnapshotPreviewResponse)
 async def preview_snapshot(req: SnapshotPreviewRequest) -> SnapshotPreviewResponse:
     agent = _resolve_active_agent(req.agent_id)
@@ -2513,6 +2551,23 @@ class PromptWorkbenchChatRequest(BaseModel):
                     "simulation steps and sessions (e.g. current simulated position). Injected into "
                     "the script's config as config['memory_key'].",
     )
+    step1_mode: str = Field(
+        default="agent",
+        description="/prompt-workbench/simulate-step only: 'agent' (default) runs the LLM-under-test "
+                    "as today. 'ec' skips the LLM entirely and runs `ec_script` instead — mirroring a "
+                    "production Event Composer wired directly to the raw trigger (e.g. event_routing.json5's "
+                    "m5_candle_trigger_to_trailing_sl_ec), with no upstream AA at all. Either way, the "
+                    "result feeds the optional decision_script (Step 2) identically.",
+    )
+    ec_script: str = Field(
+        default="",
+        description="Step-1 EC-simulation script, used when step1_mode == 'ec'. Same contract and "
+                    "execution namespace as a real Event Composer script (async def main(input, config, "
+                    "tools), plus log/emit/debug/message/ask_llm globals) — receives the raw candle "
+                    "window, no upstream decision.",
+    )
+    ec_script_config: dict[str, Any] = Field(default_factory=dict)
+    ec_script_allowed_tools: list[str] = Field(default_factory=list)
     timeout: float = 120.0
 
 class PromptWorkbenchChatResponse(BaseModel):
@@ -2538,7 +2593,24 @@ class PromptWorkbenchChatResponse(BaseModel):
         default=None,
         description="/prompt-workbench/simulate-step only: the AA-style decision this step produced, "
                     "best-effort JSON-parsed from the raw answer text (same parser production AA "
-                    "agents use). None if the answer wasn't valid JSON.",
+                    "agents use). None if the answer wasn't valid JSON even after retries.",
+    )
+    decision_valid: bool = Field(
+        default=False,
+        description="/prompt-workbench/simulate-step only: whether `decision` parsed successfully. "
+                    "False means all json_attempts retries were exhausted without valid JSON.",
+    )
+    decision_retries: int = Field(
+        default=0,
+        description="/prompt-workbench/simulate-step only: how many times the AA had to be re-prompted "
+                    "after an invalid-JSON answer this step (0 = valid on the first try). Only populated "
+                    "for the decision-only path (empty allowed_tools) — Agent._run_decision_only_cycle is "
+                    "the same method real production AA agents use, so this reflects production behavior.",
+    )
+    decision_discarded: list[str] = Field(
+        default_factory=list,
+        description="/prompt-workbench/simulate-step only: raw text of each rejected invalid-JSON attempt, "
+                    "oldest first — for spotting exactly what about the prompt caused inconsistent output.",
     )
     script_input: dict[str, Any] | None = Field(
         default=None,
@@ -2850,25 +2922,44 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
             _monitoring_bus.unsubscribe(mon_queue)
 
 
-async def _run_decision_script(
+async def _run_ec_style_script(
     script: str,
     input_payload: dict[str, Any],
     config: dict[str, Any],
     tools_proxy: Any,
     *,
+    entity_id: str,
+    broker_name: str | None,
+    pair: str | None,
+    message_ctx: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any] | None:
-    """Run a user-authored BA-simulation script — same contract and trust model as an Event
-    Composer script (`async def main(input, config, tools)`, plain `exec`, no restricted
-    builtins — the operator authoring it is trusted, same as EC scripts in composer.py)."""
-    ns: dict[str, Any] = {}
-    compiled = compile(script, "workbench_decision_script", "exec")
+    """Run a user-authored script (Step-1 EC-simulation or BA-simulation) with the EXACT same
+    execution namespace real Event Composer scripts get (see composer.py's `_run_cycle`:
+    `ask_llm`/`log`/`emit`/`debug`/`message` injected as globals, plain `exec`, no restricted
+    builtins). A script that uses `message.get(...)` or `log(...)` — like the real production
+    `EC-RELAY` script does — behaves identically here, so a script written/tested in the
+    Workbench can be pasted into a real EC config unchanged.
+    """
+    from openforexai.composers.composer import _make_debug_fn, _make_emit_fn, _make_log_fn
+    from openforexai.messaging.llm_helpers import make_ask_llm
+
+    ns: dict[str, Any] = {
+        "ask_llm": make_ask_llm(event_bus=_bus, source_id=entity_id),
+        "log": _make_log_fn(_monitoring_bus, entity_id, broker_name, pair),
+        "emit": _make_emit_fn(_bus, entity_id),
+        "debug": _make_debug_fn(_monitoring_bus, entity_id, broker_name, pair, is_test=False, start_monotonic=0.0),
+        "message": message_ctx,
+    }
+    compiled = compile(script, f"workbench_ec_script:{entity_id}", "exec")
     exec(compiled, ns)  # noqa: S102
     main_fn = ns.get("main")
     if not callable(main_fn):
-        raise RuntimeError("Decision script must define 'async def main(input, config, tools)'")
+        raise RuntimeError("Script must define 'async def main(input, config, tools)'")
     result = await asyncio.wait_for(main_fn(input_payload, config, tools_proxy), timeout=timeout)
-    return result if isinstance(result, dict) else None
+    if result is None:
+        return None
+    return result if isinstance(result, dict) else {"value": result}
 
 
 @router.post("/prompt-workbench/simulate-step", response_model=PromptWorkbenchChatResponse)
@@ -2930,53 +3021,118 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
         ]
 
     decision: dict[str, Any] | None = None
+    decision_retries = 0
+    decision_discarded: list[str] = []
+    final_text = ""
+    total_tokens = 0
     script_input: dict[str, Any] | None = None
     script_result: dict[str, Any] | None = None
     script_error: str | None = None
-    script_tool_context: ToolContext | None = None
+    new_annotations: list[dict[str, Any]] = []
+    removed_annotation_ids: list[dict[str, Any]] = []
+
+    def _message_ctx(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        # Same shape EventComposer._run_cycle builds for real EC scripts (composer.py's
+        # `message_ctx`) — synthetic here since there's no real triggering AgentMessage.
+        return {
+            "id": None, "event_type": event_type, "source_agent_id": None,
+            "instrument": req.pair.upper(), "chain": [], "correlation_id": None,
+            "payload": payload,
+        }
+
+    candle_number = (total - visible_count + 1) if last_visible is not None else None
+    candle_dict = (
+        {
+            "timestamp": last_visible.timestamp.isoformat(),
+            "open": float(last_visible.open), "high": float(last_visible.high),
+            "low": float(last_visible.low), "close": float(last_visible.close),
+        }
+        if last_visible is not None else None
+    )
+    # Step 1 (agent or EC-script) may itself draw annotations — Step 2's script needs to see
+    # them as "already existing" too, same reasoning as the existing_annotations threading
+    # elsewhere (a stale view here would repeat the AA/BA trade-id bug fixed earlier).
+    effective_existing_annotations = req.existing_annotations
 
     try:
-        agent._system_prompt = req.system_prompt
-        agent._llm_name = llm_name
-        agent._llm_service_id = llm_service_id(llm_name)
-        agent._llm_temperature = llm_temperature
-        agent._max_tokens = llm_max_tokens
-        agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
-        agent._llm_reasoning_effort = llm_reasoning_effort
-
-        if req.allowed_tools:
-            # AA-under-test has configured tool access — real tool loop, for testing an AA
-            # variant that fetches its own context instead of receiving a pre-built snapshot.
-            pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
-            forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
-            aa_tool_context = ToolContext(
+        if req.step1_mode == "ec":
+            # Step 1 as a plain script — mirrors a production EC wired directly to the raw
+            # trigger (event_routing.json5's m5_candle_trigger_to_*_ec rules), no LLM/AA at all.
+            ec_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus,
-                extra={"candle_index_map": candle_index_map, "existing_annotations": req.existing_annotations},
-            )
-            agent._tool_dispatcher = ToolDispatcher(
-                DEFAULT_REGISTRY, aa_tool_context, {
-                    "allowed_tools": req.allowed_tools,
-                    "forced_arguments": {
-                        "calculate_indicator": forced_start_args,
-                        "get_candles": forced_start_args,
-                        "get_swing_levels": forced_start_args,
-                    },
+                extra={
+                    "candle_index_map": candle_index_map,
+                    "workbench_annotations": [],
+                    "workbench_removed_annotation_ids": [],
+                    "existing_annotations": effective_existing_annotations,
+                    "fifo_enabled": req.fifo_enabled,
+                    "allow_trade_delete": req.allow_trade_delete,
                 },
             )
-            final_text, total_tokens, _executed = await asyncio.wait_for(
-                agent._run_with_tools(user_message=user_message, trigger="workbench_simulation_step", history=[]),
-                timeout=req.timeout,
+            ec_dispatcher = ToolDispatcher(
+                DEFAULT_REGISTRY, ec_tool_context, {"allowed_tools": req.ec_script_allowed_tools},
             )
+            ec_tools_proxy = ToolsProxy(ec_dispatcher, [])
+            step1_input = {
+                "pair": req.pair.upper(), "candle_number": candle_number,
+                "candle": candle_dict, "existing_annotations": effective_existing_annotations,
+            }
+            decision = await _run_ec_style_script(
+                req.ec_script, step1_input, req.ec_script_config, ec_tools_proxy,
+                entity_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                message_ctx=_message_ctx("m5_candle_trigger", step1_input), timeout=req.timeout,
+            )
+            final_text = json.dumps(decision) if decision is not None else ""
+            new_annotations.extend(ec_tool_context.extra.get("workbench_annotations", []))
+            removed_annotation_ids.extend(ec_tool_context.extra.get("workbench_removed_annotation_ids", []))
+            effective_existing_annotations = effective_existing_annotations + new_annotations
         else:
-            # No tools configured — the exact method production AA agents use for their real
-            # decision call (data-gathering already done, LLM's only job is the JSON decision).
-            final_text, total_tokens, _executed = await asyncio.wait_for(
-                agent._run_decision_only_cycle(user_message=user_message, trigger="workbench_simulation_step"),
-                timeout=req.timeout,
-            )
+            agent._system_prompt = req.system_prompt
+            agent._llm_name = llm_name
+            agent._llm_service_id = llm_service_id(llm_name)
+            agent._llm_temperature = llm_temperature
+            agent._max_tokens = llm_max_tokens
+            agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
+            agent._llm_reasoning_effort = llm_reasoning_effort
 
-        decision = Agent._parse_json_object(final_text)
+            if req.allowed_tools:
+                # AA-under-test has configured tool access — real tool loop, for testing an AA
+                # variant that fetches its own context instead of receiving a pre-built snapshot.
+                pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
+                forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
+                aa_tool_context = ToolContext(
+                    agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                    monitoring_bus=_monitoring_bus, event_bus=_bus,
+                    extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
+                )
+                agent._tool_dispatcher = ToolDispatcher(
+                    DEFAULT_REGISTRY, aa_tool_context, {
+                        "allowed_tools": req.allowed_tools,
+                        "forced_arguments": {
+                            "calculate_indicator": forced_start_args,
+                            "get_candles": forced_start_args,
+                            "get_swing_levels": forced_start_args,
+                        },
+                    },
+                )
+                final_text, total_tokens, _executed = await asyncio.wait_for(
+                    agent._run_with_tools(user_message=user_message, trigger="workbench_simulation_step", history=[]),
+                    timeout=req.timeout,
+                )
+            else:
+                # No tools configured — the exact method production AA agents use for their real
+                # decision call (data-gathering already done, LLM's only job is the JSON decision).
+                final_text, total_tokens, _executed = await asyncio.wait_for(
+                    agent._run_decision_only_cycle(user_message=user_message, trigger="workbench_simulation_step"),
+                    timeout=req.timeout,
+                )
+                # Populated by _run_decision_only_cycle's own invalid-JSON retry loop — the exact
+                # mechanism real production AA agents now use too, not a Workbench-only reimplementation.
+                decision_retries = agent._last_decision_json_retries
+                decision_discarded = agent._last_decision_json_discarded
+
+            decision = Agent._parse_json_object(final_text)
 
         if req.decision_script.strip():
             script_tool_context = ToolContext(
@@ -2986,7 +3142,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
                     "workbench_removed_annotation_ids": [],
-                    "existing_annotations": req.existing_annotations,
+                    "existing_annotations": effective_existing_annotations,
                     "fifo_enabled": req.fifo_enabled,
                     "allow_trade_delete": req.allow_trade_delete,
                 },
@@ -2996,38 +3152,34 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
                 {"allowed_tools": req.decision_script_allowed_tools},
             )
             tools_proxy = ToolsProxy(script_dispatcher, [])
-            candle_number = (total - visible_count + 1) if last_visible is not None else None
             script_input = {
                 "decision": decision or {},
                 "raw_response": final_text,
                 "pair": req.pair.upper(),
                 "candle_number": candle_number,
-                "candle": (
-                    {
-                        "timestamp": last_visible.timestamp.isoformat(),
-                        "open": float(last_visible.open), "high": float(last_visible.high),
-                        "low": float(last_visible.low), "close": float(last_visible.close),
-                    }
-                    if last_visible is not None else None
-                ),
-                "existing_annotations": req.existing_annotations,
+                "candle": candle_dict,
+                "existing_annotations": effective_existing_annotations,
             }
             script_config = {**req.decision_script_config, "memory_key": req.memory_key}
             try:
-                script_result = await _run_decision_script(
-                    req.decision_script, script_input, script_config, tools_proxy, timeout=req.timeout,
+                script_result = await _run_ec_style_script(
+                    req.decision_script, script_input, script_config, tools_proxy,
+                    entity_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                    message_ctx=_message_ctx("analysis_result", script_input), timeout=req.timeout,
                 )
             except Exception as exc:  # noqa: BLE001
                 script_error = f"{type(exc).__name__}: {exc}"
+            new_annotations.extend(script_tool_context.extra.get("workbench_annotations", []))
+            removed_annotation_ids.extend(script_tool_context.extra.get("workbench_removed_annotation_ids", []))
 
         return PromptWorkbenchChatResponse(
             answer=final_text, total_tokens=total_tokens,
             tool_events=_collect_tool_events(),
-            decision=decision, script_input=script_input, script_result=script_result, script_error=script_error,
-            annotations=(script_tool_context.extra.get("workbench_annotations", []) if script_tool_context else []),
-            removed_annotation_ids=(
-                script_tool_context.extra.get("workbench_removed_annotation_ids", []) if script_tool_context else []
-            ),
+            decision=decision, decision_valid=decision is not None,
+            decision_retries=decision_retries, decision_discarded=decision_discarded,
+            script_input=script_input, script_result=script_result, script_error=script_error,
+            annotations=new_annotations,
+            removed_annotation_ids=removed_annotation_ids,
             snapshot_errors=snapshot_errors,
         )
     except TimeoutError:

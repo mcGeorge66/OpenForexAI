@@ -128,6 +128,15 @@ class Agent:
         self._decision_prompt_profile_config: dict[str, Any] = {}
         self._run_lock: asyncio.Lock = asyncio.Lock()
 
+        # Set by _run_decision_only_cycle: how many invalid-JSON retries the most
+        # recent decision call needed, and the raw text of each rejected attempt —
+        # lets callers (and the Workbench) show why a decision took multiple tries.
+        self._last_decision_json_retries: int = 0
+        self._last_decision_json_discarded: list[str] = []
+        # Set on every cycle (see _last_received_input assignment below): the most
+        # recent trigger/source/timestamp/user_message this agent actually processed.
+        self._last_received_input: dict[str, Any] | None = None
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -862,6 +871,16 @@ class Agent:
             else:
                 user_msg = ""
 
+            # Live, in-RAM only (never persisted) — lets the Agent Config Wizard's Prompt
+            # Assistant show what this agent actually received alongside the prompt being
+            # edited, for any trigger type, not just analysis payloads.
+            self._last_received_input = {
+                "trigger": trigger,
+                "source": source,
+                "timestamp": now,
+                "user_message": user_msg,
+            }
+
             snapshot_system_prompt: str | None = None
             if self._should_use_snapshot_context(trigger):
                 if context is None or not cycle_pair:
@@ -1231,11 +1250,23 @@ class Agent:
         source: str | None = None,
         snapshot: dict[str, Any] | None = None,
         triggering_msg=None,
+        max_json_attempts: int = 3,
     ) -> tuple[str, int, list[str]]:
+        """Decision-only LLM call, retried (up to `max_json_attempts` total tries) if the
+        answer doesn't parse as JSON — production decisions are only ever consumed as JSON
+        (see _parse_json_object callers), so a non-JSON answer is never usable as-is. Each
+        rejected attempt's raw text is appended to self._last_decision_json_discarded and the
+        retry count to self._last_decision_json_retries, so callers (e.g. the Prompt Workbench)
+        can show exactly why/whether a prompt needed correction, instead of only seeing the
+        final result.
+        """
         from openforexai.ports.llm import LLMResponse
 
         if self._llm_service_id is None:
             raise RuntimeError("LLM service is not initialized.")
+
+        self._last_decision_json_retries = 0
+        self._last_decision_json_discarded = []
 
         _decision_started = perf_counter()
         await self._bus.publish(AgentMessage(
@@ -1244,78 +1275,97 @@ class Agent:
             payload={"agent_id": self.agent_id, "trigger": trigger, "source": source},
         ), triggered_by=triggering_msg)
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
-        tool_specs: list[dict[str, Any]] = []
-        turn = 0
-        self._emit_llm_request(messages, tool_specs, turn)
         diagnostics_enabled = self._is_debug_diagnostics_enabled()
-        turn_started = perf_counter()
-        if diagnostics_enabled:
-            self._emit_llm_diagnostic_event(
-                MonitoringEventType.LLM_TURN_STARTED,
-                trigger=trigger,
-                source=source,
-                turn=turn,
-                message_count=1,
-                tool_count=0,
-                approx_system_prompt_chars=len(self._system_prompt),
-                approx_messages_chars=self._estimate_payload_chars(messages),
-                approx_tool_schema_chars=0,
-                call_mode="decision_only",
-            )
-        try:
-            response: LLMResponse = await llm_complete(
-                event_bus        = self._bus,
-                llm_name         = self._llm_name or "",
-                source_id        = self.agent_id,
-                system_prompt    = build_decision_only_system_prompt(
-                    self._system_prompt,
-                    self._decision_prompt_profile_config,
-                    snapshot=snapshot,
-                ),
-                user_message     = user_message,
-                temperature      = self._llm_temperature,
-                max_tokens       = self._max_tokens,
-                reasoning_effort = self._llm_reasoning_effort,
-            )
-        except Exception as exc:
-            self._emit_llm_error(
-                turn=turn, trigger=trigger, source=source,
-                error_type=type(exc).__name__, error=str(exc), call_mode="decision_only",
-            )
+        current_user_message = user_message
+        total_tokens = 0
+        final_text = ""
+
+        for attempt in range(max_json_attempts):
+            messages: list[dict[str, Any]] = [{"role": "user", "content": current_user_message}]
+            tool_specs: list[dict[str, Any]] = []
+            turn = attempt
+            self._emit_llm_request(messages, tool_specs, turn)
+            turn_started = perf_counter()
             if diagnostics_enabled:
                 self._emit_llm_diagnostic_event(
-                    MonitoringEventType.LLM_TURN_FAILED,
+                    MonitoringEventType.LLM_TURN_STARTED,
                     trigger=trigger,
                     source=source,
                     turn=turn,
                     message_count=1,
                     tool_count=0,
-                    elapsed_ms=round((perf_counter() - turn_started) * 1000.0, 1),
-                    error_type=type(exc).__name__,
-                    error=str(exc),
+                    approx_system_prompt_chars=len(self._system_prompt),
+                    approx_messages_chars=self._estimate_payload_chars(messages),
+                    approx_tool_schema_chars=0,
                     call_mode="decision_only",
                 )
-            raise
+            try:
+                response: LLMResponse = await llm_complete(
+                    event_bus        = self._bus,
+                    llm_name         = self._llm_name or "",
+                    source_id        = self.agent_id,
+                    system_prompt    = build_decision_only_system_prompt(
+                        self._system_prompt,
+                        self._decision_prompt_profile_config,
+                        snapshot=snapshot,
+                    ),
+                    user_message     = current_user_message,
+                    temperature      = self._llm_temperature,
+                    max_tokens       = self._max_tokens,
+                    reasoning_effort = self._llm_reasoning_effort,
+                )
+            except Exception as exc:
+                self._emit_llm_error(
+                    turn=turn, trigger=trigger, source=source,
+                    error_type=type(exc).__name__, error=str(exc), call_mode="decision_only",
+                )
+                if diagnostics_enabled:
+                    self._emit_llm_diagnostic_event(
+                        MonitoringEventType.LLM_TURN_FAILED,
+                        trigger=trigger,
+                        source=source,
+                        turn=turn,
+                        message_count=1,
+                        tool_count=0,
+                        elapsed_ms=round((perf_counter() - turn_started) * 1000.0, 1),
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                        call_mode="decision_only",
+                    )
+                raise
 
-        elapsed_ms = round((perf_counter() - turn_started) * 1000.0, 1)
-        if diagnostics_enabled:
-            self._emit_llm_diagnostic_event(
-                MonitoringEventType.LLM_TURN_COMPLETED,
-                trigger=trigger,
-                source=source,
-                turn=turn,
-                message_count=1,
-                tool_count=0,
-                elapsed_ms=elapsed_ms,
-                stop_reason="end_turn",
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-                tool_calls=0,
-                call_mode="decision_only",
+            elapsed_ms = round((perf_counter() - turn_started) * 1000.0, 1)
+            if diagnostics_enabled:
+                self._emit_llm_diagnostic_event(
+                    MonitoringEventType.LLM_TURN_COMPLETED,
+                    trigger=trigger,
+                    source=source,
+                    turn=turn,
+                    message_count=1,
+                    tool_count=0,
+                    elapsed_ms=elapsed_ms,
+                    stop_reason="end_turn",
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    tool_calls=0,
+                    call_mode="decision_only",
+                )
+            self._emit_llm_monitoring(response, turn)
+            total_tokens += response.input_tokens + response.output_tokens
+            final_text = response.content or ""
+
+            if self._parse_json_object(final_text) is not None or attempt == max_json_attempts - 1:
+                self._last_decision_json_retries = attempt
+                break
+
+            self._last_decision_json_discarded.append(final_text)
+            current_user_message = (
+                f"{user_message}\n\n"
+                f"Your previous answer was rejected because it was not valid JSON:\n{final_text}\n\n"
+                "Respond again with ONLY a single valid JSON object matching the required schema "
+                "— no prose, no markdown code fences."
             )
-        self._emit_llm_monitoring(response, turn)
-        _decision_tokens = response.input_tokens + response.output_tokens
+
         await self._bus.publish(AgentMessage(
             event_type=EventType.DECISION_END,
             source_agent_id=self.agent_id,
@@ -1324,10 +1374,11 @@ class Agent:
                 "trigger": trigger,
                 "success": True,
                 "elapsed_ms": round((perf_counter() - _decision_started) * 1000, 1),
-                "tokens": _decision_tokens,
+                "tokens": total_tokens,
+                "json_retries": self._last_decision_json_retries,
             },
         ), triggered_by=triggering_msg)
-        return response.content or "", _decision_tokens, []
+        return final_text, total_tokens, []
 
     def _is_debug_diagnostics_enabled(self) -> bool:
         if self._monitoring_bus is None:

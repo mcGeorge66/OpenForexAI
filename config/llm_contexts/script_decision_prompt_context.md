@@ -14,13 +14,16 @@ When **Placeholders** is enabled on a prompt entry, the text is processed by
 `_substitute_placeholders()` before being sent to the LLM. Any `{key}` pattern in the text
 is replaced with the matching value from the `placeholders` dict written by the selector script.
 
-### Built-in placeholders (always available)
-```
-{pair}     — trading pair from the agent config, e.g. "EURUSD"
-{comment}  — comment field from the agent config
-```
+### There are no built-in placeholders
 
-### Custom placeholders (set by selector script)
+`placeholders` starts as an **empty dict** every call (`build_snapshot_system_prompt`'s
+`locals_["placeholders"] = {}`) — nothing is pre-filled, not even `{pair}`. If your prompt
+text uses `{pair}`, the selector script must explicitly write
+`placeholders["pair"] = snapshot.get("symbol", "")` (or similar) itself, every time. A
+`{key}` with no matching entry in `placeholders` is left in the text unchanged (literally
+`{key}`), not replaced with an empty string or an agent-config value.
+
+### Placeholders (set by selector script)
 The selector script can write any key into `placeholders`:
 
 ```python
@@ -47,6 +50,9 @@ does not need to reproduce the data. Instead, reference it:
 ```
 Analyse the snapshot data and provide a trading decision for {pair}.
 ```
+
+(`{pair}` here only resolves if this entry has **Placeholders** enabled *and* the selector
+script sets `placeholders["pair"]` — see above. Otherwise it renders as the literal text `{pair}`.)
 
 ### Mode: replace
 The prompt text fully replaces the base agent system prompt for this call.

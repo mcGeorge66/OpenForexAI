@@ -134,7 +134,7 @@ result["timestamp"]  = snapshot.get("timestamp")
 ```python
 import datetime  # NOT available — use string comparison instead
 
-hour = int((snapshot.get("timestamp_utc") or "T00:")[11:13])
+hour = int((snapshot.get("timestamp") or "T00:")[11:13])
 if hour < 7 or hour >= 20:
     cancel = True
     cancel_reason = f"Outside trading hours (hour={hour} UTC)"

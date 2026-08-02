@@ -12,9 +12,14 @@ for this particular snapshot. It can inspect the snapshot data and write `result
 Scripts run inside a Python `exec()` sandbox. Only safe built-ins are available:
 
 ```
-abs, all, any, bool, dict, enumerate, filter, float, int, isinstance,
-len, list, map, max, min, range, round, set, sorted, str, sum, tuple, zip
+abs, all, any, bool, callable, complex, dict, divmod, enumerate, filter, float,
+frozenset, getattr, hasattr, int, isinstance, iter, len, list, map, max, min,
+next, pow, print, range, repr, reversed, round, set, slice, sorted, str, sum,
+tuple, type, zip
 ```
+
+Plus the exception classes `TypeError`, `ValueError`, `KeyError`, `Exception`,
+and the standard-library helpers `math`, `statistics`, `Decimal`.
 
 Full Python syntax works: `def`, `for`, `if`, `while`, `try/except`, etc.
 
@@ -29,8 +34,9 @@ The full assembled snapshot dict (after assembly transform). Key fields:
 
 ```python
 snapshot["symbol"]                        # e.g. "EURUSD"
-snapshot["timestamp_utc"]                 # ISO timestamp string
+snapshot["timestamp"]                     # ISO timestamp string
 snapshot["latest_price"]                  # float — current bid price
+snapshot["latest_spread"]                 # float
 snapshot["strategy_aggressiveness"]       # "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE"
 snapshot["trigger_candle"]                # dict — the candle that triggered this snapshot
 snapshot["tool_outputs"]                  # dict — all tool block outputs (keyed by output_key)
