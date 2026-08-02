@@ -5,10 +5,8 @@ import {
   LineSeries,
   LineStyle,
   createChart,
-  createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
-  type SeriesMarker,
   type UTCTimestamp,
   type WhitespaceData,
 } from 'lightweight-charts'
@@ -17,6 +15,7 @@ import type { CandleBar, IndicatorValue } from '@/api/client'
 import type { Drawing, DrawingPoint, DrawingStyle, DrawingToolName } from './drawing/types'
 import { DrawingManager } from './drawing/DrawingManager'
 import { SessionBandsPrimitive, type SessionBandEntry } from './SessionBandsPrimitive'
+import { CustomSeriesMarkers } from './CustomSeriesMarkers'
 
 export type { SessionBandEntry }
 
@@ -116,7 +115,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-  const markerPrimitiveRef = useRef<{ setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void } | null>(null)
+  const markerPrimitiveRef = useRef<CustomSeriesMarkers | null>(null)
   const priceLineRefs = useRef<Array<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>>>([])
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map())
   const oscillatorSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map())
@@ -333,7 +332,9 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
     chartRef.current = chart
     seriesRef.current = series
     volumeRef.current = volume
-    markerPrimitiveRef.current = createSeriesMarkers(series, [])
+    const customMarkers = new CustomSeriesMarkers()
+    series.attachPrimitive(customMarkers)
+    markerPrimitiveRef.current = customMarkers
     drawingManagerRef.current = new DrawingManager(series, chart)
 
     const sessionBandsPrimitive = new SessionBandsPrimitive()
@@ -590,7 +591,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
     const markerPrimitive = markerPrimitiveRef.current
     if (!markerPrimitive) return
 
-    const markerData: SeriesMarker<UTCTimestamp>[] = markers
+    const markerData = markers
       .map(marker => ({
         time: Math.floor(new Date(marker.timestamp).getTime() / 1000) as UTCTimestamp,
         position: marker.position,
@@ -599,7 +600,10 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         text: marker.text,
       }))
       .sort((a, b) => a.time - b.time)
-    markerPrimitive.setMarkers(markerData)
+    markerPrimitive.setMarkers(markerData, orderedRef.current)
+    // Nudge the series to trigger a repaint so marker changes appear immediately —
+    // same technique used for session bands below.
+    seriesRef.current?.applyOptions({ visible: true })
   }, [markers])
 
   useEffect(() => {

@@ -212,6 +212,8 @@ Ein Mini-Snapshot-Designer für Chat/Step/Run: dieselbe `tool_blocks`/`calculati
 | **calculation_blocks-Panel** | „Test" führt alle tool_blocks plus genau diesen einen Rechenblock aus. |
 | **assembly_transform_script** | Optionales Zusammenführungs-Skript, gleicher Editor wie im Snapshot Designer. |
 | **Auto Trade-Status einfügen** | Fügt jeder Step-Anfrage automatisch einen Text über aktuell offene simulierte Trades hinzu. |
+| **FIFO aktivieren** | Wenn aktiv, muss der **älteste** noch offene simulierte Trade zuerst geschlossen werden, bevor `trade_marker` das Schließen eines neueren erlaubt — der Versuch, „außer der Reihe" zu schließen, wird mit einer Fehlermeldung abgelehnt. Bildet Broker nach, die FIFO-Schließung vorschreiben (z. B. bestimmte US-regulierte Konten). Aus ohne diese Einschränkung, entspricht dem Standardverhalten von Hedging-fähigen Brokern. |
+| **delete of trades accepted** | Standardmäßig **aus**. Ein bereits aufgezeichneter Trade-Leg gilt als beim Broker ausgeführt und lässt sich normalerweise nicht löschen, nur schließen (siehe Abschnitt 11). Diese Checkbox schaltet `op='delete'` für `trade_marker` gezielt für diese Sitzung frei — z. B. um eine eindeutige Fehlbedienung (falsche Kerze, falsches Tool) zu bereinigen, bevor daraus eine „echte" Order-Historie wird. |
 | **Test / Preview** | Baut den kompletten Snapshot einmalig zusammen, ohne das LLM aufzurufen. |
 
 **Wirkung auf Chat/Step/Run:** Sobald hier mindestens ein `tool_block` eingetragen ist, bekommt der Agent den vollständig assemblierten Snapshot statt der rohen Kerzendaten — verankert auf die zuletzt sichtbare Kerze. Bleibt die Liste leer, bekommt der Agent den einfachen Kerzentext-Block aus dem Analyse-Tab.
@@ -254,11 +256,20 @@ Der Agent kann während des Chats vier sandbox-eigene Tools benutzen, um seine A
 | `candle_marker` | Einen Pfeil-Marker über/unter einer einzelnen Kerze mit Freitext | Schreibend |
 | `get_annotation` | Sucht eine zuvor gesetzte Markierung samt ihrer echten Kerzendaten anhand ID oder Kerzenbereich | Lesend |
 
-Jeder schreibende Aufruf hat einen Parameter `op` (`new` / `change` / `delete`):
+Jeder schreibende Aufruf hat einen Parameter `op` (`new` / `change` / `delete`) — mit einer wichtigen Ausnahme bei `trade_marker`, siehe unten:
 
 - **`new`** — legt eine neue Markierung an, kurze ID (2 Zeichen) als Präfix im Label, z. B. `[A3] Angebotszone`.
 - **`change`** — korrigiert eine bestehende Markierung; ersetzt die Zeichnung am Chart statt sie zu verdoppeln.
 - **`delete`** — entfernt eine bestehende Markierung.
+
+**Sonderregel bei `trade_marker`: Ein Trade-Leg ist nach `new` unveränderlich.** Ein `open`- oder `close`-Eintrag simuliert eine tatsächlich beim Broker ausgeführte Order — und die lässt sich in der Realität nicht nachträglich korrigieren oder zurücknehmen. Deshalb gilt bei `trade_marker` abweichend von `zone_marker`/`candle_marker`:
+
+- `op='change'` darf bei einem Trade-Leg **nur** das optionale Freitextfeld `note` setzen/ändern — Kerze, Richtung und Aktion (open/close) bleiben wie ursprünglich aufgezeichnet. Ein Änderungsversuch ohne `note` oder mit dem Anspruch, Kerze/Richtung zu ändern, wird abgelehnt.
+- `op='delete'` ist bei einem Trade-Leg **standardmäßig gesperrt** und liefert eine erklärende Fehlermeldung („ein bereits aufgezeichneter Trade kann nicht gelöscht, sondern nur geschlossen werden"). Ein offener Trade lässt sich normalerweise ausschließlich per `action='close'` beenden, niemals rückwirkend entfernen — es sei denn, die Checkbox **„delete of trades accepted"** im Simulation-Tab (Abschnitt 9) ist für diese Sitzung explizit aktiviert.
+
+Das ist genau die Korrektur, die verhindert, dass ein Agent seinen ursprünglichen Einstieg im Nachhinein „schöner" umschreibt (Rückblick-Bias) — jeder Trade-Eintrag bleibt als ehrlicher Verlaufsdatensatz stehen.
+
+**Richtung sichtbar auf beiden Legs:** `direction` (long/short) wird nicht nur beim `open`-Leg gespeichert, sondern automatisch auch auf den zugehörigen `close`-Leg übertragen — im Chart-Label steht sie explizit als Text (`LONG`/`SHORT`), nicht nur implizit über die Pfeilrichtung des Open-Markers.
 
 **Nützliches Muster:** Den Agenten explizit bitten, seine eigenen Markierungen zu überprüfen und ggf. zu korrigieren, z. B.:
 

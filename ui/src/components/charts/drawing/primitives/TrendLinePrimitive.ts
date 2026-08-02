@@ -22,7 +22,7 @@ export class TrendLinePrimitive extends BasePrimitive {
       ctx.fillStyle = this._drawing.style.color
       ctx.textAlign = 'center'
       ctx.textBaseline = 'bottom'
-      ctx.fillText(this._drawing.label, midX, midY - 6)
+      ctx.fillText(this._drawing.label, midX, midY - 12)
       ctx.restore()
     }
   }

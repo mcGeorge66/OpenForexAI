@@ -2479,12 +2479,53 @@ class PromptWorkbenchChatRequest(BaseModel):
                     "already anchored to the visible window by the frontend. Only used in the plain "
                     "candle-text path (no tool_blocks): folded into a '## Swing Levels' section.",
     )
+    fifo_enabled: bool = Field(
+        default=False,
+        description="Simulation tab: when set, trade_marker rejects closing a trade out of order "
+                    "while an older simulated trade is still open, mirroring FIFO-only brokers.",
+    )
+    allow_trade_delete: bool = Field(
+        default=False,
+        description="Simulation tab: when set, trade_marker allows op='delete' on a previously "
+                    "recorded trade leg. Off by default, since a real broker fill can't be undone.",
+    )
+    decision_script: str = Field(
+        default="",
+        description="Simulation tab only (/prompt-workbench/simulate-step): user-authored BA-simulation "
+                    "script, same contract as an Event Composer script (`async def main(input, config, "
+                    "tools)`). Receives the AA-style decision this step produced and decides whether to "
+                    "act on it, drawing the outcome via trade_marker. Empty = simulate-step still runs "
+                    "the decision, just skips the BA phase entirely.",
+    )
+    decision_script_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="User-defined config dict passed to the decision script's `config` parameter. "
+                    "`memory_key` is injected/overwritten automatically from the request's memory_key field.",
+    )
+    decision_script_allowed_tools: list[str] = Field(
+        default_factory=lambda: ["assessment_memory", "trade_marker"],
+        description="Tools the decision script's `tools.call(...)` may use — independent of the AA "
+                    "decision call's own `allowed_tools`.",
+    )
+    memory_key: str = Field(
+        default="",
+        description="Key the decision script uses with assessment_memory to persist state across "
+                    "simulation steps and sessions (e.g. current simulated position). Injected into "
+                    "the script's config as config['memory_key'].",
+    )
     timeout: float = 120.0
 
 class PromptWorkbenchChatResponse(BaseModel):
     answer: str
     total_tokens: int = 0
     executed_tools: list[str] = Field(default_factory=list)
+    tool_events: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Serialized TOOL_CALL_STARTED/COMPLETED/FAILED monitoring events emitted during "
+                    "this turn — same shape and capture mechanism as AgentExecuteResponse.events (the "
+                    "production Agent Chat Inspector's Tools tab), so 'what did the agent actually call' "
+                    "is never just inferred from its answer text, in the Workbench or in production.",
+    )
     annotations: list[dict[str, Any]] = Field(default_factory=list)
     removed_annotation_ids: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -2493,6 +2534,29 @@ class PromptWorkbenchChatResponse(BaseModel):
                     "the client-side accumulated list.",
     )
     snapshot_errors: list[str] = Field(default_factory=list)
+    decision: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: the AA-style decision this step produced, "
+                    "best-effort JSON-parsed from the raw answer text (same parser production AA "
+                    "agents use). None if the answer wasn't valid JSON.",
+    )
+    script_input: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: the exact 'input' dict passed to the "
+                    "decision_script's main(input, config, tools) this step — decision, raw_response, "
+                    "pair, candle_number, candle, existing_annotations. Backend-assembled, not user-editable "
+                    "(unlike decision_script_config, which is a free-text field); shown for inspection only.",
+    )
+    script_result: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: the BA-simulation decision_script's return "
+                    "value, if a script was configured and ran without error.",
+    )
+    script_error: str | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: set if the decision script raised or timed "
+                    "out. The step's decision/annotations are still returned even if the script failed.",
+    )
     error: str | None = None
 
 
@@ -2638,6 +2702,43 @@ async def _build_prompt_workbench_context(req: PromptWorkbenchChatRequest) -> di
     }
 
 
+def _resolve_workbench_llm_name(req: PromptWorkbenchChatRequest) -> str:
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+    if req.llm_name:
+        return req.llm_name
+    llm_names = RuntimeRegistry.list_llm()
+    if not llm_names:
+        raise HTTPException(status_code=503, detail="No LLM provider available")
+    return llm_names[0]
+
+
+def _resolve_workbench_llm_settings(llm_name: str, reasoning_effort: str | None) -> tuple[float | None, int, str]:
+    """Read the module's own temperature/max_tokens — a detached workbench agent skips the
+    normal AGENT_CONFIG_RESPONSE handshake (_apply_config), so without this it would silently
+    run with Agent.__init__'s bare max_tokens=4096, which reasoning models can burn entirely on
+    internal reasoning before producing any visible text or tool call on larger candle windows —
+    an empty answer with zero tool calls, not an error.
+
+    reasoning_effort is deliberately NOT inherited from the module: it defaults to "low" and is
+    only raised via the request when a task actually needs it — an unset value must not silently
+    fall through to the trading module's own effort (e.g. "medium" for azure_azmin), which would
+    make every workbench call slower for no reason regardless of task complexity.
+    """
+    llm_temperature: float | None = None
+    llm_max_tokens = 4096
+    try:
+        llm_cfg_path = _resolve_module_config_path("llm", llm_name)
+        llm_module_cfg = json5.loads(llm_cfg_path.read_text(encoding="utf-8"))
+        if isinstance(llm_module_cfg.get("temperature"), (int, float)):
+            llm_temperature = float(llm_module_cfg["temperature"])
+        if isinstance(llm_module_cfg.get("max_tokens"), int) and llm_module_cfg["max_tokens"] > 0:
+            llm_max_tokens = llm_module_cfg["max_tokens"]
+    except HTTPException:
+        pass  # module config not resolvable — fall back to the safe defaults above
+    llm_reasoning_effort = reasoning_effort.strip() if reasoning_effort and reasoning_effort.strip() else "low"
+    return llm_temperature, llm_max_tokens, llm_reasoning_effort
+
+
 @router.post("/prompt-workbench/chat", response_model=PromptWorkbenchChatResponse)
 async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
     """Ask a free-text question against a prompt + loaded candle window, with tools."""
@@ -2654,41 +2755,11 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
     snapshot_errors = ctx["snapshot_errors"]
     user_message = ctx["user_message"]
 
-    from openforexai.registry.runtime_registry import RuntimeRegistry
-    llm_name = req.llm_name
-    if not llm_name:
-        llm_names = RuntimeRegistry.list_llm()
-        if not llm_names:
-            raise HTTPException(status_code=503, detail="No LLM provider available")
-        llm_name = llm_names[0]
-
-    # Read the module's own temperature/max_tokens — a detached agent skips the
-    # normal AGENT_CONFIG_RESPONSE handshake (_apply_config), so without this it
-    # would silently run with Agent.__init__'s bare max_tokens=4096, which
-    # reasoning models can burn entirely on internal reasoning before producing
-    # any visible text or tool call on larger candle windows — an empty answer
-    # with zero tool calls, not an error.
-    #
-    # reasoning_effort is deliberately NOT inherited from the module: it
-    # defaults to "low" (same as _ASSISTANT_DEFAULT_REASONING_EFFORT below) and
-    # is only raised via req.reasoning_effort when a task actually needs it —
-    # an unset value must not silently fall through to the trading module's
-    # own effort (e.g. "medium" for azure_azmin), which would make every
-    # workbench call slower for no reason regardless of task complexity.
-    llm_temperature: float | None = None
-    llm_max_tokens = 4096
-    try:
-        llm_cfg_path = _resolve_module_config_path("llm", llm_name)
-        llm_module_cfg = json5.loads(llm_cfg_path.read_text(encoding="utf-8"))
-        if isinstance(llm_module_cfg.get("temperature"), (int, float)):
-            llm_temperature = float(llm_module_cfg["temperature"])
-        if isinstance(llm_module_cfg.get("max_tokens"), int) and llm_module_cfg["max_tokens"] > 0:
-            llm_max_tokens = llm_module_cfg["max_tokens"]
-    except HTTPException:
-        pass  # module config not resolvable — fall back to the safe defaults above
-    llm_reasoning_effort = req.reasoning_effort.strip() if req.reasoning_effort and req.reasoning_effort.strip() else "low"
+    llm_name = _resolve_workbench_llm_name(req)
+    llm_temperature, llm_max_tokens, llm_reasoning_effort = _resolve_workbench_llm_settings(llm_name, req.reasoning_effort)
 
     from openforexai.agents.agent import Agent
+    from openforexai.models.monitoring import MonitoringEventType
     from openforexai.services.llm_service import llm_service_id
     from openforexai.tools.base import ToolContext
     from openforexai.tools.dispatcher import ToolDispatcher
@@ -2696,6 +2767,28 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
 
     temp_agent_id = f"WORKBENCH-{uuid4().hex[:8]}"
     agent = Agent(agent_id=temp_agent_id, bus=_bus, repository=_repository, monitoring_bus=_monitoring_bus)
+
+    # Same subscribe-before/drain-after pattern as _execute_agent_inspection's
+    # AgentExecuteResponse.events (the production Agent Chat Inspector's Tools tab) —
+    # so "what did the agent actually call" is real captured monitoring data here too,
+    # not just the agent's own text claiming it took an action.
+    _TOOL_EVENT_TYPES = (
+        MonitoringEventType.TOOL_CALL_STARTED,
+        MonitoringEventType.TOOL_CALL_COMPLETED,
+        MonitoringEventType.TOOL_CALL_FAILED,
+    )
+    mon_queue = _monitoring_bus.subscribe(maxsize=4096) if _monitoring_bus is not None else None
+
+    def _collect_tool_events() -> list[dict[str, Any]]:
+        if mon_queue is None:
+            return []
+        raw_events = _drain_monitoring_queue(mon_queue)
+        return [
+            _serialize_monitoring_event(event)
+            for event in raw_events
+            if event.event_type in _TOOL_EVENT_TYPES and _event_belongs_to_agent(event, temp_agent_id)
+        ]
+
     try:
         agent._system_prompt = req.system_prompt
         agent._llm_name = llm_name
@@ -2712,6 +2805,8 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
                 "workbench_annotations": [],
                 "workbench_removed_annotation_ids": [],
                 "existing_annotations": req.existing_annotations,
+                "fifo_enabled": req.fifo_enabled,
+                "allow_trade_delete": req.allow_trade_delete,
             },
         )
         # Force (not just default) `start` on candle-consuming tools the agent can call
@@ -2738,16 +2833,213 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         )
         return PromptWorkbenchChatResponse(
             answer=final_text, total_tokens=total_tokens, executed_tools=executed_tool_names,
+            tool_events=_collect_tool_events(),
             annotations=tool_context.extra.get("workbench_annotations", []),
             removed_annotation_ids=tool_context.extra.get("workbench_removed_annotation_ids", []),
             snapshot_errors=snapshot_errors,
         )
     except TimeoutError:
-        return PromptWorkbenchChatResponse(answer="", error=f"Timed out after {req.timeout:.0f}s")
+        return PromptWorkbenchChatResponse(
+            answer="", error=f"Timed out after {req.timeout:.0f}s", tool_events=_collect_tool_events(),
+        )
     except Exception as exc:  # noqa: BLE001
-        return PromptWorkbenchChatResponse(answer="", error=str(exc))
+        return PromptWorkbenchChatResponse(answer="", error=str(exc), tool_events=_collect_tool_events())
     finally:
         _bus.unregister_agent(temp_agent_id)
+        if mon_queue is not None:
+            _monitoring_bus.unsubscribe(mon_queue)
+
+
+async def _run_decision_script(
+    script: str,
+    input_payload: dict[str, Any],
+    config: dict[str, Any],
+    tools_proxy: Any,
+    *,
+    timeout: float,
+) -> dict[str, Any] | None:
+    """Run a user-authored BA-simulation script — same contract and trust model as an Event
+    Composer script (`async def main(input, config, tools)`, plain `exec`, no restricted
+    builtins — the operator authoring it is trusted, same as EC scripts in composer.py)."""
+    ns: dict[str, Any] = {}
+    compiled = compile(script, "workbench_decision_script", "exec")
+    exec(compiled, ns)  # noqa: S102
+    main_fn = ns.get("main")
+    if not callable(main_fn):
+        raise RuntimeError("Decision script must define 'async def main(input, config, tools)'")
+    result = await asyncio.wait_for(main_fn(input_payload, config, tools_proxy), timeout=timeout)
+    return result if isinstance(result, dict) else None
+
+
+@router.post("/prompt-workbench/simulate-step", response_model=PromptWorkbenchChatResponse)
+async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
+    """Simulation tab: one AA→BA cycle against the loaded candle window.
+
+    Mirrors the real production split: the LLM plays the AA role and produces only a decision
+    (its tool access is whatever `allowed_tools` the caller configures — empty means a pure
+    decision-only call via Agent._run_decision_only_cycle, the same method production AA agents
+    use for their real decision step, with no data-gathering tools offered at all). The optional
+    `decision_script` then plays the BA role: a deterministic, user-authored script (not a second
+    LLM call) that receives the AA's decision and decides whether/how to act on it, drawing the
+    outcome on the chart via trade_marker. Kept separate from /prompt-workbench/chat because the
+    two flows diverge completely — free tool chat vs. a scripted decision pipeline.
+    """
+    if _bus is None or _repository is None:
+        raise HTTPException(status_code=503, detail="System not ready")
+    if _data_container is None:
+        raise HTTPException(status_code=503, detail="DataContainer not available")
+
+    ctx = await _build_prompt_workbench_context(req)
+    short_name = ctx["short_name"]
+    candle_index_map = ctx["candle_index_map"]
+    last_visible = ctx["last_visible"]
+    total = ctx["total"]
+    visible_count = ctx["visible_count"]
+    snapshot_errors = ctx["snapshot_errors"]
+    user_message = ctx["user_message"]
+
+    llm_name = _resolve_workbench_llm_name(req)
+    llm_temperature, llm_max_tokens, llm_reasoning_effort = _resolve_workbench_llm_settings(llm_name, req.reasoning_effort)
+
+    from openforexai.agents.agent import Agent
+    from openforexai.composers.composer import ToolsProxy
+    from openforexai.models.monitoring import MonitoringEventType
+    from openforexai.services.llm_service import llm_service_id
+    from openforexai.tools.base import ToolContext
+    from openforexai.tools.dispatcher import ToolDispatcher
+    from openforexai.tools.registry import DEFAULT_REGISTRY
+
+    temp_agent_id = f"WORKBENCH-BA-{uuid4().hex[:8]}"
+    agent = Agent(agent_id=temp_agent_id, bus=_bus, repository=_repository, monitoring_bus=_monitoring_bus)
+
+    _TOOL_EVENT_TYPES = (
+        MonitoringEventType.TOOL_CALL_STARTED,
+        MonitoringEventType.TOOL_CALL_COMPLETED,
+        MonitoringEventType.TOOL_CALL_FAILED,
+    )
+    mon_queue = _monitoring_bus.subscribe(maxsize=4096) if _monitoring_bus is not None else None
+
+    def _collect_tool_events() -> list[dict[str, Any]]:
+        if mon_queue is None:
+            return []
+        raw_events = _drain_monitoring_queue(mon_queue)
+        return [
+            _serialize_monitoring_event(event)
+            for event in raw_events
+            if event.event_type in _TOOL_EVENT_TYPES and _event_belongs_to_agent(event, temp_agent_id)
+        ]
+
+    decision: dict[str, Any] | None = None
+    script_input: dict[str, Any] | None = None
+    script_result: dict[str, Any] | None = None
+    script_error: str | None = None
+    script_tool_context: ToolContext | None = None
+
+    try:
+        agent._system_prompt = req.system_prompt
+        agent._llm_name = llm_name
+        agent._llm_service_id = llm_service_id(llm_name)
+        agent._llm_temperature = llm_temperature
+        agent._max_tokens = llm_max_tokens
+        agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
+        agent._llm_reasoning_effort = llm_reasoning_effort
+
+        if req.allowed_tools:
+            # AA-under-test has configured tool access — real tool loop, for testing an AA
+            # variant that fetches its own context instead of receiving a pre-built snapshot.
+            pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
+            forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
+            aa_tool_context = ToolContext(
+                agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                extra={"candle_index_map": candle_index_map, "existing_annotations": req.existing_annotations},
+            )
+            agent._tool_dispatcher = ToolDispatcher(
+                DEFAULT_REGISTRY, aa_tool_context, {
+                    "allowed_tools": req.allowed_tools,
+                    "forced_arguments": {
+                        "calculate_indicator": forced_start_args,
+                        "get_candles": forced_start_args,
+                        "get_swing_levels": forced_start_args,
+                    },
+                },
+            )
+            final_text, total_tokens, _executed = await asyncio.wait_for(
+                agent._run_with_tools(user_message=user_message, trigger="workbench_simulation_step", history=[]),
+                timeout=req.timeout,
+            )
+        else:
+            # No tools configured — the exact method production AA agents use for their real
+            # decision call (data-gathering already done, LLM's only job is the JSON decision).
+            final_text, total_tokens, _executed = await asyncio.wait_for(
+                agent._run_decision_only_cycle(user_message=user_message, trigger="workbench_simulation_step"),
+                timeout=req.timeout,
+            )
+
+        decision = Agent._parse_json_object(final_text)
+
+        if req.decision_script.strip():
+            script_tool_context = ToolContext(
+                agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                extra={
+                    "candle_index_map": candle_index_map,
+                    "workbench_annotations": [],
+                    "workbench_removed_annotation_ids": [],
+                    "existing_annotations": req.existing_annotations,
+                    "fifo_enabled": req.fifo_enabled,
+                    "allow_trade_delete": req.allow_trade_delete,
+                },
+            )
+            script_dispatcher = ToolDispatcher(
+                DEFAULT_REGISTRY, script_tool_context,
+                {"allowed_tools": req.decision_script_allowed_tools},
+            )
+            tools_proxy = ToolsProxy(script_dispatcher, [])
+            candle_number = (total - visible_count + 1) if last_visible is not None else None
+            script_input = {
+                "decision": decision or {},
+                "raw_response": final_text,
+                "pair": req.pair.upper(),
+                "candle_number": candle_number,
+                "candle": (
+                    {
+                        "timestamp": last_visible.timestamp.isoformat(),
+                        "open": float(last_visible.open), "high": float(last_visible.high),
+                        "low": float(last_visible.low), "close": float(last_visible.close),
+                    }
+                    if last_visible is not None else None
+                ),
+                "existing_annotations": req.existing_annotations,
+            }
+            script_config = {**req.decision_script_config, "memory_key": req.memory_key}
+            try:
+                script_result = await _run_decision_script(
+                    req.decision_script, script_input, script_config, tools_proxy, timeout=req.timeout,
+                )
+            except Exception as exc:  # noqa: BLE001
+                script_error = f"{type(exc).__name__}: {exc}"
+
+        return PromptWorkbenchChatResponse(
+            answer=final_text, total_tokens=total_tokens,
+            tool_events=_collect_tool_events(),
+            decision=decision, script_input=script_input, script_result=script_result, script_error=script_error,
+            annotations=(script_tool_context.extra.get("workbench_annotations", []) if script_tool_context else []),
+            removed_annotation_ids=(
+                script_tool_context.extra.get("workbench_removed_annotation_ids", []) if script_tool_context else []
+            ),
+            snapshot_errors=snapshot_errors,
+        )
+    except TimeoutError:
+        return PromptWorkbenchChatResponse(
+            answer="", error=f"Timed out after {req.timeout:.0f}s", tool_events=_collect_tool_events(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return PromptWorkbenchChatResponse(answer="", error=str(exc), tool_events=_collect_tool_events())
+    finally:
+        _bus.unregister_agent(temp_agent_id)
+        if mon_queue is not None:
+            _monitoring_bus.unsubscribe(mon_queue)
 
 
 class PromptWorkbenchContextPreviewResponse(BaseModel):

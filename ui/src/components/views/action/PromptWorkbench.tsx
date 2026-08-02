@@ -41,6 +41,7 @@ import {
   type PromptWorkbenchChatResponse,
   type PromptWorkbenchContextPreviewResponse,
   type PromptWorkbenchSavedConfig,
+  type PromptWorkbenchToolEvent,
   type ToolInfo,
 } from '@/api/client'
 import { kbImport } from '@/knowledgebase/kbImport'
@@ -143,13 +144,57 @@ const TIMEFRAMES = Object.keys(TF_MINUTES).filter(tf => tf !== 'M1')
 const REASONING_EFFORTS = ['none', 'low', 'medium', 'high']
 const DEFAULT_ANNOTATION_COLOR = '#f59e0b'
 
-type ToolTab = 'analyse' | 'simulation' | 'context'
+type ToolTab = 'analyse' | 'simulation' | 'ba' | 'context'
 
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: string
+  // Real captured tool-call events for this turn (assistant messages only) — lets the
+  // chat show what the agent actually did, separate from what its answer text claims.
+  toolEvents?: PromptWorkbenchToolEvent[]
+  // Simulation-step only (AA-decision + BA-script input/result), assistant messages only.
+  decision?: Record<string, unknown> | null
+  scriptInput?: Record<string, unknown> | null
+  scriptResult?: Record<string, unknown> | null
+  scriptError?: string | null
+}
+
+// One line per tool call, e.g. "trade_marker(open) OK" / "trade_marker(close) FAILED".
+// Pairs TOOL_CALL_STARTED (has arguments) with the following TOOL_CALL_COMPLETED/FAILED
+// for the same tool, in emission order — dispatcher emits them strictly sequentially
+// per call, never interleaved, so positional pairing is safe.
+function summarizeToolEvents(events: PromptWorkbenchToolEvent[] | undefined): string[] {
+  if (!events?.length) return []
+  const lines: string[] = []
+  let pendingName: string | null = null
+  let pendingArgs: Record<string, unknown> | undefined
+  for (const evt of events) {
+    if (evt.event_type === 'tool_call_started') {
+      pendingName = evt.payload.tool_name ?? '?'
+      pendingArgs = evt.payload.arguments
+      continue
+    }
+    const name = evt.payload.tool_name ?? pendingName ?? '?'
+    const detail = pendingArgs?.action ? `(${pendingArgs.action})` : ''
+    // A tool can "complete" (no exception) while its own payload signals a business-level
+    // rejection (e.g. trade_marker's FIFO/immutability checks return {"error": ...} instead
+    // of raising) — parse the result so those still read as rejected, not OK.
+    let status = 'OK'
+    if (evt.event_type === 'tool_call_failed') {
+      status = 'FAILED'
+    } else if (evt.event_type === 'tool_call_completed') {
+      try {
+        const parsed = JSON.parse(evt.payload.result ?? '{}')
+        if (parsed && typeof parsed === 'object' && 'error' in parsed) status = 'REJECTED'
+      } catch { /* non-JSON result — treat as OK */ }
+    }
+    lines.push(`${name}${detail} ${status}`)
+    pendingName = null
+    pendingArgs = undefined
+  }
+  return lines
 }
 
 function now(): string {
@@ -370,6 +415,14 @@ export function PromptWorkbench() {
   // clearAnnotations() on every fresh candle set (stale zones/trade lines from
   // a previous load no longer apply).
   const [annotations, setAnnotations] = useState<TaggedAnnotation[]>([])
+  // stepOnce is called in a tight while-loop by Run (handleRunToggle) that captures a single
+  // stepOnce closure up front and keeps calling it — it never picks up a fresher closure as
+  // annotations changes turn-to-turn the way a fresh render/click would. Without this ref,
+  // every step during Run would send the annotations snapshot from when Run was first
+  // clicked, so trade_marker's id generator would never see a previous trade as "used" and
+  // would keep assigning the same id (e.g. always "AA") instead of incrementing.
+  const annotationsRef = useRef<TaggedAnnotation[]>(annotations)
+  useEffect(() => { annotationsRef.current = annotations }, [annotations])
   const renderedDrawingIdsRef = useRef<Set<string>>(new Set())
   const renderedDrawingContentRef = useRef<Map<string, string>>(new Map())
   const [annotationColor, setAnnotationColor] = useState(DEFAULT_ANNOTATION_COLOR)
@@ -483,7 +536,29 @@ export function PromptWorkbench() {
 
   // ── Tools tab ────────────────────────────────────────────────────────────
   const [toolTab, setToolTab] = useState<ToolTab>('analyse')
-  const [autoTradeStatus, setAutoTradeStatus] = useState(true)
+  // FIFO: mirrors brokers that only allow closing the oldest open position first —
+  // enforced server-side in trade_marker, not just a UI label.
+  const [fifoEnabled, setFifoEnabled] = useState(false)
+  // Off by default: a recorded trade leg mirrors a real broker fill, which can't be
+  // un-sent — enforced server-side in trade_marker, not just a UI label.
+  const [allowTradeDelete, setAllowTradeDelete] = useState(false)
+  // AA-under-test's tool access for Step/Run. Empty = decision-only via
+  // Agent._run_decision_only_cycle — the same method production AA agents use for
+  // their real decision call (data already gathered, LLM's only job is the JSON
+  // decision). Non-empty runs the normal tool loop instead, for testing an AA
+  // variant that fetches its own context.
+  const [simulationAllowedTools, setSimulationAllowedTools] = useState<string[]>([])
+  // BA-simulation: a deterministic script (not a second LLM call) that receives the
+  // AA's decision and decides whether/how to act on it, drawing the outcome via
+  // trade_marker — mirrors the real AA→BA split, with the BA played by user code
+  // instead of a second agent for fast, cheap iteration.
+  const [decisionScript, setDecisionScript] = useState('')
+  const [decisionScriptConfigText, setDecisionScriptConfigText] = useState('{}')
+  const [decisionScriptAllowedTools, setDecisionScriptAllowedTools] = useState<string[]>(['assessment_memory', 'trade_marker'])
+  // Key the script uses with assessment_memory to persist state (e.g. current
+  // simulated position) across steps and sessions — the script controls the actual
+  // get/set calls, this is just the key it's told to use.
+  const [memoryKey, setMemoryKey] = useState('')
   const [simPreview, setSimPreview] = useState<string | null>(null)
   const [simPreviewLoading, setSimPreviewLoading] = useState(false)
 
@@ -613,7 +688,7 @@ export function PromptWorkbench() {
   )
 
   const boundaryMarkers: ForexChartMarker[] = useMemo(() => {
-    if (toolTab !== 'simulation' || total === 0 || position <= 0 || position >= total) return []
+    if ((toolTab !== 'simulation' && toolTab !== 'ba') || total === 0 || position <= 0 || position >= total) return []
     const boundaryCandle = candles[visibleCount - 1]
     if (!boundaryCandle) return []
     return [{
@@ -666,7 +741,14 @@ export function PromptWorkbench() {
       position: a.action === 'open' ? 'belowBar' : 'aboveBar',
       shape: a.action === 'open' ? (a.direction === 'short' ? 'arrowDown' : 'arrowUp') : 'circle',
       color: a._color,
-      text: `[${a.trade_id}] ${a.action} #${a.candle_number}`,
+      // Line 1: ID + direction/action as single letters (S/L, O/C) + candle number.
+      // Line 2 (if present): the free-text note — its own line via CustomSeriesMarkers.
+      text: (() => {
+        const dirLetter = a.direction === 'short' ? 'S' : a.direction === 'long' ? 'L' : ''
+        const actionLetter = a.action === 'open' ? 'O' : 'C'
+        const line1 = `[${a.trade_id}] ${dirLetter}${actionLetter} #${a.candle_number}`
+        return a.note ? `${line1}\n${a.note}` : line1
+      })(),
     })), [annotations])
 
   const candleMarkers: ForexChartMarker[] = useMemo(() => annotations
@@ -761,7 +843,7 @@ export function PromptWorkbench() {
           { time: toUnixTime(a.timestamp), price: a.price },
         ],
         style: { color: openAnn._color, lineStyle: LineStyle.Solid, lineWidth: 2 },
-        label: `[${a.trade_id}] #${openAnn.candle_number}→#${a.candle_number} · ${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
+        label: `${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
         visible: true,
         selected: false,
       }
@@ -853,8 +935,21 @@ export function PromptWorkbench() {
     return () => observer.disconnect()
   }, [])
 
-  const pushMessage = (role: ChatMessage['role'], content: string) => {
-    setMessages(prev => [...prev, { id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role, content, timestamp: now() }])
+  const pushMessage = (
+    role: ChatMessage['role'],
+    content: string,
+    extra?: {
+      toolEvents?: PromptWorkbenchToolEvent[]
+      decision?: Record<string, unknown> | null
+      scriptInput?: Record<string, unknown> | null
+      scriptResult?: Record<string, unknown> | null
+      scriptError?: string | null
+    },
+  ) => {
+    setMessages(prev => [...prev, {
+      id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, role, content, timestamp: now(),
+      ...extra,
+    }])
   }
 
   // Clears only the chat transcript — chart drawings have their own dedicated
@@ -882,10 +977,10 @@ ${transcript}`
     }
   }, [messages, pair, timeframe, brokerName])
 
-  // Only sent when the Simulation tab has tool_blocks configured — otherwise
+  // Only sent when the Simulation/BA tabs have tool_blocks configured — otherwise
   // the agent keeps getting raw candle text, unchanged from before.
   const snapshotPipelineFields = useCallback(() => {
-    if (toolTab !== 'simulation' || toolBlocksState.length === 0) return {}
+    if ((toolTab !== 'simulation' && toolTab !== 'ba') || toolBlocksState.length === 0) return {}
     return {
       tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
       calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
@@ -962,7 +1057,7 @@ ${transcript}`
         timeframe,
         candle_count: candleCount,
         candle_anchor: candleAnchorRef.current,
-        visible_count: toolTab === 'simulation' ? visibleCount : undefined,
+        visible_count: (toolTab === 'simulation' || toolTab === 'ba') ? visibleCount : undefined,
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
         allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
@@ -974,9 +1069,11 @@ ${transcript}`
           last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
         })),
         swing_levels: swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : [],
+        fifo_enabled: fifoEnabled,
+        allow_trade_delete: allowTradeDelete,
         ...snapshotPipelineFields(),
       })
-      pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
+      pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'), { toolEvents: resp.tool_events })
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
       applyAnnotationUpdates(resp)
     } catch (err) {
@@ -1005,12 +1102,19 @@ ${transcript}`
     setSimBusy(true)
     try {
       const question = [
-        autoTradeStatus ? tradeStatusText() : '',
         `Continue the simulation. Candles up to #${newPosition} (numbered #1=newest .. #${total}=oldest) are now visible.`,
-        'Decide whether to open, hold, or close a position given the visible candles, and briefly explain why. '
-        + 'Use the trade_marker tool to record any open/close decision.',
-      ].filter(Boolean).join('\n')
-      const resp = await api.promptWorkbenchChat({
+        'Give your independent market assessment as strict JSON only — no prose outside the JSON, no tool calls: '
+        + '{"decision": "BIAS_LONG"|"BIAS_SHORT"|"NEUTRAL", "confidence": 0-100, "reasoning": "...", '
+        + '"invalidation_level": <price>, "target": <price>}. '
+        + 'Assess the chart on its own merits each time — you are not managing a position, only reading the market.',
+      ].join('\n')
+      let decisionScriptConfig: Record<string, unknown> = {}
+      try {
+        decisionScriptConfig = decisionScript.trim() ? JSON.parse(decisionScriptConfigText) : {}
+      } catch (err) {
+        pushMessage('assistant', `Script Config ist kein gültiges JSON, wird als {} behandelt: ${String(err)}`)
+      }
+      const resp = await api.promptWorkbenchSimulateStep({
         system_prompt: promptText,
         question,
         history: [],
@@ -1022,8 +1126,11 @@ ${transcript}`
         visible_count: newVisibleCount,
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
-        allowed_tools: ['calculate_indicator', 'zone_marker', 'trade_marker', 'candle_marker', 'get_annotation'],
-        existing_annotations: annotations,
+        allowed_tools: simulationAllowedTools,
+        // Read via ref, not the closed-over `annotations` state — see annotationsRef's comment:
+        // Run calls this function in a loop using one stale closure, so the state value here
+        // would otherwise never reflect trades opened/closed by earlier steps in the same Run.
+        existing_annotations: annotationsRef.current,
         indicators: indicators.filter(ind => ind.visible).map(ind => ({
           name: ind.name,
           period: ind.period,
@@ -1031,9 +1138,18 @@ ${transcript}`
           last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
         })),
         swing_levels: swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : [],
+        fifo_enabled: fifoEnabled,
+        allow_trade_delete: allowTradeDelete,
+        decision_script: decisionScript,
+        decision_script_config: decisionScriptConfig,
+        decision_script_allowed_tools: decisionScriptAllowedTools,
+        memory_key: memoryKey,
         ...snapshotPipelineFields(),
       })
-      pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'))
+      pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'), {
+        toolEvents: resp.tool_events, decision: resp.decision, scriptInput: resp.script_input,
+        scriptResult: resp.script_result, scriptError: resp.script_error,
+      })
       if (resp.snapshot_errors?.length) pushMessage('assistant', `Snapshot errors:\n${resp.snapshot_errors.join('\n')}`)
       applyAnnotationUpdates(resp)
     } catch (err) {
@@ -1044,7 +1160,11 @@ ${transcript}`
     positionRef.current = newPosition
     setPosition(newPosition)
     return newPosition > 0
-  }, [total, stepSize, autoTradeStatus, promptText, pair, brokerName, timeframe, candleCount, llmName, reasoningEffort, tradeStatusText, applyAnnotationUpdates, annotations, snapshotPipelineFields])
+  }, [
+    total, stepSize, fifoEnabled, allowTradeDelete, simulationAllowedTools, decisionScript, decisionScriptConfigText,
+    decisionScriptAllowedTools, memoryKey, promptText, pair, brokerName, timeframe, candleCount, llmName,
+    reasoningEffort, applyAnnotationUpdates, indicators, swingEnabled, swingLines, snapshotPipelineFields,
+  ])
 
   const handleStep = () => { void stepOnce() }
 
@@ -1119,7 +1239,13 @@ ${transcript}`
     setAnchorDate(found.anchor_date)
     setAnnotationColor(found.annotation_color)
     setStepSize(found.step_size)
-    setAutoTradeStatus(found.auto_trade_status)
+    setFifoEnabled(found.fifo_enabled ?? false)
+    setAllowTradeDelete(found.allow_trade_delete ?? false)
+    setSimulationAllowedTools(found.simulation_allowed_tools ?? [])
+    setDecisionScript(found.decision_script ?? '')
+    setDecisionScriptConfigText(JSON.stringify(found.decision_script_config ?? {}, null, 2))
+    setDecisionScriptAllowedTools(found.decision_script_allowed_tools ?? ['assessment_memory', 'trade_marker'])
+    setMemoryKey(found.memory_key ?? '')
     setLeftTab(found.left_tab)
     setToolTab(found.tool_tab)
     setPromptText(found.system_prompt)
@@ -1147,7 +1273,8 @@ ${transcript}`
       anchor_date: anchorDate,
       annotation_color: annotationColor,
       step_size: stepSize,
-      auto_trade_status: autoTradeStatus,
+      fifo_enabled: fifoEnabled,
+      allow_trade_delete: allowTradeDelete,
       left_tab: leftTab,
       // "context" is a live preview tab, not a persisted workbench mode —
       // fall back to "analyse" so the saved-config schema stays unchanged.
@@ -1159,6 +1286,11 @@ ${transcript}`
       tool_blocks: toolBlocksState.map((b, i) => serializeToolBlock(b, i)),
       calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
       assembly_transform_script: assemblyScriptText,
+      simulation_allowed_tools: simulationAllowedTools,
+      decision_script: decisionScript,
+      decision_script_config: (() => { try { return JSON.parse(decisionScriptConfigText) } catch { return {} } })(),
+      decision_script_allowed_tools: decisionScriptAllowedTools,
+      memory_key: memoryKey,
     }
     const next = [...savedConfigs.filter(c => c.name !== name), entry]
     try {
@@ -1202,7 +1334,13 @@ ${transcript}`
     setRunning(false)
     setLeftTab('chat')
     setToolTab('analyse')
-    setAutoTradeStatus(true)
+    setFifoEnabled(false)
+    setAllowTradeDelete(false)
+    setSimulationAllowedTools([])
+    setDecisionScript('')
+    setDecisionScriptConfigText('{}')
+    setDecisionScriptAllowedTools(['assessment_memory', 'trade_marker'])
+    setMemoryKey('')
     setSimPreview(null)
     setSnapshotProfileName('')
     setToolBlocksState([])
@@ -1498,7 +1636,9 @@ ${transcript}`
                 {messages.length === 0 && (
                   <p className="text-xs text-white italic">Ask a question, or use Step/Run above to walk the simulation.</p>
                 )}
-                {messages.map(msg => (
+                {messages.map(msg => {
+                  const toolLines = msg.role === 'assistant' ? summarizeToolEvents(msg.toolEvents) : []
+                  return (
                   <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start items-start gap-1'}>
                     <div className={
                       msg.role === 'user'
@@ -1506,6 +1646,25 @@ ${transcript}`
                         : 'max-w-[90%] rounded-lg px-3 py-1.5 text-xs bg-gray-800 text-gray-200 whitespace-pre-wrap'
                     }>
                       {msg.content}
+                      {toolLines.length > 0 && (
+                        <div
+                          className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono"
+                          title="Tatsächlich ausgeführte Tool-Aufrufe dieser Antwort — nicht vom Antworttext abgeleitet"
+                        >
+                          Tools: {toolLines.join(', ')}
+                        </div>
+                      )}
+                      {msg.scriptInput && (
+                        <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
+                          <summary
+                            className="cursor-pointer select-none text-gray-400 hover:text-white"
+                            title="Das exakte 'input'-JSON, das an das BA Decision Script übergeben wurde — backend-erzeugt, nicht editierbar"
+                          >
+                            Script Input
+                          </summary>
+                          <pre className="mt-1 whitespace-pre-wrap break-all">{JSON.stringify(msg.scriptInput, null, 2)}</pre>
+                        </details>
+                      )}
                     </div>
                     {msg.role === 'assistant' && (
                       <div className="pt-1.5">
@@ -1513,7 +1672,8 @@ ${transcript}`
                       </div>
                     )}
                   </div>
-                ))}
+                  )
+                })}
                 {(sending || simBusy) && (
                   <div className="flex justify-start">
                     <div className="bg-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-400 animate-pulse">
@@ -1575,7 +1735,7 @@ ${transcript}`
         {/* Tools — [Analyse] / [Simulation] */}
         <section className="flex flex-col min-h-0 w-1/2">
           <div className="flex items-center border-b border-gray-800 bg-gray-900 flex-shrink-0">
-            {(['analyse', 'simulation', 'context'] as ToolTab[]).map(tab => (
+            {(['analyse', 'simulation', 'ba', 'context'] as ToolTab[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setToolTab(tab)}
@@ -1584,7 +1744,7 @@ ${transcript}`
                   toolTab === tab ? 'bg-indigo-700 text-white' : 'text-white hover:text-gray-200 hover:bg-gray-800',
                 ].join(' ')}
               >
-                {tab === 'analyse' ? 'Analyse' : tab === 'simulation' ? 'Simulation' : 'LLM Context'}
+                {tab === 'analyse' ? 'Analyse' : tab === 'simulation' ? 'Simulation' : tab === 'ba' ? 'BA' : 'LLM Context'}
               </button>
             ))}
           </div>
@@ -1684,16 +1844,6 @@ ${transcript}`
                     contextFile="script_snapshot_assembly_context.md"
                   />
                 </div>
-
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input type="checkbox" checked={autoTradeStatus} onChange={e => setAutoTradeStatus(e.target.checked)} className="accent-emerald-500" />
-                  <span className={autoTradeStatus ? 'text-emerald-400' : 'text-white'}>Auto Trade-Status einfügen</span>
-                </label>
-                {openTrades.size > 0 && (
-                  <pre className="whitespace-pre-wrap break-words text-[11px] text-emerald-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
-                    {tradeStatusText()}
-                  </pre>
-                )}
                 <button
                   onClick={() => void handlePreview()}
                   disabled={simPreviewLoading}
@@ -1704,6 +1854,116 @@ ${transcript}`
                 {simPreview && (
                   <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
                     {simPreview}
+                  </pre>
+                )}
+              </>
+            ) : toolTab === 'ba' ? (
+              <>
+                <p className="text-white">
+                  BA-Simulation: bildet den echten AA→BA-Ablauf nach. Die Agentin (Prompt-Tab) liefert bei
+                  Step/Run nur noch eine Entscheidung — ohne eigenen Tool-Zugriff läuft sie über den exakten
+                  Aufruf, den Produktions-AA-Agenten für ihre Entscheidung nutzen. Das Skript unten spielt die
+                  BA-Rolle: es bekommt diese Entscheidung, entscheidet deterministisch ob/wie gehandelt wird, und
+                  zeichnet das Ergebnis über trade_marker ins Chart.
+                </p>
+
+                <div className="space-y-1">
+                  <span className="text-white" title="Tool-Zugriff der AA-Agentin während Step/Run. Leer = reine Entscheidung ohne Tools (Agent._run_decision_only_cycle) — exakt der Aufruf, den echte AA-Agenten für ihre Entscheidung nutzen.">
+                    AA Tool Access (Step/Run) — leer = Decision-Only wie in Produktion
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
+                      <button
+                        key={t.name}
+                        type="button"
+                        title={t.description}
+                        onClick={() => setSimulationAllowedTools(prev =>
+                          prev.includes(t.name) ? prev.filter(n => n !== t.name) : [...prev, t.name],
+                        )}
+                        className={`px-2 py-0.5 rounded border text-xs ${
+                          simulationAllowedTools.includes(t.name)
+                            ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
+                            : 'bg-gray-900 border-gray-700 text-white hover:text-gray-200'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-white" title="Deterministisches Skript, das die AA-Entscheidung bekommt und die BA-Rolle simuliert: entscheidet ob/wie gehandelt wird, zeichnet das Ergebnis via trade_marker.">
+                    BA Decision Script (async def main(input, config, tools))
+                  </span>
+                  <ScriptEditor
+                    value={decisionScript}
+                    onChange={setDecisionScript}
+                    minHeight={140}
+                    snippetScope="ec"
+                    contextFile="script_pwb_decision_context.md"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-white">Script Config (JSON)</span>
+                  <textarea
+                    value={decisionScriptConfigText}
+                    onChange={e => setDecisionScriptConfigText(e.target.value)}
+                    rows={4}
+                    spellCheck={false}
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-white" title="Wird als config['memory_key'] ans Skript übergeben — dein Skript nutzt es selbst mit assessment_memory, um Zustand über Schritte/Sitzungen hinweg zu speichern.">
+                    Memory Key
+                  </span>
+                  <input
+                    type="text" value={memoryKey} onChange={e => setMemoryKey(e.target.value)}
+                    placeholder="z. B. eurusd_krieger_v1"
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-white">BA Script Tool Access</span>
+                  <div className="flex flex-wrap gap-1">
+                    {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
+                      <button
+                        key={t.name}
+                        type="button"
+                        title={t.description}
+                        onClick={() => setDecisionScriptAllowedTools(prev =>
+                          prev.includes(t.name) ? prev.filter(n => n !== t.name) : [...prev, t.name],
+                        )}
+                        className={`px-2 py-0.5 rounded border text-xs ${
+                          decisionScriptAllowedTools.includes(t.name)
+                            ? 'bg-emerald-800/40 border-emerald-500 text-emerald-300'
+                            : 'bg-gray-900 border-gray-700 text-white hover:text-gray-200'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label
+                  className="flex items-center gap-2 cursor-pointer select-none"
+                  title="Wenn aktiv, muss der älteste noch offene Trade zuerst geschlossen werden, bevor ein neuerer geschlossen werden darf — wie bei FIFO-pflichtigen Brokern."
+                >
+                  <input type="checkbox" checked={fifoEnabled} onChange={e => setFifoEnabled(e.target.checked)} className="accent-emerald-500" />
+                  <span className={fifoEnabled ? 'text-emerald-400' : 'text-white'}>FIFO aktivieren</span>
+                </label>
+                <label
+                  className="flex items-center gap-2 cursor-pointer select-none"
+                  title="Standardmäßig aus: ein aufgezeichneter Trade gilt als beim Broker ausgeführt und kann nicht gelöscht, nur geschlossen werden."
+                >
+                  <input type="checkbox" checked={allowTradeDelete} onChange={e => setAllowTradeDelete(e.target.checked)} className="accent-emerald-500" />
+                  <span className={allowTradeDelete ? 'text-emerald-400' : 'text-white'}>delete of trades accepted</span>
+                </label>
+                {openTrades.size > 0 && (
+                  <pre className="whitespace-pre-wrap break-words text-[11px] text-emerald-300 leading-5 bg-gray-900/60 border border-gray-800 rounded p-2">
+                    {tradeStatusText()}
                   </pre>
                 )}
               </>

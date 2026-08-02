@@ -212,6 +212,8 @@ A mini Snapshot Designer for Chat/Step/Run: the same `tool_blocks`/`calculation_
 | **calculation_blocks panel** | "Test" runs all tool_blocks plus just that one calculation block. |
 | **assembly_transform_script** | Optional merge script, same editor as the Snapshot Designer. |
 | **Auto Trade-Status einfügen** | Automatically prefixes every Step request with a summary of currently open simulated trades. |
+| **FIFO aktivieren** | When enabled, the **oldest** still-open simulated trade must be closed first — `trade_marker` rejects an attempt to close a newer one out of order, with an explanatory error. Mirrors brokers that mandate FIFO closing (e.g. certain US-regulated accounts). Off by default, matching the standard behavior of hedging-capable brokers. |
+| **delete of trades accepted** | Off by default. A previously recorded trade leg is treated as filled at the broker and normally can't be deleted, only closed (see Section 11). This checkbox explicitly unlocks `op='delete'` for `trade_marker` for this session — e.g. to clean up an unambiguous tool-usage mistake (wrong candle, wrong tool) before it becomes part of a "real" order history. |
 | **Test / Preview** | Assembles the complete snapshot once, without calling the LLM. |
 
 **Effect on Chat/Step/Run:** as soon as at least one `tool_block` is entered, the agent receives the fully assembled snapshot instead of the raw candle text — anchored to the last visible candle. If the list stays empty, the agent gets the plain candle-text block from the Analyse tab.
@@ -254,11 +256,20 @@ During chat, the agent can use four sandbox-only tools to record its analysis di
 | `candle_marker` | An arrow marker above/below a single candle with free text | Write |
 | `get_annotation` | Looks up a previously placed marking and its real candle data by id or candle range | Read |
 
-Every write call has an `op` parameter (`new` / `change` / `delete`):
+Every write call has an `op` parameter (`new` / `change` / `delete`) — with one important exception for `trade_marker`, see below:
 
 - **`new`** — creates a new marking, short 2-character id shown as a label prefix, e.g. `[A3] Supply zone`.
 - **`change`** — corrects an existing marking; replaces the chart drawing instead of duplicating it.
 - **`delete`** — removes an existing marking.
+
+**Special rule for `trade_marker`: a leg is permanent once recorded via `new`.** An `open` or `close` entry simulates an order actually filled at a broker — and in reality that can't be corrected or taken back afterward. So `trade_marker` deliberately deviates from `zone_marker`/`candle_marker` here:
+
+- `op='change'` on a trade leg may **only** set/update the optional free-text `note` field — the candle, direction, and action (open/close) stay exactly as originally recorded. A change call without a `note`, or one that tries to alter the candle/direction, is rejected.
+- `op='delete'` is **blocked by default** for a trade leg and returns an explanatory error ("a recorded trade cannot be deleted, only closed"). An open trade can normally only be ended via `action='close'` — never retroactively removed — unless the **"delete of trades accepted"** checkbox in the Simulation tab (Section 9) is explicitly enabled for this session.
+
+This is exactly the fix that stops an agent from quietly rewriting its own entry after the fact (hindsight bias) — every trade record stays an honest, permanent log entry.
+
+**Direction visible on both legs:** `direction` (long/short) isn't just stored on the `open` leg — it's automatically carried over to the matching `close` leg too, and the chart label spells it out as text (`LONG`/`SHORT`), not just implicitly via the open marker's arrow direction.
 
 **Useful pattern:** explicitly ask the agent to review and correct its own markings, e.g.:
 

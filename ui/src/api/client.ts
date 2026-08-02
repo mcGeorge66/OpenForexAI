@@ -271,6 +271,8 @@ export const api = {
                     post<LLMAssistantChatResponse>('/llm-assistant/chat', req),
   promptWorkbenchChat: (req: PromptWorkbenchChatRequest) =>
                     post<PromptWorkbenchChatResponse>('/prompt-workbench/chat', req),
+  promptWorkbenchSimulateStep: (req: PromptWorkbenchChatRequest) =>
+                    post<PromptWorkbenchChatResponse>('/prompt-workbench/simulate-step', req),
   promptWorkbenchContextPreview: (req: PromptWorkbenchChatRequest) =>
                     post<PromptWorkbenchContextPreviewResponse>('/prompt-workbench/context-preview', req),
   promptWorkbenchSnapshotPreview: (req: PromptWorkbenchSnapshotPreviewRequest) =>
@@ -766,6 +768,13 @@ export interface PromptWorkbenchChatRequest {
   assembly_transform_script?: string
   indicators?: Record<string, unknown>[]
   swing_levels?: Record<string, unknown>[]
+  fifo_enabled?: boolean
+  allow_trade_delete?: boolean
+  // /prompt-workbench/simulate-step only — ignored by /prompt-workbench/chat.
+  decision_script?: string
+  decision_script_config?: Record<string, unknown>
+  decision_script_allowed_tools?: string[]
+  memory_key?: string
   timeout?: number
 }
 
@@ -820,6 +829,7 @@ export interface PromptWorkbenchTradeAnnotation {
   timestamp: string
   price: number
   direction?: 'long' | 'short'
+  note?: string
 }
 
 export interface PromptWorkbenchCandleMarkerAnnotation {
@@ -844,13 +854,30 @@ export type PromptWorkbenchAnnotationRemoval =
   | { kind: 'trade'; trade_id: string; action: 'open' | 'close' }
   | { kind: 'candle_marker'; marker_id: string }
 
+export interface PromptWorkbenchToolEvent {
+  id: string
+  timestamp: string
+  source: string
+  event_type: 'tool_call_started' | 'tool_call_completed' | 'tool_call_failed'
+  payload: { tool_name?: string; agent?: string; arguments?: Record<string, unknown>; result?: string }
+}
+
 export interface PromptWorkbenchChatResponse {
   answer: string
   total_tokens: number
   executed_tools: string[]
+  // Real captured monitoring events for this turn's tool calls — same mechanism the
+  // production Agent Chat Inspector's Tools tab uses — so what the agent actually did
+  // is never just inferred from its answer text.
+  tool_events?: PromptWorkbenchToolEvent[]
   annotations: PromptWorkbenchAnnotation[]
   removed_annotation_ids?: PromptWorkbenchAnnotationRemoval[]
   snapshot_errors?: string[]
+  // /prompt-workbench/simulate-step only — undefined when returned by /prompt-workbench/chat.
+  decision?: Record<string, unknown> | null
+  script_input?: Record<string, unknown> | null
+  script_result?: Record<string, unknown> | null
+  script_error?: string | null
   error?: string
 }
 
@@ -866,9 +893,10 @@ export interface PromptWorkbenchSavedConfig {
   anchor_date: string
   annotation_color: string
   step_size: number
-  auto_trade_status: boolean
+  fifo_enabled: boolean
+  allow_trade_delete: boolean
   left_tab: 'chat' | 'prompt'
-  tool_tab: 'analyse' | 'simulation'
+  tool_tab: 'analyse' | 'simulation' | 'ba'
   system_prompt: string
   llm_name: string
   reasoning_effort: string
@@ -878,6 +906,15 @@ export interface PromptWorkbenchSavedConfig {
   tool_blocks: Record<string, unknown>[]
   calculation_blocks: Record<string, unknown>[]
   assembly_transform_script: string
+  // AA-under-test's tool access during Step/Run — empty means decision-only
+  // (Agent._run_decision_only_cycle), matching a production AA's real decision call.
+  simulation_allowed_tools: string[]
+  // BA-simulation: deterministic script (async def main(input, config, tools)) that
+  // decides whether/how to act on the AA's decision and draws it via trade_marker.
+  decision_script: string
+  decision_script_config: Record<string, unknown>
+  decision_script_allowed_tools: string[]
+  memory_key: string
 }
 
 export interface PromptWorkbenchConfigLibrary {
