@@ -125,8 +125,11 @@ async def main(input, config, tools):
         log("EC guard: no instrument on triggering message", level="error", pin=True)
         return None
 
-    candles = await tools.call("get_candles", pair=pair, timeframe="M5", count=20)
-    closes = [c["close"] for c in candles.get("candles", [])]
+    # get_candles ignores a `pair` argument — it always uses this EC's own
+    # configured pair (context.pair) regardless. Its result is also the one
+    # exception to "tools return a dict": it's a bare list of candle dicts.
+    candles = await tools.call("get_candles", timeframe="M5", count=20)
+    closes = [c["close"] for c in candles]
     if len(closes) < 20:
         return None
 

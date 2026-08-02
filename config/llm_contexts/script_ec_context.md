@@ -85,9 +85,20 @@ Call with `await tools.call("tool_name", **kwargs)` — **keyword arguments dire
 not a dict as a second positional argument**:
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
-result = await tools.call("get_candles", timeframe="M5", count=20, pair=config.get("pair", "EURUSD"))
-candles = result.get("candles") or []
+candles = await tools.call("get_candles", timeframe="M5", count=20)
+last_close = float(candles[-1]["close"]) if candles else None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**`get_candles` is the one tool whose result is a bare list**, not a dict — `tools.call(...)`
+returns exactly the tool's own return value (`content = json.dumps(raw_result)`, then
+`json.loads()`), and `GetCandlesTool.execute()` returns `candles[-count:]` directly. Every
+other tool here (`calculate_indicator`, `get_swing_levels`, `get_open_positions`, ...)
+returns a dict — only `get_candles` doesn't. `candles.get("candles")` on the result is a bug
+(`AttributeError` — lists have no `.get()`); use `candles` itself as the list.
+
+Also note: `get_candles`'s `pair`/`broker` schema fields are accepted but currently ignored by
+the tool — it always reads `context.broker_name`/`context.pair` (this EC's own configured
+pair), never the call's own arguments. Passing `pair=...` here does nothing.
 
 Available tools can vary by instance — check registered tools in the Tools
 panel.
@@ -158,8 +169,7 @@ Common tool calls
 ### Get candles
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
-resp    = await tools.call("get_candles", timeframe="M5", count=20)
-candles = resp.get("candles") or []
+candles = await tools.call("get_candles", timeframe="M5", count=20)
 last    = candles[-1] if candles else {}
 close   = float(last.get("close", 0))
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,8 +216,7 @@ Wrap tool calls defensively — tools can fail if the broker is disconnected:
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
 try:
-    resp = await tools.call("get_candles", timeframe="M5", count=10)
-    candles = resp.get("candles") or []
+    candles = await tools.call("get_candles", timeframe="M5", count=10)
 except Exception as e:
     return {"error": str(e)}
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,10 +233,9 @@ async def main(input, config, tools):
     pair      = config.get("pair", "EURUSD")
     threshold = float(config.get("rsi_threshold", 30.0))
 
-    resp  = await tools.call("get_candles", timeframe="M5", count=5, pair=pair)
-    rsi_r = await tools.call("calculate_indicator", indicator="RSI", period=14, timeframe="H1")
+    candles = await tools.call("get_candles", timeframe="M5", count=5)
+    rsi_r   = await tools.call("calculate_indicator", indicator="RSI", period=14, timeframe="H1")
 
-    candles = resp.get("candles") or []
     last    = candles[-1] if candles else {}
     close   = float(last.get("close", 0))
     rsi     = rsi_r.get("value")

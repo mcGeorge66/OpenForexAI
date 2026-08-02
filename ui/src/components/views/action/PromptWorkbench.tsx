@@ -2018,11 +2018,15 @@ ${transcript}`
                   zeichnet das Ergebnis über trade_marker ins Chart.
                 </p>
 
-                <div className="space-y-1">
-                  <span className="text-white" title="Tool-Zugriff der AA-Agentin während Step/Run. Leer = reine Entscheidung ohne Tools (Agent._run_decision_only_cycle) — exakt der Aufruf, den echte AA-Agenten für ihre Entscheidung nutzen.">
+                <details className="space-y-1">
+                  <summary
+                    className="text-white cursor-pointer select-none"
+                    title="Tool-Zugriff der AA-Agentin während Step/Run. Leer = reine Entscheidung ohne Tools (Agent._run_decision_only_cycle) — exakt der Aufruf, den echte AA-Agenten für ihre Entscheidung nutzen."
+                  >
                     AA Tool Access (Step/Run) — leer = Decision-Only wie in Produktion
-                  </span>
-                  <div className="flex flex-wrap gap-1">
+                    {simulationAllowedTools.length > 0 && ` (${simulationAllowedTools.length})`}
+                  </summary>
+                  <div className="flex flex-wrap gap-1 mt-1">
                     {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
                       <button
                         key={t.name}
@@ -2041,7 +2045,7 @@ ${transcript}`
                       </button>
                     ))}
                   </div>
-                </div>
+                </details>
 
                 <div className="space-y-1">
                   <span className="text-white" title="Deterministisches Skript, das die AA-Entscheidung bekommt und die BA-Rolle simuliert: entscheidet ob/wie gehandelt wird, zeichnet das Ergebnis via trade_marker.">
@@ -2075,9 +2079,12 @@ ${transcript}`
                     className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600"
                   />
                 </div>
-                <div className="space-y-1">
-                  <span className="text-white">BA Script Tool Access</span>
-                  <div className="flex flex-wrap gap-1">
+                <details className="space-y-1">
+                  <summary className="text-white cursor-pointer select-none">
+                    BA Script Tool Access
+                    {decisionScriptAllowedTools.length > 0 && ` (${decisionScriptAllowedTools.length})`}
+                  </summary>
+                  <div className="flex flex-wrap gap-1 mt-1">
                     {[...availableTools].sort((a, b) => a.name.localeCompare(b.name)).map(t => (
                       <button
                         key={t.name}
@@ -2096,7 +2103,7 @@ ${transcript}`
                       </button>
                     ))}
                   </div>
-                </div>
+                </details>
 
                 <label
                   className="flex items-center gap-2 cursor-pointer select-none"
