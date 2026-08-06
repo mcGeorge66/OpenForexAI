@@ -190,11 +190,15 @@ function HandbookPopup() {
 }
 
 export default function App() {
-  // Popup mode: render only the handbook when ?handbook=1
+  // Popup mode: render only the handbook when ?handbook=1 — a separate component so
+  // MainApp's hooks (monitoring stream, system-config fetch, ...) never mount for it.
   if (new URLSearchParams(window.location.search).get('handbook') === '1') {
     return <HandbookPopup />
   }
+  return <MainApp />
+}
 
+function MainApp() {
   const [section, setSection] = useState<TopSection>('action')
   const [subItems, setSubItems] = useState<Record<TopSection, string>>(DEFAULT_SUB)
   const [savedMonitorFilters, setSavedMonitorFilters] = useState<SavedMonitorFilter[]>([])

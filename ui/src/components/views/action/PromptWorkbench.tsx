@@ -53,13 +53,13 @@ import {
   type ForexChartPriceLine,
 } from '@/components/charts/ForexChart'
 import type { Drawing } from '@/components/charts/drawing/types'
+import { IndicatorsPanel } from '@/components/charts/IndicatorsPanel'
 import {
-  IndicatorsPanel,
   INDICATOR_DEFS,
   DEFAULT_COLORS,
   type IndicatorInstance,
   type IndicatorName,
-} from '@/components/charts/IndicatorsPanel'
+} from '@/components/charts/indicatorDefs'
 import { SwingLevelsPanel, type SwingResult } from '@/components/charts/SwingLevelsPanel'
 import { PlainTextMonacoEditor } from '@/components/common/PlainTextMonacoEditor'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
@@ -67,6 +67,8 @@ import { JsonViewer } from '@/components/common/JsonViewer'
 import {
   CalculationBlocksPanel,
   ToolBlocksPanel,
+} from '@/components/common/SnapshotBlocksPanel'
+import {
   defaultArgumentsForTool,
   defaultOutputKey,
   normalizeCalculationBlock,
@@ -74,7 +76,7 @@ import {
   serializeCalculationBlock,
   serializeToolBlock,
   type SnapshotToolBlockForm,
-} from '@/components/common/SnapshotBlocksPanel'
+} from '@/components/common/snapshotBlocksHelpers'
 import { TF_MINUTES } from '@/utils/indicators'
 
 function toUnixTime(iso: string): UTCTimestamp {

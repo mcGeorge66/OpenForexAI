@@ -15,10 +15,10 @@ import { api, type ECExecuteResponse } from '@/api/client'
 import {
   applyPatch,
   parseResponse,
-  MessageBubble,
   type AssistantMessage,
   type ParsedResponse,
 } from '@/components/common/assistantShared'
+import { MessageBubble } from '@/components/common/MessageBubble'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

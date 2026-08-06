@@ -256,11 +256,16 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
       drawingManagerRef.current?.update(id, patch)
     },
     getDrawings: () => drawingManagerRef.current?.getAll() ?? [],
-  }), [])
+  }), [initialRange])
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    // Captured now, not read fresh in the cleanup below — the Map instances themselves are
+    // stable for this component's whole lifetime (created once via useRef, only ever mutated
+    // in place), but ESLint can't know that from a `.current` read inside a closure.
+    const overlaySeriesMap = overlaySeriesRef.current
+    const oscillatorSeriesMap = oscillatorSeriesRef.current
 
     const chart = createChart(el, {
       width: el.clientWidth,
@@ -500,13 +505,13 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
       volumeRef.current = null
       markerPrimitiveRef.current = null
       priceLineRefs.current = []
-      overlaySeriesRef.current.clear()
-      oscillatorSeriesRef.current.clear()
+      overlaySeriesMap.clear()
+      oscillatorSeriesMap.clear()
     }
   }, [])
 
   const futureBarsRef   = useRef(futureBars)
-  futureBarsRef.current = futureBars
+  useEffect(() => { futureBarsRef.current = futureBars }, [futureBars])
   const initialLoadDone = useRef(false)
 
   const applyVisibleRange = useCallback(() => {
@@ -558,8 +563,11 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         applyVisibleRange()
       }
     }
-    // On subsequent 30s refreshes setData() replaces data silently — zoom preserved
-  }, [orderedCandles])   // NO applyVisibleRange in deps — prevents zoom reset on every candle update
+    // On subsequent 30s refreshes setData() replaces data silently — zoom preserved.
+    // applyVisibleRange deliberately excluded below: including it re-runs this effect
+    // (and resets zoom) on every candle refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedCandles])
 
   useEffect(() => {
     if (initialLoadDone.current) applyVisibleRange()
@@ -652,15 +660,20 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         .sort((a, b) => a.time - b.time)
       const filtered = raw.filter(v => v.time >= firstCandleTime && v.time <= lastCandleTime)
       const outside = raw.filter(v => v.time < firstCandleTime || v.time > lastCandleTime)
-      void fetch('/debug/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message:
-          `[overlay:${line.key}] total=${raw.length} in-range=${filtered.length} outside=${outside.length}` +
-          ` | chart: ${new Date(firstCandleTime * 1000).toISOString()} → ${new Date(lastCandleTime * 1000).toISOString()}` +
-          (outside.length > 0 ? ` | outside-range: ${outside.map(v => new Date(v.time * 1000).toISOString()).join(', ')}` : ' | no outside'),
-        }),
-      })
+      // lastCandleTime is Infinity when no candles are loaded yet — new Date(Infinity)
+      // is an Invalid Date, and .toISOString() throws RangeError on one, crashing this
+      // effect (and the whole chart) the moment an indicator is added before data loads.
+      if (lastRef.length > 0) {
+        void fetch('/debug/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message:
+            `[overlay:${line.key}] total=${raw.length} in-range=${filtered.length} outside=${outside.length}` +
+            ` | chart: ${new Date(firstCandleTime * 1000).toISOString()} → ${new Date(lastCandleTime * 1000).toISOString()}` +
+            (outside.length > 0 ? ` | outside-range: ${outside.map(v => new Date(v.time * 1000).toISOString()).join(', ')}` : ' | no outside'),
+          }),
+        })
+      }
       s.setData(filtered)
     }
   }, [overlayLines])

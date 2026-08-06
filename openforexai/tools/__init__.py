@@ -15,7 +15,9 @@ from openforexai.tools.market.calculate_indicator import CalculateIndicatorTool
 # ── Register built-in tools ───────────────────────────────────────────────────
 from openforexai.tools.market.chartshot import ChartShotTool
 from openforexai.tools.market.get_candles import GetCandlesTool
+from openforexai.tools.orderbook.get_order import GetOrderTool
 from openforexai.tools.orderbook.get_order_book import GetOrderBookTool
+from openforexai.tools.orderbook.get_order_trace import GetOrderTraceTool
 from openforexai.tools.registry import DEFAULT_REGISTRY, ToolRegistry
 from openforexai.tools.sandbox.candle_marker import CandleMarkerTool
 from openforexai.tools.sandbox.get_annotation import GetAnnotationTool
@@ -23,6 +25,10 @@ from openforexai.tools.sandbox.trade_marker import TradeMarkerTool
 from openforexai.tools.sandbox.zone_marker import ZoneMarkerTool
 from openforexai.tools.system.alarm import RaiseAlarmTool
 from openforexai.tools.system.assessment_memory import AssessmentMemoryTool
+from openforexai.tools.system.get_agent_config import GetAgentConfigTool
+from openforexai.tools.system.get_agent_decisions import GetAgentDecisionsTool
+from openforexai.tools.system.get_ec_config import GetEcConfigTool
+from openforexai.tools.system.get_ec_runs import GetEcRunsTool
 from openforexai.tools.system.get_last_decision import GetLastDecisionTool
 from openforexai.tools.market.session_status import ForexSessionStatusTool
 from openforexai.tools.market.swing_levels import GetSwingLevelsTool
@@ -56,6 +62,12 @@ DEFAULT_REGISTRY.register(ZoneMarkerTool())
 DEFAULT_REGISTRY.register(TradeMarkerTool())
 DEFAULT_REGISTRY.register(CandleMarkerTool())
 DEFAULT_REGISTRY.register(GetAnnotationTool())
+DEFAULT_REGISTRY.register(GetOrderTool())
+DEFAULT_REGISTRY.register(GetOrderTraceTool())
+DEFAULT_REGISTRY.register(GetAgentConfigTool())
+DEFAULT_REGISTRY.register(GetAgentDecisionsTool())
+DEFAULT_REGISTRY.register(GetEcConfigTool())
+DEFAULT_REGISTRY.register(GetEcRunsTool())
 
 __all__ = [
     "DEFAULT_REGISTRY",

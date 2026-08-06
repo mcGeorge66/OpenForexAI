@@ -1,3 +1,5 @@
+import { headingSlug } from './headingSlug'
+
 interface Props {
   content: string
 }
@@ -6,10 +8,6 @@ interface Heading {
   level: number
   text: string
   slug: string
-}
-
-export function headingSlug(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 function parseHeadings(md: string): Heading[] {

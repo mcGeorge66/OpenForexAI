@@ -120,7 +120,6 @@ export function JsonViewer({ data, defaultExpandLevel = 1, emptyText = '(leer)',
       }
     })
     return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery, data, shouldExpandNode])
 
   const isEmpty = useMemo(() => {

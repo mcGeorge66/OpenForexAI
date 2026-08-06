@@ -76,7 +76,7 @@ export function ModuleConfigViewer({ moduleType }: ModuleConfigViewerProps) {
           : undefined
         const relStr = typeof relPath === 'string' && relPath.trim() ? relPath : ''
         const sep = root.includes('\\') ? '\\' : '/'
-        setPathLabel(relStr ? (/^[A-Za-z]:[\\\/]/.test(relStr) ? relStr : (root ? root + sep + relStr.replaceAll('/', sep) : relStr)) : '')
+        setPathLabel(relStr ? (/^[A-Za-z]:[\\/]/.test(relStr) ? relStr : (root ? root + sep + relStr.replaceAll('/', sep) : relStr)) : '')
         setCursor({ line: 1, column: 1 })
         setConfigLoading(false)
       })

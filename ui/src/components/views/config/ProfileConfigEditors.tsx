@@ -9,7 +9,7 @@ import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
 import { LLMChatPanel } from '@/components/common/LLMChatPanel'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
 import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
-import { filterToolsByBlocklist, useSnapshotToolBlocklist } from '@/components/common/SnapshotBlocksPanel'
+import { filterToolsByBlocklist, useSnapshotToolBlocklist } from '@/components/common/snapshotBlocksHelpers'
 
 function CopyButton({ getText }: { getText: () => string }) {
   const [copied, setCopied] = useState(false)
@@ -1790,6 +1790,10 @@ function DecisionPromptTestWindow({
     }
   }
 
+  // Run once when this modal mounts — handleRun is deliberately excluded (it's recreated
+  // every render); including it would re-run the test on every keystroke/state change
+  // instead of once on open.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void handleRun() }, [])
 
   const matched = result?.matched_prompt
@@ -1952,6 +1956,9 @@ export function DecisionPromptConfigEditor() {
     }
   }
 
+  // Load once on mount — load is deliberately excluded (recreated every render);
+  // including it would re-fetch on every state change instead of once on open.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load() }, [])
 
   const persist = async (

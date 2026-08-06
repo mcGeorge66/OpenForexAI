@@ -18,10 +18,10 @@ import { api, type AgentLastInputResponse, type EntityHistoryEntry } from '@/api
 import {
   applyPatch,
   parseResponse,
-  MessageBubble,
   type AssistantMessage,
   type ParsedResponse,
 } from '@/components/common/assistantShared'
+import { MessageBubble } from '@/components/common/MessageBubble'
 
 export interface AgentConfigSummary {
   agent_id: string

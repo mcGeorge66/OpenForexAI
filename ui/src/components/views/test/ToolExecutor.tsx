@@ -302,7 +302,6 @@ export function ToolExecutor() {
   }, [
     tool,
     values,
-    agentId,
     effectiveBrokerContext,
     effectivePairContext,
     isOrderPlacementTool,

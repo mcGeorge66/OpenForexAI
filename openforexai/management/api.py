@@ -3416,6 +3416,145 @@ async def get_orderbook_entry(entry_id: str) -> dict[str, Any]:
     return _serialize_order_book_entry(entry, include_analysis=True)
 
 
+_ORDER_INVESTIGATE_SYSTEM_PROMPT = (
+    "You are a trading-desk investigator helping a human understand ONE specific order/trade "
+    "shown in the Orderbook UI — why it was opened or closed, whether the decision made sense, "
+    "or exactly where in the system's configuration to make a change.\n\n"
+    "The full order record is given below as your starting context (entry/exit prices, P&L, "
+    "the AA analysis that led to opening it, and the close reason/reasoning if closed). Use it "
+    "as your primary source — don't guess at data you already have.\n\n"
+    "If the question needs more than that record, you have read-only tools:\n"
+    "- get_order_trace: this order's causal event history on BOTH sides — 'open_trace' (the "
+    "decision that opened it) and, if closed, 'close_trace'/'closed_by_agent' (the exact "
+    "agent/EventComposer that issued the close — trailing-stop, risk-guard, relay, or an AA "
+    "itself). Open and close are two SEPARATE event chains, not one continuous trace — always "
+    "check both sides of the result.\n"
+    "- get_agent_decisions: an agent's recent decisions (not just its current latest) — use this "
+    "to find the specific decision cycle around a past timestamp, e.g. right before this order's "
+    "close_requested_at, once get_order_trace told you which agent closed it.\n"
+    "- get_agent_config / get_ec_config: the LIVE configuration (system prompt, snapshot/decision "
+    "profile, script, tool config) of a specific agent or EventComposer — use this to tell the "
+    "user exactly which config field to change. This is the CURRENT config, which may differ "
+    "from what was active when this order was placed.\n"
+    "- get_ec_runs: recent run history (input/output, tool calls) for one EventComposer.\n"
+    "- get_order / get_order_book: fetch this or other orders for comparison.\n"
+    "- get_candles / calculate_indicator / get_swing_levels: live market data if relevant.\n\n"
+    "Be concise and specific: cite exact fields/numbers from the data, and when pointing at a "
+    "config change, name the exact agent/EC id and field."
+)
+
+_ORDER_INVESTIGATE_ALLOWED_TOOLS = [
+    "get_order", "get_order_trace", "get_order_book",
+    "get_agent_config", "get_ec_config", "get_ec_runs", "get_agent_decisions",
+    "get_candles", "calculate_indicator", "get_swing_levels",
+]
+
+
+class OrderInvestigateRequest(BaseModel):
+    question: str
+    history: list[PromptWorkbenchMessage] = Field(default_factory=list)
+    llm_name: str | None = None
+    reasoning_effort: str | None = None
+    timeout: float = 60.0
+
+
+class OrderInvestigateResponse(BaseModel):
+    answer: str
+    total_tokens: int = 0
+    executed_tools: list[str] = Field(default_factory=list)
+    tool_events: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+
+
+@router.post("/orderbook/{entry_id}/investigate", response_model=OrderInvestigateResponse)
+async def investigate_order(entry_id: str, req: OrderInvestigateRequest) -> OrderInvestigateResponse:
+    """Ask an LLM free-text questions about one specific order — pre-loaded with its full record
+    (AA analysis, P&L, close reasoning) and given read-only tools to dig further: the causal event
+    chain, the live agent/EC config that produced/closed it, EC run history, and general market
+    data. Same tool-calling Agent pattern as /prompt-workbench/chat, scoped to real order history
+    instead of a simulated candle window — no forced_arguments anchoring needed here.
+    """
+    if _bus is None or _repository is None:
+        raise HTTPException(status_code=503, detail="System not ready")
+
+    entry = await _repository.get_order_book_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Order book entry {entry_id!r} not found")
+    await _reconcile_order_book_entries_with_broker([entry])
+    order_data = _serialize_order_book_entry(entry, include_analysis=True)
+
+    llm_name = _resolve_workbench_llm_name(req)
+    llm_temperature, llm_max_tokens, llm_reasoning_effort = _resolve_workbench_llm_settings(llm_name, req.reasoning_effort)
+
+    from openforexai.agents.agent import Agent
+    from openforexai.models.monitoring import MonitoringEventType
+    from openforexai.services.llm_service import llm_service_id
+    from openforexai.tools.base import ToolContext
+    from openforexai.tools.dispatcher import ToolDispatcher
+    from openforexai.tools.registry import DEFAULT_REGISTRY
+
+    temp_agent_id = f"ORDERINV-{uuid4().hex[:8]}"
+    agent = Agent(agent_id=temp_agent_id, bus=_bus, repository=_repository, monitoring_bus=_monitoring_bus)
+
+    _TOOL_EVENT_TYPES = (
+        MonitoringEventType.TOOL_CALL_STARTED,
+        MonitoringEventType.TOOL_CALL_COMPLETED,
+        MonitoringEventType.TOOL_CALL_FAILED,
+    )
+    mon_queue = _monitoring_bus.subscribe(maxsize=4096) if _monitoring_bus is not None else None
+
+    def _collect_tool_events() -> list[dict[str, Any]]:
+        if mon_queue is None:
+            return []
+        raw_events = _drain_monitoring_queue(mon_queue)
+        return [
+            _serialize_monitoring_event(event)
+            for event in raw_events
+            if event.event_type in _TOOL_EVENT_TYPES and _event_belongs_to_agent(event, temp_agent_id)
+        ]
+
+    try:
+        agent._system_prompt = _ORDER_INVESTIGATE_SYSTEM_PROMPT
+        agent._llm_name = llm_name
+        agent._llm_service_id = llm_service_id(llm_name)
+        agent._llm_temperature = llm_temperature
+        agent._max_tokens = llm_max_tokens
+        agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
+        agent._llm_reasoning_effort = llm_reasoning_effort
+        tool_context = ToolContext(
+            agent_id=temp_agent_id,
+            broker_name=order_data.get("broker_name"),
+            pair=order_data.get("pair"),
+            monitoring_bus=_monitoring_bus, event_bus=_bus,
+        )
+        agent._tool_dispatcher = ToolDispatcher(
+            DEFAULT_REGISTRY, tool_context, {"allowed_tools": _ORDER_INVESTIGATE_ALLOWED_TOOLS},
+        )
+        user_message = (
+            f"=== Order {entry_id} ===\n{json.dumps(order_data, default=str, indent=2)}\n"
+            f"=== End order ===\n\n{req.question}"
+        )
+        history = [{"role": m.role, "content": m.content} for m in req.history]
+        final_text, total_tokens, executed_tool_names = await asyncio.wait_for(
+            agent._run_with_tools(user_message=user_message, trigger="orderbook_investigate", history=history),
+            timeout=req.timeout,
+        )
+        return OrderInvestigateResponse(
+            answer=final_text, total_tokens=total_tokens, executed_tools=executed_tool_names,
+            tool_events=_collect_tool_events(),
+        )
+    except TimeoutError:
+        return OrderInvestigateResponse(
+            answer="", error=f"Timed out after {req.timeout:.0f}s", tool_events=_collect_tool_events(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return OrderInvestigateResponse(answer="", error=str(exc), tool_events=_collect_tool_events())
+    finally:
+        _bus.unregister_agent(temp_agent_id)
+        if mon_queue is not None:
+            _monitoring_bus.unsubscribe(mon_queue)
+
+
 @router.get("/orderbook/{entry_id}/candles")
 async def get_orderbook_entry_candles(
     entry_id: str,

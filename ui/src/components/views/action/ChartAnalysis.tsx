@@ -16,13 +16,15 @@ import {
 import { TF_MINUTES } from '@/utils/indicators'
 import {
   IndicatorsPanel,
+} from '@/components/charts/IndicatorsPanel'
+import {
   INDICATOR_DEFS,
   LINE_STYLE_OPTIONS,
   DEFAULT_COLORS,
   TIMEFRAMES,
   type IndicatorInstance,
   type IndicatorName,
-} from '@/components/charts/IndicatorsPanel'
+} from '@/components/charts/indicatorDefs'
 import { SwingLevelsPanel, type SwingResult } from '@/components/charts/SwingLevelsPanel'
 import type { Drawing, DrawingStyle, DrawingToolName } from '@/components/charts/drawing/types'
 import { REQUIRED_POINTS, TOOL_LABELS } from '@/components/charts/drawing/types'
@@ -463,7 +465,7 @@ export function ChartAnalysis() {
         payload: rec,
       }
     })
-  }, [showAnalyses, analysisRecords, timeframe],
+  }, [showAnalyses, analysisRecords, timeframe, candles],
   )
 
   // ── Chart overlay/oscillator props ─────────────────────────────────────────

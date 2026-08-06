@@ -63,8 +63,9 @@ export function TraceViewer({ eventId, onClose, embedded }: Props) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
+    // No setLoading(true)/setError(null) reset here: callers key this component by eventId
+    // (EventLogView.tsx, Orderbook.tsx) so a new eventId always remounts it fresh — the
+    // useState initializers above already start at loading=true/error=null.
     api.getEventTrace(eventId)
       .then(setEvents)
       .catch(e => setError(String(e)))

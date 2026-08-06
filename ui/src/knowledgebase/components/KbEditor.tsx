@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import type * as Monaco from 'monaco-editor'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
-import { headingSlug } from './TableOfContents'
+import { headingSlug } from './headingSlug'
 import type { KbDocMeta } from '@/api/client'
 import {
   Bold, Italic, Code, Link2, Table, List, ListOrdered,
@@ -66,19 +66,44 @@ function wrap(editor: Monaco.editor.IStandaloneCodeEditor, before: string, after
   insert(editor, `${before}${selected || 'Text'}${after}`)
 }
 
-export function KbEditor({ docId, title, initialContent, onTitleChange, onSave, saving, saved, docs, onNavigate, editorRefCallback }: Props) {
+function ModeBtn({ active, label, icon: Icon, onClick }: { active: boolean; label: string; icon: React.ElementType; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
+        active ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800',
+      ].join(' ')}
+      title={label}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  )
+}
+
+function ToolBtn({ title: t, icon: Icon, onClick }: { title: string; icon: React.ElementType; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center justify-center w-7 h-7 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+      title={t}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  )
+}
+
+export function KbEditor({ title, initialContent, onTitleChange, onSave, saving, saved, docs, onNavigate, editorRefCallback }: Props) {
+  // docId itself isn't read here — KnowledgebaseApp.tsx uses it as this component's `key`
+  // so switching documents remounts it fresh instead of needing an internal reset effect.
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('preview')
   // Preview content is managed locally — never causes parent re-renders
   const [previewContent, setPreviewContent] = useState(initialContent)
 
-  // When docId changes (new document selected), reset Monaco and preview
-  useEffect(() => {
-    setPreviewContent(initialContent)
-    if (editorRef.current) {
-      editorRef.current.setValue(initialContent)
-    }
-  }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // No docId-change effect needed: KnowledgebaseApp.tsx keys this component by docId, so
+  // switching documents remounts it fresh — previewContent's useState(initialContent) and
+  // Monaco's own onMount (which pushes initialContent into the model) already start correct.
 
   // Add "Bild einfügen" to Monaco's right-click context menu
   const setupImagePaste = useCallback((editor: Monaco.editor.IStandaloneCodeEditor) => {
@@ -143,30 +168,13 @@ export function KbEditor({ docId, title, initialContent, onTitleChange, onSave, 
     })
   })()
 
-  const ModeBtn = ({ mode, label, icon: Icon }: { mode: ViewMode; label: string; icon: React.ElementType }) => (
-    <button
-      onClick={() => setViewMode(mode)}
-      className={[
-        'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
-        viewMode === mode ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800',
-      ].join(' ')}
-      title={label}
-    >
-      <Icon className="w-3.5 h-3.5" />
-    </button>
-  )
-
-  const ToolBtn = ({ title: t, icon: Icon, onClick }: { title: string; icon: React.ElementType; onClick: () => void }) => (
-    <button
-      onClick={onClick}
-      className="flex items-center justify-center w-7 h-7 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
-      title={t}
-    >
-      <Icon className="w-3.5 h-3.5" />
-    </button>
-  )
-
   const ed = () => editorRef.current!
+  // Computed once, outside the viewMode-gated blocks below — inlining `viewMode === 'edit'`
+  // etc. directly inside `{viewMode === 'preview' && (...)}` would let TS narrow `viewMode`
+  // to the literal 'preview' there and flag the other two comparisons as always-false.
+  const isEditMode = viewMode === 'edit'
+  const isSplitMode = viewMode === 'split'
+  const isPreviewMode = viewMode === 'preview'
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -220,17 +228,17 @@ export function KbEditor({ docId, title, initialContent, onTitleChange, onSave, 
             <Save className="w-3.5 h-3.5" />
             {saving ? 'Speichern…' : saved ? '✓ Gespeichert' : 'Speichern'}
           </button>
-          <ModeBtn mode="edit" label="Bearbeiten" icon={Edit3} />
-          <ModeBtn mode="split" label="Geteilt" icon={Columns} />
-          <ModeBtn mode="preview" label="Vorschau" icon={Eye} />
+          <ModeBtn active={isEditMode} label="Bearbeiten" icon={Edit3} onClick={() => setViewMode('edit')} />
+          <ModeBtn active={isSplitMode} label="Geteilt" icon={Columns} onClick={() => setViewMode('split')} />
+          <ModeBtn active={isPreviewMode} label="Vorschau" icon={Eye} onClick={() => setViewMode('preview')} />
         </div>
       )}
 
       {viewMode === 'preview' && (
         <div className="flex items-center justify-end gap-1 px-3 py-1 bg-gray-900 border-b border-gray-700 flex-shrink-0 print:hidden">
-          <ModeBtn mode="edit" label="Bearbeiten" icon={Edit3} />
-          <ModeBtn mode="split" label="Geteilt" icon={Columns} />
-          <ModeBtn mode="preview" label="Vorschau" icon={Eye} />
+          <ModeBtn active={isEditMode} label="Bearbeiten" icon={Edit3} onClick={() => setViewMode('edit')} />
+          <ModeBtn active={isSplitMode} label="Geteilt" icon={Columns} onClick={() => setViewMode('split')} />
+          <ModeBtn active={isPreviewMode} label="Vorschau" icon={Eye} onClick={() => setViewMode('preview')} />
         </div>
       )}
 

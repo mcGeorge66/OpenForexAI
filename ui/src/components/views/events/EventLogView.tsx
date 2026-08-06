@@ -293,6 +293,7 @@ export function EventLogView() {
         {traceId && (
           <div className="w-1/2 border-l border-gray-700 overflow-hidden flex flex-col">
             <TraceViewer
+              key={traceId}
               eventId={traceId}
               onClose={() => setTraceId(null)}
               embedded

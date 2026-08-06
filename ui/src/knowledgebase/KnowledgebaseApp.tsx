@@ -255,6 +255,7 @@ export function KnowledgebaseApp() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {activeDoc && !activeDoc.is_folder ? (
             <KbEditor
+              key={activeId}
               docId={activeId ?? ''}
               title={title}
               initialContent={initialContent}

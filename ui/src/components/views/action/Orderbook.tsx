@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TF_MINUTES } from '@/utils/indicators'
 import { useDebounce } from '@/utils/useDebounce'
-import { AlertCircle, Check, Copy, FileText, GitBranch, Loader2, Printer, RefreshCcw, BookOpen, X } from 'lucide-react'
+import { AlertCircle, Bot, Check, Copy, FileText, GitBranch, Loader2, Printer, RefreshCcw, BookOpen, X } from 'lucide-react'
 import { TraceViewer } from '@/components/views/events/TraceViewer'
+import { OrderInvestigateModal } from '@/components/views/action/OrderInvestigateModal'
 import { kbImport } from '@/knowledgebase/kbImport'
 import { formatTs as formatTsCentral } from '@/utils/time'
 
@@ -259,6 +260,7 @@ export function Orderbook() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M5')
   const [analysisOpen, setAnalysisOpen] = useState(false)
   const [traceEntryId, setTraceEntryId] = useState<string | null>(null)
+  const [investigateEntryId, setInvestigateEntryId] = useState<string | null>(null)
   const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>([])
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null)
   const [showAnalyses, setShowAnalyses] = useState(true)
@@ -684,7 +686,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
     } catch (e) {
       setError(`KB Import failed: ${String(e)}`)
     }
-  }, [selectedEntry])
+  }, [selectedEntry, formatAnalysisAsMarkdown])
 
   return (
     <div className="h-full flex flex-col bg-gray-950 text-gray-100">
@@ -848,6 +850,17 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                         >
                           <GitBranch className="w-3.5 h-3.5" />
                           Trace
+                        </button>
+                        <button
+                          onClick={event => {
+                            event.stopPropagation()
+                            setInvestigateEntryId(entry.id)
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-indigo-400 hover:text-indigo-300 text-xs"
+                          title="Ask AI about this order"
+                        >
+                          <Bot className="w-3.5 h-3.5" />
+                          AI
                         </button>
                       </div>
                     </td>
@@ -1055,7 +1068,16 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
       {traceEntryId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-2xl h-[80vh] shadow-xl rounded-lg overflow-hidden">
-            <OrderTraceViewer entryId={traceEntryId} onClose={() => setTraceEntryId(null)} />
+            <OrderTraceViewer key={traceEntryId} entryId={traceEntryId} onClose={() => setTraceEntryId(null)} />
+          </div>
+        </div>
+      )}
+
+      {/* Ask AI modal — tool-calling investigation chat for one order */}
+      {investigateEntryId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-3xl h-[85vh] shadow-xl rounded-lg overflow-hidden">
+            <OrderInvestigateModal orderId={investigateEntryId} onClose={() => setInvestigateEntryId(null)} />
           </div>
         </div>
       )}
@@ -1074,8 +1096,10 @@ function OrderTraceViewer({ entryId, onClose }: { entryId: string; onClose: () =
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
+    // No setLoading(true)/setError(null) reset here: this component is always freshly
+    // mounted per lookup (the modal fully covers the table, so entryId can't change on an
+    // already-mounted instance) — the useState initializers above already start at
+    // loading=true/error=null, matching what a reset would set anyway.
     // Look up events that have this entry ID as their correlation ID
     api.getEvents({ correlation: entryId, limit: 1 })
       .then(events => {
@@ -1136,5 +1160,5 @@ function OrderTraceViewer({ entryId, onClose }: { entryId: string; onClose: () =
     )
   }
 
-  return <TraceViewer eventId={resolvedEventId} onClose={onClose} />
+  return <TraceViewer key={resolvedEventId} eventId={resolvedEventId} onClose={onClose} />
 }

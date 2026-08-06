@@ -664,6 +664,11 @@ export function EventStream({
     if (!activeQuickFilterId) return
     const selected = savedQuickFilters.find(item => item.id === activeQuickFilterId)
     if (!selected) return
+    // Loading a saved filter (selected via SubMenu navigation, a prop from the parent — not
+    // a local event) into several local, independently-editable state slots at once: the
+    // documented "adjusting state when a prop changes" useEffect pattern, not something a
+    // single event handler can own since the trigger lives outside this component.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFilterGroup(cloneFilterGroup(selected.definition))
     setFilterName(selected.name)
     setLoadedFilterId(selected.id)
@@ -1095,7 +1100,11 @@ export function EventStream({
               {formatPayload(evt.event_type, evt.payload)}
             </span>
             <button
-              onClick={e => { e.stopPropagation(); pinnedIds.has(evt.id) ? handleUnpin(evt.id) : handlePin(evt.id) }}
+              onClick={e => {
+                e.stopPropagation()
+                if (pinnedIds.has(evt.id)) handleUnpin(evt.id)
+                else handlePin(evt.id)
+              }}
               title={pinnedIds.has(evt.id) ? 'Unpin event' : 'Pin event'}
               className={`ml-auto flex-shrink-0 transition-colors ${
                 pinnedIds.has(evt.id)

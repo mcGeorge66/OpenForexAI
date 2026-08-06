@@ -22,7 +22,7 @@ export function joinPath(root: string, ...parts: string[]): string {
 export function useProjectRoot(): string {
   const [root, setRoot] = useState(_cached ?? '')
   useEffect(() => {
-    if (_cached) { setRoot(_cached); return }
+    if (_cached) return // already the initial state above — nothing to sync
     fetchRoot().then(setRoot).catch(() => {})
   }, [])
   return root

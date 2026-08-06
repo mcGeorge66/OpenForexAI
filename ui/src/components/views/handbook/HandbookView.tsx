@@ -53,8 +53,12 @@ export function HandbookView() {
       })
   }
 
+  // Load once on mount — initialFile is only read from the URL at this moment (never
+  // meant to react to later URL changes) and loadFile is recreated every render, so
+  // including either would defeat the "just the initial file, once" intent.
   useEffect(() => {
     loadFile(initialFile, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

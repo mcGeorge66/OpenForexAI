@@ -657,7 +657,8 @@ export function AgentChat() {
                       className="flex items-center gap-2 text-xs text-white cursor-pointer select-none"
                       onClick={() => setCollapsedMessages(prev => {
                         const next = new Set(prev)
-                        next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id)
+                        if (next.has(msg.id)) next.delete(msg.id)
+                        else next.add(msg.id)
                         return next
                       })}
                     >
@@ -686,7 +687,8 @@ export function AgentChat() {
                           checked={inHistory}
                           onChange={() => setSelectedForHistory(prev => {
                             const next = new Set(prev)
-                            next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id)
+                            if (next.has(msg.id)) next.delete(msg.id)
+                            else next.add(msg.id)
                             return next
                           })}
                           className="accent-emerald-500 w-3 h-3"

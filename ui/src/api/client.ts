@@ -148,6 +148,8 @@ export const api = {
                     get<CandleBar[]>(
                       `/orderbook/${encodeURIComponent(entryId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
                     ),
+  investigateOrder: (entryId: string, req: OrderInvestigateRequest) =>
+                    post<OrderInvestigateResponse>(`/orderbook/${encodeURIComponent(entryId)}/investigate`, req),
   getCandles: (pair: string, timeframe = 'M5', count = 200, broker_name?: string | null, start?: string | null) => {
                     const q = new URLSearchParams({ pair, timeframe, count: String(count) })
                     if (broker_name) q.set('broker_name', broker_name)
@@ -679,6 +681,26 @@ export interface OrderbookEntryDetail extends OrderbookEntrySummary {
   analysis_text?: string | null
   analysis?: Record<string, unknown> | null
   market_context_snapshot: Record<string, unknown>
+}
+
+// POST /orderbook/{id}/investigate — real tool-calling Agent (same pattern as
+// /prompt-workbench/chat), pre-loaded with this order's full record and given
+// read-only tools (get_order_trace, get_agent_config, get_ec_config, get_ec_runs,
+// get_candles, ...) to dig further than the record alone answers.
+export interface OrderInvestigateRequest {
+  question: string
+  history: LLMAssistantMessage[]
+  llm_name?: string | null
+  reasoning_effort?: string | null
+  timeout?: number
+}
+
+export interface OrderInvestigateResponse {
+  answer: string
+  total_tokens: number
+  executed_tools: string[]
+  tool_events: PromptWorkbenchToolEvent[]
+  error?: string | null
 }
 
 export interface AnalysisRecord {
