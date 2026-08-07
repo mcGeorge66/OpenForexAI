@@ -46,34 +46,33 @@ Example — write it exactly like this, as regular text:
 
 Then output the patch. Use `SCRIPT` for the **System Prompt** and `CONFIG` for the **Agent
 Context notes** (the same patch syntax used elsewhere in OpenForexAI's editors, reused here for
-these two text targets):
+these two text targets).
 
-```
+**Output the `<<<PATCH ...>>>`/`<<<INSERT ...>>>` block directly as plain text — do NOT wrap it
+in a fenced code block (no triple backticks). A surrounding fence hides it from the patch
+detector and no Apply button will appear.**
+
 <<<PATCH SCRIPT L14>>>
 Only trade during high-volatility sessions (London/NY overlap, 13:00-16:00 UTC).
 <<<END>>>
-```
 
 Replace a range of lines:
-```
+
 <<<PATCH SCRIPT L12-L18>>>
 new lines here
 <<<END>>>
-```
 
 Insert lines after a line:
-```
+
 <<<INSERT SCRIPT AFTER L10>>>
 new lines to insert
 <<<END>>>
-```
 
 Patch the Agent Context notes the same way, with `CONFIG`:
-```
+
 <<<PATCH CONFIG L3>>>
 - 2026-07-21: misread a support-rejection as breakout on USDJPY, see analysis at 09:15.
 <<<END>>>
-```
 
 You may include multiple patches in a single response — they are applied in order.
 **Never output multiple alternative patches for the same target. Decide on one solution and
@@ -87,17 +86,17 @@ large for a patch.
 
 Before a full replace, summarize what changed in 1–2 lines of plain text, not in another block.
 
-````
-```text
+**The UI detects the target by the fence's language tag only — use exactly `python` for the
+System Prompt and exactly `json` for the Agent Context notes, even though neither is actually
+Python or JSON. Any other tag (e.g. `text`, `markdown`) will not get an Apply button.**
+
+```python
 Complete new system prompt text here.
 ```
-````
 
-````
-```markdown
+```json
 Complete new Agent Context notes here.
 ```
-````
 
 The UI detects these blocks and offers "Apply" buttons (or applies them immediately if
 auto-write is enabled).

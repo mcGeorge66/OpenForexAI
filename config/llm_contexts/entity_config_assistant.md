@@ -182,33 +182,31 @@ Example — write it exactly like this, as regular text:
   - L02:   pair = (input.get("instrument") or "").strip().upper()
   + L02:   pair = (message.get("instrument") or "").strip().upper()
 
-Then output the patch:
-```
+Then output the patch. **Output the `<<<PATCH ...>>>`/`<<<INSERT ...>>>` block directly as plain
+text — do NOT wrap it in a fenced code block (no triple backticks). A surrounding fence hides it
+from the patch detector and no Apply button will appear.**
+
 <<<PATCH SCRIPT L2>>>
     pair = (message.get("instrument") or "").strip().upper()
 <<<END>>>
-```
 
 Replace a range of lines:
-```
+
 <<<PATCH SCRIPT L12-L18>>>
 new lines here
 <<<END>>>
-```
 
 Insert lines after a line:
-```
+
 <<<INSERT SCRIPT AFTER L10>>>
 new lines to insert
 <<<END>>>
-```
 
 Use `CONFIG` instead of `SCRIPT` to patch the config JSON:
-```
+
 <<<PATCH CONFIG L3>>>
   "min_atr": 0.0010,
 <<<END>>>
-```
 
 You may include multiple patches in a single response — they are applied in order.
 **Never output multiple alternative patches or code blocks for the same target. Decide on one solution and output it once.**

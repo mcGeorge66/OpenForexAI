@@ -63,8 +63,18 @@ export function applyPatch(source: string, patch: PatchBlock): { result: string;
 // ─── Response parser ──────────────────────────────────────────────────────────
 
 export function parseResponse(text: string): ParsedResponse {
-  const triggerRun = text.includes('<<RUN_TEST>>')
-  const work = text.replace(/<<RUN_TEST>>/g, '').trimEnd()
+  // Models sometimes wrap <<<PATCH/INSERT ...>>>...<<<END>>> markers in a ``` fence
+  // (e.g. mimicking the Full-Replace example format). Without this, the fenced-code
+  // alternative below would match first and swallow the whole thing as one inert
+  // "full/text" block — hiding the real patch and its Apply button. Only unwraps
+  // when the ENTIRE fence content is patch/insert blocks, so a genuine code sample
+  // that merely mentions "<<<PATCH" in passing is left alone.
+  const unwrapped = text.replace(
+    /```[\w]*\n((?:\s*<<<(?:PATCH|INSERT)\b[\s\S]*?<<<END>>>\s*)+)```/g,
+    '$1',
+  )
+  const triggerRun = unwrapped.includes('<<RUN_TEST>>')
+  const work = unwrapped.replace(/<<RUN_TEST>>/g, '').trimEnd()
 
   const segments: Segment[] = []
   const RE = /<<<(PATCH|INSERT)\s+(SCRIPT|CONFIG)(?:\s+(?:AFTER\s+)?L(\d+)(?:-L?(\d+))?)?>>>([\s\S]*?)<<<END>>>|```([\w]*)\n([\s\S]*?)```/g
