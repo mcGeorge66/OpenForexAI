@@ -579,16 +579,31 @@ class Agent:
                     if (msg.target_agent_id is not None
                             and msg.target_agent_id != self.agent_id):
                         continue   # not addressed to us
+                    override_llm_name = (
+                        msg.payload.get("llm_name") if isinstance(msg.payload, dict) else None
+                    )
                     # A query expects a response — wait for the lock rather than
                     # skipping, so it never runs concurrently with another cycle
-                    # against the shared ToolContext (pair/extra).
+                    # against the shared ToolContext (pair/extra). The lock also
+                    # makes a temporary LLM override safe: no other cycle can
+                    # observe self._llm_name/_llm_service_id mid-swap.
                     async with self._run_lock:
-                        await self._run_cycle(
-                            trigger=event_val,
-                            payload=msg.payload,
-                            source=msg.source_agent_id,
-                            correlation_id=str(msg.id),
-                        )
+                        saved_llm_name = self._llm_name
+                        saved_llm_service_id = self._llm_service_id
+                        if override_llm_name and override_llm_name in RuntimeRegistry.list_llm():
+                            from openforexai.services.llm_service import llm_service_id
+                            self._llm_name = override_llm_name
+                            self._llm_service_id = llm_service_id(override_llm_name)
+                        try:
+                            await self._run_cycle(
+                                trigger=event_val,
+                                payload=msg.payload,
+                                source=msg.source_agent_id,
+                                correlation_id=str(msg.id),
+                            )
+                        finally:
+                            self._llm_name = saved_llm_name
+                            self._llm_service_id = saved_llm_service_id
                 elif event_val == EventType.AGENT_CONFIG_RESPONSE.value:
                     # Runtime config refresh: re-apply config without restart.
                     try:

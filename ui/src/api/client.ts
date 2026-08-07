@@ -105,8 +105,8 @@ export const api = {
                     get<AgentContextTextResponse>(`/llm-contexts/agent/${encodeURIComponent(agentId)}`),
   saveAgentContext: (agentId: string, text: string) =>
                     put<{ status: string; file: string }>(`/llm-contexts/agent/${encodeURIComponent(agentId)}`, text),
-  askAgent:       (agentId: string, question: string, timeout = 120, history?: Array<{role: string, content: string}>) =>
-                    post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout, ...(history?.length ? { history } : {}) }),
+  askAgent:       (agentId: string, question: string, timeout = 120, history?: Array<{role: string, content: string}>, llmName?: string) =>
+                    post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout, ...(history?.length ? { history } : {}), ...(llmName ? { llm_name: llmName } : {}) }),
   executeAgent:   (agentId: string, body: AgentExecuteRequest) =>
                     post<AgentExecuteResponse>(`/agents/${encodeURIComponent(agentId)}/execute`, body),
   getAgentCandles: (agentId: string, timeframe = 'M5', count = 100) =>
@@ -777,6 +777,7 @@ export interface LLMAssistantChatRequest {
   history: LLMAssistantMessage[]
   context_data?: string
   include_editing_suffix?: boolean
+  llm_name?: string | null
 }
 
 export interface LLMAssistantChatResponse {

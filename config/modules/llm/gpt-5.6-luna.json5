@@ -1,0 +1,18 @@
+{
+  // OpenAI-compatible LLM module, same endpoint/key as azure_azmin, fixed to the
+  // "gpt-5.6-luna" model. Copy of openai_azmin.json5 with only "model" changed —
+  // see that file for field notes.
+  "adapter": "openai",
+  "base_url":    "${OFAI_AZURE-ENDPOINT}",
+  "model":       "gpt-5.6-luna",
+  "api_key":     "${OFAI_AZURE-KEY}",
+  "reasoning_effort": "medium",
+  "retry_attempts": 3,
+  "retry_base_delay": 1.0,
+  "timeout_seconds": 180,
+  "sdk_max_retries": 0,
+  "transcript_enabled": true,
+  "transcript_path": "./logs/gpt-5.6-luna_llm_transcript.log",
+  "temperature": 1.0,
+  "max_tokens": 16384
+}

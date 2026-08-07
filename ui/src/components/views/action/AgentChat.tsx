@@ -177,6 +177,8 @@ export function AgentChat() {
   const { agents, loading: agentsLoading } = useAgents()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string>('')
+  const [llmName, setLlmName] = useState('')
+  const [availableLlmNames, setAvailableLlmNames] = useState<string[]>([])
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sending, setSending] = useState(false)
@@ -223,6 +225,12 @@ export function AgentChat() {
   const splitRef = useRef<HTMLDivElement | null>(null)
   const isDragging = useRef(false)
   const [leftWidthPct, setLeftWidthPct] = useState(50)
+
+  useEffect(() => {
+    api.getModuleNames('llm')
+      .then(resp => setAvailableLlmNames(resp.names))
+      .catch(() => setAvailableLlmNames([]))
+  }, [])
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -419,6 +427,7 @@ export function AgentChat() {
           question,
           history,
           include_editing_suffix: false,
+          ...(llmName ? { llm_name: llmName } : {}),
         })
         const assistantMsg: ChatMessage = {
           id: `a-${Date.now()}`,
@@ -431,7 +440,7 @@ export function AgentChat() {
         return
       }
 
-      const resp = await api.askAgent(selectedAgent, question, timeout, history.length ? history : undefined)
+      const resp = await api.askAgent(selectedAgent, question, timeout, history.length ? history : undefined, llmName || undefined)
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
@@ -591,6 +600,19 @@ export function AgentChat() {
                 <option value="">Chat</option>
                 {agents.map(a => (
                   <option key={a.agent_id} value={a.agent_id}>{a.agent_id}</option>
+                ))}
+              </select>
+
+              <label className="text-xs text-white flex-shrink-0 ml-4">Model:</label>
+              <select
+                value={llmName}
+                onChange={e => setLlmName(e.target.value)}
+                title="Override the LLM model used for this question only (leave on auto to use the agent's/assistant's configured default)"
+                className="bg-gray-800 text-gray-200 text-sm rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">— auto —</option>
+                {availableLlmNames.map(name => (
+                  <option key={name} value={name}>{name}</option>
                 ))}
               </select>
 

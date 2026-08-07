@@ -126,6 +126,7 @@ _runtime_composer_tasks: dict[str, asyncio.Task] = {}
 _active_agents: dict[str, Any] = {}
 _active_composers: dict[str, Any] = {}
 _llm_services: dict[str, Any] = {}   # module_name → LLMService
+_runtime_llm_service_tasks: dict[str, asyncio.Task] = {}   # module_name → LLMService.run() task, for modules (re)loaded after startup
 _start_time: float = time.monotonic()
 
 _update_task: asyncio.Task | None = None
@@ -1400,6 +1401,12 @@ class AgentQueryRequest(BaseModel):
     history: list[dict[str, str]] = Field(
         default_factory=list,
         description="Optional prior conversation turns [{role, content}] prepended before the question",
+    )
+    llm_name: str | None = Field(
+        default=None,
+        description="Override the agent's configured LLM module for this question only "
+                    "(must be a name registered under modules.llm). Leave unset to use the "
+                    "agent's own configured model.",
     )
 
 
@@ -2793,6 +2800,10 @@ def _resolve_workbench_llm_name(req: PromptWorkbenchChatRequest) -> str:
     llm_names = RuntimeRegistry.list_llm()
     if not llm_names:
         raise HTTPException(status_code=503, detail="No LLM provider available")
+    assistant_cfg = _system_config.get("llm_assistant", {}) if isinstance(_system_config, dict) else {}
+    default_name = assistant_cfg.get("provider") if isinstance(assistant_cfg, dict) else None
+    if isinstance(default_name, str) and default_name.strip() and default_name.strip() in llm_names:
+        return default_name.strip()
     return llm_names[0]
 
 
@@ -3667,6 +3678,7 @@ async def ask_agent(agent_id: str, req: AgentQueryRequest) -> AgentQueryResponse
             "question": req.question,
             "history": req.history,
             "source": "management_api",
+            "llm_name": req.llm_name,
         },
     )
     future_key = str(query_msg.id)
@@ -4921,6 +4933,74 @@ async def _apply_runtime_composer_changes(previous_system_config: dict[str, Any]
     return {"started": started, "stopped": stopped, "refresh": refresh}
 
 
+def _reload_llm_module(name: str, cfg_path: Path) -> None:
+    """(Re)instantiate one LLM module and swap it into RuntimeRegistry + the bus.
+
+    Mirrors bootstrap.py's LLM-loading block exactly (adapter resolution,
+    from_config, RuntimeRegistry.register_llm), plus starting/restarting its
+    LLMService bus loop — the piece bootstrap does separately in main.py.
+    Called both when a brand-new module name appears in modules.llm (via
+    /config/system) and when an existing module's own file is edited (via
+    /config/modules/llm/{name}/raw) — either way the running system must
+    reflect the new model/settings without a restart.
+    """
+    from openforexai.config.json_loader import load_json_config
+    from openforexai.registry.plugin_registry import PluginRegistry
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+    from openforexai.services.llm_service import LLMService
+
+    llm_mod = load_json_config(cfg_path)
+    adapter = llm_mod.get("adapter", name)
+    LLMClass = PluginRegistry.get_llm_provider(adapter)
+    llm_instance = LLMClass.from_config(llm_mod)
+    RuntimeRegistry.register_llm(name, llm_instance)
+
+    # Cancel any previous runtime-started service loop for this name before
+    # starting a new one — LLMService.__init__ -> bus.register_member() returns
+    # the SAME queue for an already-registered id, so an old and new service
+    # loop both pulling from it concurrently would randomly split requests
+    # between the stale and fresh model instances.
+    old_task = _runtime_llm_service_tasks.pop(name, None)
+    if old_task is not None:
+        old_task.cancel()
+
+    svc = LLMService(module_name=name, llm=llm_instance, bus=_bus)
+    task = asyncio.create_task(svc.run(), name=f"runtime:llm-service:{name}")
+    _runtime_llm_service_tasks[name] = task
+    _llm_services[name] = svc
+
+
+async def _apply_runtime_llm_module_changes(previous_system_config: dict[str, Any]) -> dict[str, Any]:
+    """Instantiate any LLM module newly added to modules.llm, without a restart."""
+    if _bus is None:
+        return {"started": 0}
+
+    prev_modules = previous_system_config.get("modules", {}) if isinstance(previous_system_config, dict) else {}
+    prev_llm = prev_modules.get("llm", {}) if isinstance(prev_modules, dict) else {}
+    next_modules = _system_config.get("modules", {}) if isinstance(_system_config, dict) else {}
+    next_llm = next_modules.get("llm", {}) if isinstance(next_modules, dict) else {}
+
+    from openforexai.registry.runtime_registry import RuntimeRegistry
+    already_registered = set(RuntimeRegistry.list_llm())
+    to_start = sorted(
+        name for name, path in next_llm.items()
+        if isinstance(path, str) and path.strip() and (name not in prev_llm or name not in already_registered)
+    )
+
+    started = 0
+    errors: dict[str, str] = {}
+    for name in to_start:
+        try:
+            _reload_llm_module(name, _project_root() / next_llm[name])
+            started += 1
+        except Exception as exc:
+            errors[name] = f"{type(exc).__name__}: {exc}"
+    result: dict[str, Any] = {"started": started}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 async def _apply_runtime_agent_changes(previous_system_config: dict[str, Any]) -> dict[str, Any]:
     """Start newly enabled agents and stop dynamically started disabled ones."""
     if _bus is None or _data_container is None or _repository is None:
@@ -4998,11 +5078,13 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
         _config_service.update_config(_system_config)
     _apply_monitoring_detail_level()
 
+    llm_module_apply = await _apply_runtime_llm_module_changes(previous_system_config)
     runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
     composer_apply = await _apply_runtime_composer_changes(previous_system_config)
     return {
         "status": "saved",
         "file": "config/system.json5",
+        "llm_module_apply": llm_module_apply,
         "runtime_apply": runtime_apply,
         "composer_apply": composer_apply,
     }
@@ -5400,10 +5482,19 @@ async def get_module_config_raw_text(module_type: str, name: str) -> dict[str, s
 
 @router.put("/config/modules/{module_type}/{name}/raw")
 async def save_module_config_raw(module_type: str, name: str, content: dict[str, Any] | str) -> dict:
-    """Save a raw single module config file."""
+    """Save a raw single module config file and, for LLM modules, hot-swap the
+    live adapter instance so edits (model, temperature, ...) apply immediately.
+    """
     cfg_path = _resolve_module_config_path(module_type, name)
     _write_json_file(cfg_path, content)
-    return {"status": "saved", "file": str(cfg_path)}
+    result: dict[str, Any] = {"status": "saved", "file": str(cfg_path)}
+    if module_type == "llm" and _bus is not None:
+        try:
+            _reload_llm_module(name, cfg_path)
+            result["reloaded"] = True
+        except Exception as exc:
+            result["reload_error"] = f"{type(exc).__name__}: {exc}"
+    return result
 
 
 # â"€â"€ Frontend debug log â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -5606,6 +5697,11 @@ class LLMAssistantChatRequest(BaseModel):
                     "config editing) to the system prompt. Set False for plain conversational "
                     "contexts that are not editing anything (e.g. the general Chat context).",
     )
+    llm_name: str | None = Field(
+        default=None,
+        description="Override the assistant's configured LLM module for this question only. "
+                    "Leave unset to use llm_assistant.provider from system config.",
+    )
 
 class LLMAssistantChatResponse(BaseModel):
     answer: str
@@ -5639,12 +5735,14 @@ def _resolve_file_refs(text: str) -> str:
 _ASSISTANT_DEFAULT_REASONING_EFFORT = "low"
 
 
-def _resolve_assistant_llm():
+def _resolve_assistant_llm(llm_name_override: str | None = None):
     """Return (llm_instance, call_kwargs) for the assistant.
 
     Reads system.json5 -> llm_assistant for provider selection and optional
     parameter overrides (temperature, reasoning_effort, max_tokens).
-    Falls back to first registered LLM when provider is not set or not found.
+    llm_name_override (a per-request llm_name from the caller) takes precedence
+    over the configured provider — used for the "on the fly" model picker in
+    Action Chat. Falls back to first registered LLM when neither resolves.
     Only non-None config values are forwarded to llm.complete() so the
     provider's own defaults remain in effect for anything not configured here —
     except reasoning_effort, which defaults to "low" for the assistant
@@ -5660,7 +5758,8 @@ def _resolve_assistant_llm():
             assistant_cfg = raw
 
     provider_name: str | None = (
-        str(assistant_cfg["provider"]) if assistant_cfg.get("provider") else None
+        llm_name_override.strip() if llm_name_override and llm_name_override.strip()
+        else (str(assistant_cfg["provider"]) if assistant_cfg.get("provider") else None)
     )
     llm = None
     if provider_name:
@@ -5732,7 +5831,7 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
     user_message = context_block + "\n".join(conversation_parts)
 
     try:
-        llm, call_kwargs = _resolve_assistant_llm()
+        llm, call_kwargs = _resolve_assistant_llm(req.llm_name)
         response = await llm.complete(
             system_prompt=system_prompt,
             user_message=user_message,
