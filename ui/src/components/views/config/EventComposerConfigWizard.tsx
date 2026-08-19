@@ -7,11 +7,10 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Clock, Copy, Download, MessageSquare, Save, Trash2, Plus, Play } from 'lucide-react'
+import { Bot, ChevronDown, ChevronRight, Clock, Copy, Download, Save, Trash2, Plus, Play } from 'lucide-react'
 import { api, type ToolInfo, type ECExecuteResponse } from '@/api/client'
 import { ScriptEditor } from '@/components/common/ScriptEditor'
 import { Json5MonacoEditor } from '@/components/common/Json5MonacoEditor'
-import { AiAssistantModal } from '@/components/common/AiAssistantModal'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { EntityAssistantPanel } from '@/components/common/EntityAssistantPanel'
 import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
@@ -192,6 +191,7 @@ export function EventComposerConfigWizard() {
   const [isNew, setIsNew] = useState(false)
 
   // Script/Config tab state
+  const [outerTab, setOuterTab] = useState<'editor' | 'assistant'>('editor')
   const [activeTab, setActiveTab] = useState<'script' | 'config' | 'test'>('script')
   const [triggersOpen, setTriggersOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -223,7 +223,6 @@ export function EventComposerConfigWizard() {
       setExampleLoading(null)
     }
   }
-  const [aiAssistantOpen, setAiAssistantOpen] = useState(false)
   const [testModalOpen, setTestModalOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
 
@@ -497,14 +496,6 @@ export function EventComposerConfigWizard() {
                 >
                   <Play className="w-3.5 h-3.5" />
                   Test Event
-                </button>
-                <button
-                  onClick={() => setAiAssistantOpen(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors border border-indigo-500/40"
-                  title="AI Assistant"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  AI Assistant
                 </button>
                 {!isNew && (
                   <button
@@ -807,20 +798,52 @@ export function EventComposerConfigWizard() {
             </section>
 
 
-            {/* Entity Assistant */}
-            <EntityAssistantPanel
-              script={editForm.script}
-              configJson={editForm.config_json}
-              allowedTools={editForm.allowed_tools}
-              testInput={testInput}
-              testResult={testResult}
-              snapshotProfile={editForm.snapshot_profile}
-              onApplyScript={v => setField('script', v)}
-              onApplyConfig={v => setField('config_json', v)}
-              onRunTest={handleTest}
-            />
+            {/* Outer Editor / LLM Assistant tabs */}
+            <div className="flex items-center gap-1 border-b border-gray-700">
+              <button
+                onClick={() => setOuterTab('editor')}
+                className={[
+                  'px-3 py-1.5 text-xs transition-colors',
+                  outerTab === 'editor'
+                    ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                    : 'text-white hover:text-gray-300',
+                ].join(' ')}
+              >
+                Editor
+              </button>
+              <button
+                onClick={() => setOuterTab('assistant')}
+                className={[
+                  'px-3 py-1.5 text-xs transition-colors flex items-center gap-1',
+                  outerTab === 'assistant'
+                    ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                    : 'text-white hover:text-gray-300',
+                ].join(' ')}
+              >
+                <Bot className="w-3 h-3" />
+                LLM Assistant
+              </button>
+            </div>
 
-            {/* Script + Config tabs */}
+            {/* Always mounted (never unmounted on tab switch) so the chat history
+                survives switching to Editor and back — only hidden via CSS, same
+                convention as SystemPromptEditorModal's PromptAssistantPanel tab. */}
+            <div className={outerTab === 'assistant' ? '' : 'hidden'} style={{ height: 480 }}>
+              <EntityAssistantPanel
+                script={editForm.script}
+                configJson={editForm.config_json}
+                allowedTools={editForm.allowed_tools}
+                testInput={testInput}
+                testResult={testResult}
+                snapshotProfile={editForm.snapshot_profile}
+                entityConfig={editForm}
+                onApplyScript={v => setField('script', v)}
+                onApplyConfig={v => setField('config_json', v)}
+                onRunTest={handleTest}
+              />
+            </div>
+
+            {outerTab === 'editor' && (
             <section className="space-y-2">
               <div className="flex items-center gap-1 border-b border-gray-700">
                 <button
@@ -1013,7 +1036,7 @@ export function EventComposerConfigWizard() {
                 </div>
               )}
             </section>
-
+            )}
 
           </div>
         </div>
@@ -1037,16 +1060,6 @@ export function EventComposerConfigWizard() {
         entityType="event_composer"
         entityId={editForm.ec_id}
         onClose={() => setHistoryOpen(false)}
-      />
-    )}
-
-    {aiAssistantOpen && (
-      <AiAssistantModal
-        title="AI Assistant — Entity Config"
-        contextFile="entity_config_assistant.md"
-        contextData={editForm ? JSON.stringify(editForm, null, 2) : undefined}
-        contextDataLabel={editForm?.ec_id || 'new entity'}
-        onClose={() => setAiAssistantOpen(false)}
       />
     )}
     </>

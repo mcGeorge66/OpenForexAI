@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import { Check, Copy, Pencil, FlaskConical, AlertTriangle } from 'lucide-react'
-import { applyPatch, parseResponse, renderInlineText, type AssistantMessage } from './assistantShared'
+import { applyDiffHunk, applyPatch, parseResponse, renderInlineText, type AssistantMessage } from './assistantShared'
 
 export interface MessageBubbleProps {
   msg: AssistantMessage
@@ -120,6 +120,49 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
                   </div>
                 </div>
                 <pre className="px-3 py-2 text-[11px] font-mono text-indigo-300 overflow-x-auto whitespace-pre bg-gray-950">{block.code}</pre>
+                {patchErrors[i] && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-red-400 bg-red-900/20 border-t border-red-800/40">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />{patchErrors[i]}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          if (seg.type === 'diffhunk') {
+            const { block } = seg
+            const targetLabel = block.target === 'script' ? 'Script' : 'Config'
+            const canApply = block.target === 'script' || (block.target === 'config' && !!onApplyConfig)
+
+            return (
+              <div key={i} className="rounded border border-indigo-800/60 overflow-hidden">
+                <div className="flex items-center justify-between px-2 py-1 bg-gray-900 border-b border-indigo-800/40">
+                  <span className="text-[10px] font-mono text-indigo-400">diff {targetLabel}</span>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => { void navigator.clipboard.writeText(block.replaceText).then(() => markCopied(i)) }}
+                      className="flex items-center gap-1 text-[10px] text-white hover:text-gray-300 transition-colors">
+                      {copied[i] ? <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Copied</span></> : <><Copy className="w-3 h-3" />Copy</>}
+                    </button>
+                    {canApply && !autoWrite && (
+                      <button type="button" onClick={() => {
+                        const source = block.target === 'script' ? currentScript : currentConfig
+                        const { result, error } = applyDiffHunk(source, block)
+                        if (error) { setPatchErrors(s => ({ ...s, [i]: error })); return }
+                        if (block.target === 'script') onApplyScript(result)
+                        if (block.target === 'config') onApplyConfig?.(result)
+                        markApplied(i)
+                        setPatchErrors(s => { const n = { ...s }; delete n[i]; return n })
+                      }} className="flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 border border-indigo-700 rounded px-1.5 py-0.5 transition-colors">
+                        {applied[i] ? <><Check className="w-3 h-3" />Applied</> : <><Pencil className="w-3 h-3" />Apply diff</>}
+                      </button>
+                    )}
+                    {canApply && autoWrite && <span className="text-[10px] text-indigo-400 italic">auto-applied</span>}
+                  </div>
+                </div>
+                <pre className="px-3 py-2 text-[11px] font-mono overflow-x-auto whitespace-pre bg-gray-950">
+                  {block.searchText.split('\n').map((l, li) => <div key={`s${li}`} className="text-red-400">{`- ${l}`}</div>)}
+                  {block.replaceText.split('\n').map((l, li) => <div key={`r${li}`} className="text-emerald-400">{`+ ${l}`}</div>)}
+                </pre>
                 {patchErrors[i] && (
                   <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-red-400 bg-red-900/20 border-t border-red-800/40">
                     <AlertTriangle className="w-3 h-3 flex-shrink-0" />{patchErrors[i]}

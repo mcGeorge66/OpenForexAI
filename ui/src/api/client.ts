@@ -778,10 +778,22 @@ export interface LLMAssistantChatRequest {
   context_data?: string
   include_editing_suffix?: boolean
   llm_name?: string | null
+  /** Offer propose_patch/propose_full_replace tools so the model returns structured change
+   *  proposals instead of free-text markup. Only set true for callers that render/apply them. */
+  allow_change_proposals?: boolean
+}
+
+export interface LLMAssistantProposal {
+  type: 'patch' | 'full'
+  target: 'script' | 'config'
+  search_text?: string | null
+  replace_text?: string | null
+  content?: string | null
 }
 
 export interface LLMAssistantChatResponse {
   answer: string
+  proposals?: LLMAssistantProposal[]
   error?: string
 }
 

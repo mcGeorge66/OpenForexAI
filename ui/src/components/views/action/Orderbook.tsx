@@ -1073,13 +1073,11 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
         </div>
       )}
 
-      {/* Ask AI modal — tool-calling investigation chat for one order */}
+      {/* Ask AI window — tool-calling investigation chat for one order. Free-floating
+          (drag/resize itself) rather than a centered backdrop modal, so it doesn't
+          block the Orderbook behind it. */}
       {investigateEntryId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-3xl h-[85vh] shadow-xl rounded-lg overflow-hidden">
-            <OrderInvestigateModal orderId={investigateEntryId} onClose={() => setInvestigateEntryId(null)} />
-          </div>
-        </div>
+        <OrderInvestigateModal key={investigateEntryId} orderId={investigateEntryId} onClose={() => setInvestigateEntryId(null)} />
       )}
     </div>
   )

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MonacoEditor, { type Monaco } from '@monaco-editor/react'
 import type { editor as MonacoEditorNS } from 'monaco-editor'
-import { BookOpen, Check, Copy, Maximize2, X } from 'lucide-react'
+import { Bot, BookOpen, Check, Copy, Maximize2, X } from 'lucide-react'
 import { SnippetLibraryModal } from '@/components/common/SnippetLibraryModal'
 import { ScriptAssistantPanel } from '@/components/common/ScriptAssistantPanel'
 import { api } from '@/api/client'
@@ -109,10 +109,6 @@ interface ExpandedEditorModalProps {
   contextData?: string
 }
 
-const PANEL_MIN_HEIGHT = 80
-const PANEL_MAX_HEIGHT = 600
-const PANEL_DEFAULT_HEIGHT = 280
-
 function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetScope = 'script', contextFile, contextData }: ExpandedEditorModalProps) {
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<Monaco | null>(null)
@@ -120,32 +116,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
   const [localValue, setLocalValue] = useState(initialValue)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })
-  const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT_HEIGHT)
-  const dragStartY = useRef<number | null>(null)
-  const dragStartHeight = useRef<number>(PANEL_DEFAULT_HEIGHT)
-
-  const onDragHandleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    dragStartY.current = e.clientY
-    dragStartHeight.current = panelHeight
-  }, [panelHeight])
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (dragStartY.current === null) return
-      // dragging up = increasing panel height
-      const delta = dragStartY.current - e.clientY
-      const next = Math.min(PANEL_MAX_HEIGHT, Math.max(PANEL_MIN_HEIGHT, dragStartHeight.current + delta))
-      setPanelHeight(next)
-    }
-    const onMouseUp = () => { dragStartY.current = null }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [])
+  const [tab, setTab] = useState<'editor' | 'assistant'>('editor')
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -210,74 +181,102 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
             onClose={onClose}
           />
 
-          {/* Keyboard shortcut hints */}
-          <div className="flex items-center gap-4 px-3 py-1 bg-gray-950/60 border-b border-gray-700/50 text-[10px] text-gray-300 select-none overflow-x-auto flex-shrink-0">
-            {([
-              ['Ctrl+F', 'Find'],
-              ['Ctrl+H', 'Replace'],
-              ['Ctrl+/', 'Comment'],
-              ['Ctrl+D', 'Select next'],
-              ['Alt+↑↓', 'Move line'],
-              ['Ctrl+Z', 'Undo'],
-              ['Ctrl+Y', 'Redo'],
-            ] as [string, string][]).map(([key, label]) => (
-              <span key={key} className="flex items-center gap-1 whitespace-nowrap">
-                <kbd className="font-mono bg-gray-800 border border-gray-700 rounded px-1 py-px text-gray-300 text-[9px]">{key}</kbd>
-                <span>{label}</span>
-              </span>
-            ))}
-          </div>
+          {contextFile && (
+            <div className="flex items-center gap-1 px-2 pt-1.5 bg-gray-900/60 border-b border-gray-700/50 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setTab('editor')}
+                className={[
+                  'px-3 py-1.5 text-xs transition-colors',
+                  tab === 'editor'
+                    ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                    : 'text-white hover:text-gray-300',
+                ].join(' ')}
+              >
+                Editor
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('assistant')}
+                className={[
+                  'px-3 py-1.5 text-xs transition-colors flex items-center gap-1',
+                  tab === 'assistant'
+                    ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                    : 'text-white hover:text-gray-300',
+                ].join(' ')}
+              >
+                <Bot className="w-3 h-3" />
+                LLM Assistant
+              </button>
+            </div>
+          )}
 
-          <div className="flex-1 min-h-0">
-            <MonacoEditor
-              height="100%"
-              defaultLanguage="python"
-              theme="vs-dark"
-              value={localValue}
-              onChange={v => setLocalValue(v ?? '')}
-              onMount={(editor, monaco) => {
-                editorRef.current = editor
-                monacoRef.current = monaco
-                editor.focus()
-                editor.onDidChangeCursorPosition(e => {
-                  setCursorPos({ line: e.position.lineNumber, col: e.position.column })
-                })
-              }}
-              options={{
-                minimap: { enabled: true },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                tabSize: 4,
-                insertSpaces: true,
-                automaticLayout: true,
-                scrollbar: { vertical: 'auto', horizontal: 'auto' },
-                overviewRulerLanes: 0,
-                renderLineHighlight: 'line',
-                folding: true,
-                foldingStrategy: 'indentation',
-                showFoldingControls: 'always',
-              }}
-            />
+          {/* Both tabs stay mounted (only hidden via CSS) — Monaco keeps its editorRef
+              valid for Apply/Cancel regardless of active tab, and the assistant's chat
+              history survives switching back to Editor and forth. */}
+          <div className={tab === 'editor' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+            {/* Keyboard shortcut hints */}
+            <div className="flex items-center gap-4 px-3 py-1 bg-gray-950/60 border-b border-gray-700/50 text-[10px] text-gray-300 select-none overflow-x-auto flex-shrink-0">
+              {([
+                ['Ctrl+F', 'Find'],
+                ['Ctrl+H', 'Replace'],
+                ['Ctrl+/', 'Comment'],
+                ['Ctrl+D', 'Select next'],
+                ['Alt+↑↓', 'Move line'],
+                ['Ctrl+Z', 'Undo'],
+                ['Ctrl+Y', 'Redo'],
+              ] as [string, string][]).map(([key, label]) => (
+                <span key={key} className="flex items-center gap-1 whitespace-nowrap">
+                  <kbd className="font-mono bg-gray-800 border border-gray-700 rounded px-1 py-px text-gray-300 text-[9px]">{key}</kbd>
+                  <span>{label}</span>
+                </span>
+              ))}
+            </div>
+
+            <div className="flex-1 min-h-0">
+              <MonacoEditor
+                height="100%"
+                defaultLanguage="python"
+                theme="vs-dark"
+                value={localValue}
+                onChange={v => setLocalValue(v ?? '')}
+                onMount={(editor, monaco) => {
+                  editorRef.current = editor
+                  monacoRef.current = monaco
+                  editor.focus()
+                  editor.onDidChangeCursorPosition(e => {
+                    setCursorPos({ line: e.position.lineNumber, col: e.position.column })
+                  })
+                }}
+                options={{
+                  minimap: { enabled: true },
+                  fontSize: 13,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  tabSize: 4,
+                  insertSpaces: true,
+                  automaticLayout: true,
+                  scrollbar: { vertical: 'auto', horizontal: 'auto' },
+                  overviewRulerLanes: 0,
+                  renderLineHighlight: 'line',
+                  folding: true,
+                  foldingStrategy: 'indentation',
+                  showFoldingControls: 'always',
+                }}
+              />
+            </div>
           </div>
 
           {contextFile && (
-            <>
-              {/* Drag handle */}
-              <div
-                onMouseDown={onDragHandleMouseDown}
-                className="flex-shrink-0 h-1.5 bg-gray-700 hover:bg-indigo-600 cursor-row-resize transition-colors select-none"
-                title="Drag to resize assistant panel"
-              />
+            <div className={tab === 'assistant' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               <ScriptAssistantPanel
                 code={localValue}
                 contextFile={contextFile}
                 contextData={contextData}
                 onApplyCode={v => { setLocalValue(v); editorRef.current?.getModel()?.setValue(v) }}
-                height={panelHeight}
               />
-            </>
+            </div>
           )}
 
           <div className="flex items-center justify-between gap-2 px-4 py-2 bg-gray-800/80 border-t border-gray-700">

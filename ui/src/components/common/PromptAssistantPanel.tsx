@@ -16,8 +16,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Bot, Check, CornerDownLeft, Loader2, Pencil, Search, Trash2, X } from 'lucide-react'
 import { api, type AgentLastInputResponse, type EntityHistoryEntry } from '@/api/client'
 import {
+  applyDiffHunk,
   applyPatch,
-  parseResponse,
+  buildParsedResponse,
   type AssistantMessage,
   type ParsedResponse,
 } from '@/components/common/assistantShared'
@@ -186,6 +187,14 @@ export function PromptAssistantPanel({
         if (seg.block.target === 'script') onApplySystemPromptRef.current(result)
         if (seg.block.target === 'config') onApplyAgentContextRef.current(result)
       }
+      if (seg.type === 'diffhunk') {
+        const source = seg.block.target === 'script' ? systemPromptRef.current : agentContextRef.current
+        const { result, error } = applyDiffHunk(source, seg.block)
+        if (!error) {
+          if (seg.block.target === 'script') onApplySystemPromptRef.current(result)
+          if (seg.block.target === 'config') onApplyAgentContextRef.current(result)
+        }
+      }
     }
   }
 
@@ -203,9 +212,10 @@ export function PromptAssistantPanel({
         question,
         history: historyRef.current.map(({ role, content }) => ({ role, content })),
         context_data: buildContextData(),
+        allow_change_proposals: true,
       })
       if (resp.error) { setError(resp.error); return }
-      const parsed = parseResponse(resp.answer)
+      const parsed = buildParsedResponse(resp.answer, resp.proposals)
       if (autoWriteRef.current) autoApplyParsed(parsed)
       appendMessage({ role: 'assistant', content: resp.answer, parsed })
     } catch (e: unknown) {

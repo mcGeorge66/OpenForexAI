@@ -47,7 +47,7 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import json5
@@ -3427,32 +3427,21 @@ async def get_orderbook_entry(entry_id: str) -> dict[str, Any]:
     return _serialize_order_book_entry(entry, include_analysis=True)
 
 
-_ORDER_INVESTIGATE_SYSTEM_PROMPT = (
-    "You are a trading-desk investigator helping a human understand ONE specific order/trade "
-    "shown in the Orderbook UI — why it was opened or closed, whether the decision made sense, "
-    "or exactly where in the system's configuration to make a change.\n\n"
-    "The full order record is given below as your starting context (entry/exit prices, P&L, "
-    "the AA analysis that led to opening it, and the close reason/reasoning if closed). Use it "
-    "as your primary source — don't guess at data you already have.\n\n"
-    "If the question needs more than that record, you have read-only tools:\n"
-    "- get_order_trace: this order's causal event history on BOTH sides — 'open_trace' (the "
-    "decision that opened it) and, if closed, 'close_trace'/'closed_by_agent' (the exact "
-    "agent/EventComposer that issued the close — trailing-stop, risk-guard, relay, or an AA "
-    "itself). Open and close are two SEPARATE event chains, not one continuous trace — always "
-    "check both sides of the result.\n"
-    "- get_agent_decisions: an agent's recent decisions (not just its current latest) — use this "
-    "to find the specific decision cycle around a past timestamp, e.g. right before this order's "
-    "close_requested_at, once get_order_trace told you which agent closed it.\n"
-    "- get_agent_config / get_ec_config: the LIVE configuration (system prompt, snapshot/decision "
-    "profile, script, tool config) of a specific agent or EventComposer — use this to tell the "
-    "user exactly which config field to change. This is the CURRENT config, which may differ "
-    "from what was active when this order was placed.\n"
-    "- get_ec_runs: recent run history (input/output, tool calls) for one EventComposer.\n"
-    "- get_order / get_order_book: fetch this or other orders for comparison.\n"
-    "- get_candles / calculate_indicator / get_swing_levels: live market data if relevant.\n\n"
-    "Be concise and specific: cite exact fields/numbers from the data, and when pointing at a "
-    "config change, name the exact agent/EC id and field."
-)
+_ORDER_INVESTIGATE_CONTEXT_FILE = "order_investigate_system_prompt.md"
+
+
+def _load_order_investigate_system_prompt() -> str:
+    """Fresh-read per request (no cache) — same convention as llm_assistant_chat's
+    context files, so this prompt can be edited under Config -> AI-Assistant
+    without a restart, instead of being a hardcoded Python string.
+    """
+    ctx_path = _project_root() / "config" / "llm_contexts" / _ORDER_INVESTIGATE_CONTEXT_FILE
+    if not ctx_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Context file not found: config/llm_contexts/{_ORDER_INVESTIGATE_CONTEXT_FILE}",
+        )
+    return ctx_path.read_text(encoding="utf-8")
 
 _ORDER_INVESTIGATE_ALLOWED_TOOLS = [
     "get_order", "get_order_trace", "get_order_book",
@@ -3525,7 +3514,7 @@ async def investigate_order(entry_id: str, req: OrderInvestigateRequest) -> Orde
         ]
 
     try:
-        agent._system_prompt = _ORDER_INVESTIGATE_SYSTEM_PROMPT
+        agent._system_prompt = _load_order_investigate_system_prompt()
         agent._llm_name = llm_name
         agent._llm_service_id = llm_service_id(llm_name)
         agent._llm_temperature = llm_temperature
@@ -5702,9 +5691,25 @@ class LLMAssistantChatRequest(BaseModel):
         description="Override the assistant's configured LLM module for this question only. "
                     "Leave unset to use llm_assistant.provider from system config.",
     )
+    allow_change_proposals: bool = Field(
+        default=False,
+        description="Offer the propose_patch/propose_full_replace tools so the model returns "
+                    "structured change proposals instead of writing them as free-text markup. "
+                    "Set True only for callers that actually render/apply proposals (Entity/"
+                    "Script/Prompt assistant panels) — leave False for pure-advisory chat "
+                    "surfaces that only display the answer text.",
+    )
+
+class LLMAssistantProposal(BaseModel):
+    type: Literal["patch", "full"]
+    target: Literal["script", "config"]
+    search_text: str | None = None
+    replace_text: str | None = None
+    content: str | None = None
 
 class LLMAssistantChatResponse(BaseModel):
     answer: str
+    proposals: list[LLMAssistantProposal] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -5731,6 +5736,55 @@ def _resolve_file_refs(text: str) -> str:
 
     return re.sub(r"\[\[([^\]]+)\]\]", _replace, text)
 
+
+# Structured alternative to the old free-text <<<PATCH>>>/fenced-diff markup — the
+# model calls one of these instead of writing a change proposal as text, so the
+# UI never has to guess/regex-detect which of N textual conventions it used this
+# time. search_text/content must be copied verbatim from the numbered source
+# shown in context, not retyped from memory, so the exact-match apply succeeds.
+_PROPOSE_PATCH_TOOL: dict[str, Any] = {
+    "name": "propose_patch",
+    "description": (
+        "Propose replacing one exact, contiguous block of existing lines in the script or "
+        "config with new lines. search_text must match the CURRENT content verbatim "
+        "(whitespace included) — copy it directly from the numbered source already shown to "
+        "you, character for character, not from memory. Call this once per distinct change; "
+        "never call it more than once for alternative versions of the same change — decide on "
+        "one and propose only that one."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "enum": ["script", "config"]},
+            "search_text": {
+                "type": "string",
+                "description": "Exact existing lines to replace, copied verbatim from the source shown above.",
+            },
+            "replace_text": {
+                "type": "string",
+                "description": "The new lines that replace search_text.",
+            },
+        },
+        "required": ["target", "search_text", "replace_text"],
+    },
+}
+
+_PROPOSE_FULL_REPLACE_TOOL: dict[str, Any] = {
+    "name": "propose_full_replace",
+    "description": (
+        "Propose replacing the ENTIRE script or config content with new content. Use only "
+        "when the change is too large or pervasive for propose_patch. Call at most once per "
+        "target per response."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "enum": ["script", "config"]},
+            "content": {"type": "string", "description": "The complete new content for target."},
+        },
+        "required": ["target", "content"],
+    },
+}
 
 _ASSISTANT_DEFAULT_REASONING_EFFORT = "low"
 
@@ -5832,12 +5886,27 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
 
     try:
         llm, call_kwargs = _resolve_assistant_llm(req.llm_name)
-        response = await llm.complete(
+        tools = [_PROPOSE_PATCH_TOOL, _PROPOSE_FULL_REPLACE_TOOL] if req.allow_change_proposals else []
+        response = await llm.complete_with_tools(
             system_prompt=system_prompt,
-            user_message=user_message,
+            messages=[{"role": "user", "content": user_message}],
+            tools=tools,
             **call_kwargs,
         )
-        return LLMAssistantChatResponse(answer=response.content)
+        proposals: list[LLMAssistantProposal] = []
+        for call in response.tool_calls:
+            args = call.arguments
+            target = args.get("target")
+            if target not in ("script", "config"):
+                continue
+            if call.name == "propose_patch" and isinstance(args.get("search_text"), str) and isinstance(args.get("replace_text"), str):
+                proposals.append(LLMAssistantProposal(
+                    type="patch", target=target,
+                    search_text=args["search_text"], replace_text=args["replace_text"],
+                ))
+            elif call.name == "propose_full_replace" and isinstance(args.get("content"), str):
+                proposals.append(LLMAssistantProposal(type="full", target=target, content=args["content"]))
+        return LLMAssistantChatResponse(answer=response.content or "", proposals=proposals)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
