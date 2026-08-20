@@ -1,91 +1,33 @@
 /**
- * EntityAssistantPanel — full-height LLM chat for EventComposer entities, meant
- * to fill its own tab (visibility is the caller's job — mount this always and
- * toggle a CSS class, the way SystemPromptEditorModal does for PromptAssistantPanel,
- * so chat history survives switching to the Script/Config/Test tab and back).
+ * EntityAssistantPanel — full-height LLM chat view for EventComposer entities.
+ * Purely presentational — all state/logic lives in useEntityAssistantChat
+ * (own file, a Fast Refresh requirement: this file must only export the
+ * component). Create the chat once with the hook and pass it into as many
+ * `<EntityAssistantPanel chat={...} />` renderings as needed — e.g. the EC
+ * wizard's own "LLM Assistant" tab AND the fullscreen Script editor's
+ * "Assistant" tab — and both stay in sync since they share one state object.
  *
  * Supports full script/config replacement, line-number patches, and an
- * agentic debug loop (auto-test + auto-fix up to MAX_AUTO_ITERATIONS).
- *
- * Patch formats (see entity_config_assistant.md for full docs):
- *   <<<PATCH SCRIPT L12-L18>>>  /  <<<PATCH CONFIG L3>>>  /  <<<INSERT SCRIPT AFTER L10>>>
- *   <<<END>>>
+ * agentic debug loop (auto-test + auto-fix up to MAX_AUTO_ITERATIONS) via
+ * structured tool-call proposals (see assistantShared.tsx) rather than
+ * free-text markup.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import type React from 'react'
 import { Bot, CornerDownLeft, Loader2, Pencil, FlaskConical, Trash2 } from 'lucide-react'
-import { api, type ECExecuteResponse } from '@/api/client'
-import {
-  applyDiffHunk,
-  applyPatch,
-  buildParsedResponse,
-  type AssistantMessage,
-  type ParsedResponse,
-} from '@/components/common/assistantShared'
 import { MessageBubble } from '@/components/common/MessageBubble'
+import type { EntityAssistantChat } from '@/components/common/useEntityAssistantChat'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface EntityAssistantPanelProps {
-  script: string
-  configJson: string
-  allowedTools: string[]
-  testInput: string
-  testResult: ECExecuteResponse | null
-  contextFile?: string
-  // Name of the snapshot_profiles entry this EC is wired to (if any) — tells the assistant
-  // whether the `snapshot` global actually exists in this script's namespace.
-  snapshotProfile?: string
-  // Full entity form (ec_id, comment, broker, pair, enable, event_triggers, session_filter,
-  // timer, any_candle, max_tool_turns, script_timeout_seconds, ...) — everything besides the
-  // script/config already sent separately above. Lets the assistant answer "why doesn't this
-  // EC run" questions that hinge on triggers/session filter/enable, not just script logic.
-  entityConfig?: Record<string, unknown>
-  onApplyScript: (code: string) => void
-  onApplyConfig: (json: string) => void
-  onRunTest: () => Promise<ECExecuteResponse | null>
-}
-
-const MAX_AUTO_ITERATIONS = 5
-const CONTEXT_FILE_DEFAULT = 'entity_config_assistant.md'
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-export function EntityAssistantPanel({
-  script,
-  configJson,
-  allowedTools,
-  testInput,
-  testResult,
-  contextFile = CONTEXT_FILE_DEFAULT,
-  snapshotProfile,
-  entityConfig,
-  onApplyScript,
-  onApplyConfig,
-  onRunTest,
-}: EntityAssistantPanelProps) {
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [autoWrite, setAutoWrite] = useState(false)
-  const [canTest, setCanTest] = useState(false)
-  const [history, setHistory] = useState<AssistantMessage[]>([])
+export function EntityAssistantPanel({ chat }: { chat: EntityAssistantChat }) {
+  const {
+    history, input, setInput, loading, error,
+    autoWrite, setAutoWrite, canTest, setCanTest,
+    send, clearChat, script, configJson, onApplyScript, onApplyConfig,
+  } = chat
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const historyRef = useRef(history)
-  historyRef.current = history
-
-  const scriptRef = useRef(script); scriptRef.current = script
-  const configJsonRef = useRef(configJson); configJsonRef.current = configJson
-  const testInputRef = useRef(testInput); testInputRef.current = testInput
-  const snapshotProfileRef = useRef(snapshotProfile); snapshotProfileRef.current = snapshotProfile
-  const entityConfigRef = useRef(entityConfig); entityConfigRef.current = entityConfig
-  const autoWriteRef = useRef(autoWrite); autoWriteRef.current = autoWrite
-  const canTestRef = useRef(canTest); canTestRef.current = canTest
-  const onApplyScriptRef = useRef(onApplyScript); onApplyScriptRef.current = onApplyScript
-  const onApplyConfigRef = useRef(onApplyConfig); onApplyConfigRef.current = onApplyConfig
-  const onRunTestRef = useRef(onRunTest); onRunTestRef.current = onRunTest
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -95,113 +37,8 @@ export function EntityAssistantPanel({
     setTimeout(() => inputRef.current?.focus(), 50)
   }, [])
 
-  function buildContextData(lastResult?: ECExecuteResponse | null): string {
-    const lines = scriptRef.current.split('\n')
-    const numbered = lines.map((l, i) => `${String(i + 1).padStart(4, ' ')} | ${l}`).join('\n')
-    const parts = [
-      `=== Script (Python, with line numbers) ===\n\`\`\`\n${numbered}\n\`\`\``,
-      `=== Config JSON ===\n\`\`\`json\n${configJsonRef.current}\n\`\`\``,
-      `=== Allowed Tools ===\n${allowedTools.length ? allowedTools.join(', ') : '(none)'}`,
-      `=== Snapshot Profile ===\n${
-        snapshotProfileRef.current
-          ? `"${snapshotProfileRef.current}" — the \`snapshot\` global IS available in this script.`
-          : '(none) — the `snapshot` global does NOT exist; referencing it raises NameError.'
-      }`,
-    ]
-    if (entityConfigRef.current) {
-      parts.push(
-        `=== Entity Configuration (id, comment, broker, pair, enable, event_triggers, ` +
-        `session_filter, timer, any_candle, max_tool_turns, script_timeout_seconds) ===\n` +
-        `\`\`\`json\n${JSON.stringify(entityConfigRef.current, null, 2)}\n\`\`\``,
-      )
-    }
-    const ti = testInputRef.current?.trim()
-    if (ti) parts.push(`=== Test Input ===\n\`\`\`json\n${ti}\n\`\`\``)
-    const lr = lastResult ?? testResult
-    if (lr) parts.push(`=== Last Test Result ===\n\`\`\`json\n${JSON.stringify(lr, null, 2)}\n\`\`\``)
-    return parts.join('\n\n')
-  }
-
-  function appendMessage(msg: AssistantMessage) {
-    setHistory(h => [...h, msg])
-  }
-
-  function autoApplyParsed(parsed: ParsedResponse) {
-    for (const seg of parsed.segments) {
-      if (seg.type === 'full') {
-        if (seg.block.target === 'script') onApplyScriptRef.current(seg.block.code)
-        if (seg.block.target === 'config') onApplyConfigRef.current(seg.block.code)
-      }
-      if (seg.type === 'patch') {
-        const source = seg.block.target === 'script' ? scriptRef.current : configJsonRef.current
-        const { result } = applyPatch(source, seg.block)
-        if (seg.block.target === 'script') onApplyScriptRef.current(result)
-        if (seg.block.target === 'config') onApplyConfigRef.current(result)
-      }
-      if (seg.type === 'diffhunk') {
-        const source = seg.block.target === 'script' ? scriptRef.current : configJsonRef.current
-        const { result, error } = applyDiffHunk(source, seg.block)
-        if (!error) {
-          if (seg.block.target === 'script') onApplyScriptRef.current(result)
-          if (seg.block.target === 'config') onApplyConfigRef.current(result)
-        }
-      }
-    }
-  }
-
-  async function runAgentLoop(question: string, iteration = 0): Promise<void> {
-    if (iteration >= MAX_AUTO_ITERATIONS) {
-      appendMessage({ role: 'assistant', content: `⚠️ Maximale Iterationsanzahl (${MAX_AUTO_ITERATIONS}) erreicht.` })
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const resp = await api.llmAssistantChat({
-        context_file: contextFile,
-        script: scriptRef.current,
-        question,
-        history: historyRef.current.map(({ role, content }) => ({ role, content })),
-        context_data: buildContextData(),
-        allow_change_proposals: true,
-      })
-      if (resp.error) { setError(resp.error); setLoading(false); return }
-
-      const parsed = buildParsedResponse(resp.answer, resp.proposals)
-      if (autoWriteRef.current) autoApplyParsed(parsed)
-      appendMessage({ role: 'assistant', content: resp.answer, parsed })
-
-      if (parsed.triggerRun && canTestRef.current) {
-        setLoading(false)
-        await new Promise(r => setTimeout(r, 400))
-        let runResult: ECExecuteResponse | null = null
-        try { runResult = await onRunTestRef.current() } catch { /* non-fatal */ }
-        const resultSummary = runResult
-          ? `Test-Ergebnis:\n\`\`\`json\n${JSON.stringify(runResult, null, 2)}\n\`\`\``
-          : 'Test konnte nicht ausgeführt werden.'
-        const followUp = `[Automatisches Test-Feedback, Iteration ${iteration + 1}]\n${resultSummary}`
-        appendMessage({ role: 'user', content: followUp })
-        if (runResult && !runResult.success) { await runAgentLoop(followUp, iteration + 1); return }
-        setLoading(false)
-        return
-      }
-    } catch (e: unknown) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const send = async () => {
-    const question = input.trim()
-    if (!question || loading) return
-    appendMessage({ role: 'user', content: question })
-    setInput('')
-    await runAgentLoop(question)
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
   return (
@@ -235,7 +72,7 @@ export function EntityAssistantPanel({
           </label>
 
           {history.length > 0 && (
-            <button type="button" onClick={() => { setHistory([]); setError(null) }}
+            <button type="button" onClick={clearChat}
               title="Chat leeren" className="text-gray-600 hover:text-red-400 transition-colors">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -275,7 +112,7 @@ export function EntityAssistantPanel({
             placeholder="Frage oder Änderungsauftrag… (Enter senden, Shift+Enter Zeilenumbruch)"
             className="flex-1 resize-none bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
             disabled={loading} />
-          <button type="button" onClick={() => void send()} disabled={loading || !input.trim()}
+          <button type="button" onClick={send} disabled={loading || !input.trim()}
             title="Senden (Enter)"
             className="flex-shrink-0 flex items-center justify-center w-7 h-7 rounded bg-indigo-700 hover:bg-indigo-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             <CornerDownLeft className="w-3.5 h-3.5" />

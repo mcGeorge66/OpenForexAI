@@ -13,6 +13,7 @@ import { ScriptEditor } from '@/components/common/ScriptEditor'
 import { Json5MonacoEditor } from '@/components/common/Json5MonacoEditor'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { EntityAssistantPanel } from '@/components/common/EntityAssistantPanel'
+import { useEntityAssistantChat } from '@/components/common/useEntityAssistantChat'
 import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
 import { useMonitoringStream } from '@/hooks/useMonitoringStream'
 
@@ -206,6 +207,27 @@ export function EventComposerConfigWizard() {
   const [exampleError, setExampleError] = useState<string | null>(null)
   const debugStream = useMonitoringStream({ filter: ['ec_debug_log'] })
   const debugEntries = debugStream.events.filter(e => e.payload.ec_id === editForm?.ec_id)
+
+  // One shared chat — rendered both in this wizard's own "LLM Assistant" tab and (via
+  // ScriptEditor's `assistant` slot) inside the fullscreen Script editor, so switching
+  // between them never loses/duplicates the conversation.
+  const toolSchemas = useMemo(
+    () => allTools.filter(t => (editForm?.allowed_tools ?? []).includes(t.name)),
+    [allTools, editForm?.allowed_tools],
+  )
+  const assistantChat = useEntityAssistantChat({
+    script: editForm?.script ?? '',
+    configJson: editForm?.config_json ?? '{}',
+    allowedTools: editForm?.allowed_tools ?? [],
+    toolSchemas,
+    testInput,
+    testResult,
+    snapshotProfile: editForm?.snapshot_profile,
+    entityConfig: editForm ?? undefined,
+    onApplyScript: v => setField('script', v),
+    onApplyConfig: v => setField('config_json', v),
+    onRunTest: handleTest,
+  })
 
   async function loadRealExample(eventType: string) {
     setExampleLoading(eventType)
@@ -829,18 +851,7 @@ export function EventComposerConfigWizard() {
                 survives switching to Editor and back — only hidden via CSS, same
                 convention as SystemPromptEditorModal's PromptAssistantPanel tab. */}
             <div className={outerTab === 'assistant' ? '' : 'hidden'} style={{ height: 480 }}>
-              <EntityAssistantPanel
-                script={editForm.script}
-                configJson={editForm.config_json}
-                allowedTools={editForm.allowed_tools}
-                testInput={testInput}
-                testResult={testResult}
-                snapshotProfile={editForm.snapshot_profile}
-                entityConfig={editForm}
-                onApplyScript={v => setField('script', v)}
-                onApplyConfig={v => setField('config_json', v)}
-                onRunTest={handleTest}
-              />
+              <EntityAssistantPanel chat={assistantChat} />
             </div>
 
             {outerTab === 'editor' && (
@@ -895,6 +906,7 @@ export function EventComposerConfigWizard() {
                     onChange={v => setField('script', v ?? '')}
                     minHeight={400}
                     snippetScope="ec"
+                    assistant={<EntityAssistantPanel chat={assistantChat} />}
                   />
                 </div>
               )}

@@ -1,3 +1,4 @@
+import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import MonacoEditor, { type Monaco } from '@monaco-editor/react'
 import type { editor as MonacoEditorNS } from 'monaco-editor'
@@ -107,9 +108,14 @@ interface ExpandedEditorModalProps {
   snippetScope?: string
   contextFile?: string
   contextData?: string
+  /** Render this instead of the built-in ScriptAssistantPanel in the "Assistant" tab —
+   *  lets a caller share ONE assistant chat (same history/state) between this fullscreen
+   *  view and another location (e.g. its own wizard's "LLM Assistant" tab) instead of
+   *  each spinning up its own disconnected instance. Takes precedence over contextFile. */
+  assistant?: React.ReactNode
 }
 
-function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetScope = 'script', contextFile, contextData }: ExpandedEditorModalProps) {
+function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetScope = 'script', contextFile, contextData, assistant }: ExpandedEditorModalProps) {
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<Monaco | null>(null)
   const savedSelectionRef = useRef<SavedRange | null>(null)
@@ -181,7 +187,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
             onClose={onClose}
           />
 
-          {contextFile && (
+          {(assistant || contextFile) && (
             <div className="flex items-center gap-1 px-2 pt-1.5 bg-gray-900/60 border-b border-gray-700/50 flex-shrink-0">
               <button
                 type="button"
@@ -268,14 +274,16 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
             </div>
           </div>
 
-          {contextFile && (
+          {(assistant || contextFile) && (
             <div className={tab === 'assistant' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-              <ScriptAssistantPanel
-                code={localValue}
-                contextFile={contextFile}
-                contextData={contextData}
-                onApplyCode={v => { setLocalValue(v); editorRef.current?.getModel()?.setValue(v) }}
-              />
+              {assistant ?? (
+                <ScriptAssistantPanel
+                  code={localValue}
+                  contextFile={contextFile as string}
+                  contextData={contextData}
+                  onApplyCode={v => { setLocalValue(v); editorRef.current?.getModel()?.setValue(v) }}
+                />
+              )}
             </div>
           )}
 
@@ -326,6 +334,10 @@ interface ScriptEditorProps {
   contextFile?: string
   /** Additional context for the LLM assistant (e.g. tool name + arguments) */
   contextData?: string
+  /** Render this instead of the built-in ScriptAssistantPanel in the fullscreen "Assistant"
+   *  tab — pass a chat driven by shared/lifted state to keep it in sync with another
+   *  rendering of the same assistant elsewhere. Takes precedence over contextFile. */
+  assistant?: React.ReactNode
 }
 
 export function ScriptEditor({
@@ -336,6 +348,7 @@ export function ScriptEditor({
   snippetScope = 'script',
   contextFile,
   contextData,
+  assistant,
 }: ScriptEditorProps) {
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null)
   const savedSelectionRef = useRef<SavedRange | null>(null)
@@ -398,6 +411,7 @@ export function ScriptEditor({
           snippetScope={snippetScope}
           contextFile={contextFile}
           contextData={contextData}
+          assistant={assistant}
         />
       )}
 
