@@ -895,7 +895,6 @@ export function EventComposerConfigWizard() {
                     onChange={v => setField('script', v ?? '')}
                     minHeight={400}
                     snippetScope="ec"
-                    contextFile="script_ec_context.md"
                   />
                 </div>
               )}
