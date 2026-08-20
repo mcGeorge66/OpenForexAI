@@ -124,6 +124,16 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })
   const [tab, setTab] = useState<'editor' | 'assistant'>('editor')
 
+  // While this modal is open, the caller's `value` prop can only change from OUTSIDE
+  // (the shared assistant applying a patch — the underlying base editor is covered by
+  // this modal and unreachable, and typing in THIS editor only ever touches localValue,
+  // never the prop) — so it's always safe to pick that up, never a manual-edit clobber.
+  // Without this, an assistant-applied change while this modal is open would render here
+  // stale, and clicking Apply afterwards would silently overwrite it with the old draft.
+  useEffect(() => {
+    setLocalValue(initialValue)
+  }, [initialValue])
+
   useEffect(() => {
     const timer = setTimeout(async () => {
       const monaco = monacoRef.current
