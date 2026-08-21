@@ -119,20 +119,29 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<Monaco | null>(null)
   const savedSelectionRef = useRef<SavedRange | null>(null)
-  const [localValue, setLocalValue] = useState(initialValue)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })
   const [tab, setTab] = useState<'editor' | 'assistant'>('editor')
 
-  // While this modal is open, the caller's `value` prop can only change from OUTSIDE
-  // (the shared assistant applying a patch — the underlying base editor is covered by
-  // this modal and unreachable, and typing in THIS editor only ever touches localValue,
-  // never the prop) — so it's always safe to pick that up, never a manual-edit clobber.
-  // Without this, an assistant-applied change while this modal is open would render here
-  // stale, and clicking Apply afterwards would silently overwrite it with the old draft.
-  useEffect(() => {
-    setLocalValue(initialValue)
-  }, [initialValue])
+  // When a shared assistant is provided, this view has no draft of its own at all —
+  // it reads/writes the exact same value the caller holds (like the inline editor
+  // always has), so there's only ever one copy of the script to begin with. That's
+  // the only way the assistant (which always writes to the caller's value, since it
+  // may be invoked from either this view or elsewhere sharing the same chat) can never
+  // write "into" a hidden draft this view would then clobber on Apply, or vice versa.
+  //
+  // Without a shared assistant, this is the ORIGINAL, unchanged behavior every other
+  // ScriptEditor caller (SnapshotBlocksPanel, PromptWorkbench, ProfileConfigEditors, ...)
+  // relies on: a draft captured once at mount, kept until Apply/Cancel, deliberately
+  // NEVER resynced to the live value while open — this modal is unmounted/remounted
+  // fresh on every open (`{modalOpen && <ExpandedEditorModal/>}`), so useState(initialValue)
+  // already guarantees "start fresh each time"; no resync effect is needed OR safe here —
+  // one would silently overwrite an unsaved draft if the caller's value changed for any
+  // other reason while this modal happened to be open.
+  const isLive = !!assistant
+  const [draftValue, setDraftValue] = useState(initialValue)
+  const currentValue = isLive ? initialValue : draftValue
+  const setCurrentValue = (v: string) => { if (isLive) onApply(v); else setDraftValue(v) }
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -140,7 +149,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
       const model = editorRef.current?.getModel()
       if (!monaco || !model) return
       try {
-        const result = await api.validateScript({ code: localValue })
+        const result = await api.validateScript({ code: currentValue })
         monaco.editor.setModelMarkers(model, 'python-syntax', result.errors.map(e => ({
           severity: monaco.MarkerSeverity.Error,
           startLineNumber: e.line,
@@ -155,7 +164,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
       }
     }, 600)
     return () => clearTimeout(timer)
-  }, [localValue])
+  }, [currentValue])
 
   const openLibrary = () => {
     const sel = editorRef.current?.getSelection()
@@ -167,14 +176,14 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
 
   const insertAtCursor = (code: string) => {
     const editor = editorRef.current
-    if (!editor) { setLocalValue(v => v ? `${v}\n${code}` : code); return }
+    if (!editor) { setCurrentValue(currentValue ? `${currentValue}\n${code}` : code); return }
     insertIntoEditor(editor, code, savedSelectionRef.current)
     savedSelectionRef.current = null
-    // Sync localValue after Monaco edit
-    setLocalValue(editor.getValue())
+    // Sync state after Monaco edit
+    setCurrentValue(editor.getValue())
   }
 
-  const handleApply = () => { onApply(localValue); onClose() }
+  const handleApply = () => { onApply(currentValue); onClose() }
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose()
@@ -192,7 +201,7 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
           onClick={e => e.stopPropagation()}
         >
           <EditorToolbar
-            value={localValue}
+            value={currentValue}
             onOpenLibrary={openLibrary}
             onClose={onClose}
           />
@@ -254,8 +263,8 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
                 height="100%"
                 defaultLanguage="python"
                 theme="vs-dark"
-                value={localValue}
-                onChange={v => setLocalValue(v ?? '')}
+                value={currentValue}
+                onChange={v => setCurrentValue(v ?? '')}
                 onMount={(editor, monaco) => {
                   editorRef.current = editor
                   monacoRef.current = monaco
@@ -288,10 +297,10 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
             <div className={tab === 'assistant' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               {assistant ?? (
                 <ScriptAssistantPanel
-                  code={localValue}
+                  code={currentValue}
                   contextFile={contextFile as string}
                   contextData={contextData}
-                  onApplyCode={v => { setLocalValue(v); editorRef.current?.getModel()?.setValue(v) }}
+                  onApplyCode={v => setCurrentValue(v)}
                 />
               )}
             </div>
@@ -302,20 +311,34 @@ function ExpandedEditorModal({ value: initialValue, onApply, onClose, snippetSco
               Ln {cursorPos.line}, Col {cursorPos.col}
             </span>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-1.5 text-sm rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                className="px-4 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
-              >
-                Apply
-              </button>
+              {isLive ? (
+                // Live mode: every change (manual or via the assistant) already went
+                // straight to the caller's value — nothing pending to accept or discard.
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
+                >
+                  Close
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-4 py-1.5 text-sm rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApply}
+                    className="px-4 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
+                  >
+                    Apply
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -1,26 +1,54 @@
 /**
- * SystemPromptEditorModal — 3-tab editor for an Agent's system_prompt:
+ * SystemPromptEditorModal — 3-tab fullscreen editor for an Agent's system_prompt:
  * "Prompt Editor" (line-numbered text), "LLM Assistant" (full-height chat,
  * can pick a specific past analysis + raw snapshot into the discussion),
  * "Agent Context" (per-agent notes file the assistant reads by default).
  *
- * The Prompt Editor tab writes back into the parent form (persisted only
- * when the outer wizard's Save/Update button is clicked — same as every
- * other field). The Agent Context tab is a separate file on disk and saves
- * itself via its own Save button.
+ * The Prompt Editor tab writes back into the parent form on every keystroke
+ * (persisted only when the outer wizard's Save/Update button is clicked —
+ * same as every other field) — there is no separate draft here, so it can
+ * never go stale relative to the wizard's own inline Prompt tab.
+ *
+ * The assistant chat and the Agent Context notes state are NOT owned here —
+ * both are passed in from the caller (AgentConfigWizard), which also renders
+ * its own "LLM Assistant" tab sharing the exact same chat. That's what makes
+ * "ask the assistant something" behave identically whether you're in this
+ * fullscreen view or the wizard's own tab: one chat, one Agent Context state,
+ * rendered in two possible places.
  */
-import { useEffect, useState } from 'react'
-import { Check, Copy, Loader2, Save, X } from 'lucide-react'
-import { api } from '@/api/client'
+import { useRef, useState } from 'react'
+import type React from 'react'
+import type { editor as MonacoEditorNS } from 'monaco-editor'
+import { Check, Copy, Link2, Loader2, Save, X } from 'lucide-react'
 import { PlainTextMonacoEditor } from '@/components/common/PlainTextMonacoEditor'
-import { PromptAssistantPanel, type AgentConfigSummary } from '@/components/common/PromptAssistantPanel'
+
+// The two docs that together cover everything constant across every agent (config field
+// names/semantics, full tool parameter schemas) — inserted as [[...]] references, which
+// _resolve_file_refs (backend) expands into the assistant's context at chat time. Kept as
+// a manual insert rather than auto-injected into every agent's file, so the user decides
+// per agent whether/where this shared background belongs in their own notes.
+const REFERENCE_LINKS = [
+  '[[config/llm_contexts/agent_config_assistant.md]]',
+  '[[config/llm_contexts/tools_reference.md]]',
+].join('\n')
 
 type Tab = 'prompt' | 'assistant' | 'context'
 
 interface Props {
-  agentConfig: AgentConfigSummary
+  agentId: string
   systemPrompt: string
   onChangeSystemPrompt: (text: string) => void
+  /** Rendered in the "LLM Assistant" tab — pass a chat driven by shared/lifted
+   *  state (the same one rendered in the wizard's own tab) to keep them in sync. */
+  assistant: React.ReactNode
+  agentContextText: string
+  agentContextExists: boolean
+  agentContextLoading: boolean
+  agentContextSaving: boolean
+  agentContextDirty: boolean
+  agentContextError: string | null
+  onChangeAgentContext: (text: string) => void
+  onSaveAgentContext: () => void
   onClose: () => void
 }
 
@@ -38,49 +66,40 @@ function CopyButton({ getText }: { getText: () => string }) {
   )
 }
 
-export function SystemPromptEditorModal({ agentConfig, systemPrompt, onChangeSystemPrompt, onClose }: Props) {
-  const agentId = agentConfig.agent_id
+export function SystemPromptEditorModal({
+  agentId,
+  systemPrompt,
+  onChangeSystemPrompt,
+  assistant,
+  agentContextText,
+  agentContextExists,
+  agentContextLoading,
+  agentContextSaving,
+  agentContextDirty,
+  agentContextError,
+  onChangeAgentContext,
+  onSaveAgentContext,
+  onClose,
+}: Props) {
   const [tab, setTab] = useState<Tab>('prompt')
+  const contextEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null)
 
-  const [contextText, setContextText] = useState('')
-  const [contextExists, setContextExists] = useState(false)
-  const [contextLoading, setContextLoading] = useState(true)
-  const [contextSaving, setContextSaving] = useState(false)
-  const [contextSavedText, setContextSavedText] = useState('')
-  const [contextError, setContextError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setContextLoading(true)
-    api.getAgentContext(agentId)
-      .then(resp => {
-        setContextText(resp.text)
-        setContextSavedText(resp.text)
-        setContextExists(resp.exists)
-      })
-      .catch(e => setContextError(String(e)))
-      .finally(() => setContextLoading(false))
-  }, [agentId])
-
-  const contextDirty = contextText !== contextSavedText
-
-  async function saveContext() {
-    setContextSaving(true)
-    setContextError(null)
-    try {
-      await api.saveAgentContext(agentId, contextText)
-      setContextSavedText(contextText)
-      setContextExists(true)
-    } catch (e) {
-      setContextError(String(e))
-    } finally {
-      setContextSaving(false)
-    }
+  const insertReferenceLinks = () => {
+    const editor = contextEditorRef.current
+    if (!editor) return
+    const position = editor.getPosition()
+    const range = position
+      ? { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column }
+      : { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }
+    editor.executeEdits('insert-reference-links', [{ range, text: REFERENCE_LINKS + '\n', forceMoveMarkers: true }])
+    editor.focus()
+    onChangeAgentContext(editor.getValue())
   }
 
   const TAB_LABEL: Record<Tab, string> = {
     prompt: 'Prompt Editor',
     assistant: 'LLM Assistant',
-    context: `Agent Context${contextDirty ? ' •' : ''}`,
+    context: `Agent Context${agentContextDirty ? ' •' : ''}`,
   }
 
   return (
@@ -127,15 +146,7 @@ export function SystemPromptEditorModal({ agentConfig, systemPrompt, onChangeSys
           {/* Always mounted (never unmounted on tab switch) so the chat history
               survives switching to Agent Context and back — only hidden via CSS. */}
           <div className={tab === 'assistant' ? 'h-full' : 'hidden'}>
-            <PromptAssistantPanel
-              agentId={agentId}
-              systemPrompt={systemPrompt}
-              onApplySystemPrompt={onChangeSystemPrompt}
-              agentContextText={contextText}
-              agentContextExists={contextExists}
-              onApplyAgentContext={setContextText}
-              agentConfig={agentConfig}
-            />
+            {assistant}
           </div>
 
           {tab === 'context' && (
@@ -143,28 +154,43 @@ export function SystemPromptEditorModal({ agentConfig, systemPrompt, onChangeSys
               <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900/60 border-b border-gray-800">
                 <span className="text-xs text-white">
                   config/llm_contexts/{agentId}.md · default context for the LLM Assistant
-                  {!contextExists && !contextLoading && <span className="text-gray-600 italic"> (not created yet)</span>}
+                  {!agentContextExists && !agentContextLoading && <span className="text-gray-600 italic"> (not created yet)</span>}
                 </span>
                 <div className="flex items-center gap-2">
-                  <CopyButton getText={() => contextText} />
                   <button
-                    onClick={() => void saveContext()}
-                    disabled={contextSaving || !contextDirty}
+                    type="button"
+                    onClick={insertReferenceLinks}
+                    disabled={agentContextLoading}
+                    title="Insert [[...]] references to the shared config-field and tools-reference docs at the cursor"
+                    className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-800 disabled:opacity-40 transition-colors"
+                  >
+                    <Link2 className="w-3 h-3" />
+                    Insert reference links
+                  </button>
+                  <CopyButton getText={() => agentContextText} />
+                  <button
+                    onClick={onSaveAgentContext}
+                    disabled={agentContextSaving || !agentContextDirty}
                     className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 transition-colors"
                   >
-                    {contextSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    {agentContextSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                     Save
                   </button>
                 </div>
               </div>
-              {contextError && <div className="px-3 py-1 text-xs text-red-400 bg-red-900/20">{contextError}</div>}
+              {agentContextError && <div className="px-3 py-1 text-xs text-red-400 bg-red-900/20">{agentContextError}</div>}
               <div className="flex-1 min-h-0">
-                {contextLoading ? (
+                {agentContextLoading ? (
                   <div className="flex items-center gap-2 text-white text-xs p-3">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading context file…
                   </div>
                 ) : (
-                  <PlainTextMonacoEditor value={contextText} onChange={setContextText} language="markdown" />
+                  <PlainTextMonacoEditor
+                    value={agentContextText}
+                    onChange={onChangeAgentContext}
+                    language="markdown"
+                    onMount={editor => { contextEditorRef.current = editor }}
+                  />
                 )}
               </div>
             </div>

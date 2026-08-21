@@ -5877,7 +5877,10 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
     conversation_parts.append(f"User: {req.question}")
 
     if req.context_data is not None and req.context_data.strip():
-        context_block = f"=== Current Context ===\n{req.context_data.strip()}\n=== End Context ===\n\n"
+        # e.g. an Agent Context notes file embedded here may itself contain [[path]]
+        # references (to shared docs like agent_config_assistant.md/tools_reference.md) —
+        # resolve those too, not just the ones in the context_file's own instructions.
+        context_block = f"=== Current Context ===\n{_resolve_file_refs(req.context_data.strip())}\n=== End Context ===\n\n"
     elif req.script.strip():
         context_block = f"```python\n{req.script}\n```\n\n"
     else:

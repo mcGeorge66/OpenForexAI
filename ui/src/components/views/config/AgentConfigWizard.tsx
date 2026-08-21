@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import JSON5 from 'json5'
-import { BookOpen, Check, Clock, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
+import { Bot, BookOpen, Check, Clock, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
 import { api, type ToolInfo } from '@/api/client'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
 import { AiAssistantModal } from '@/components/common/AiAssistantModal'
 import { EntityHistoryModal } from '@/components/common/EntityHistoryModal'
 import { SystemPromptEditorModal } from '@/components/views/config/SystemPromptEditorModal'
+import { PromptAssistantPanel } from '@/components/common/PromptAssistantPanel'
+import { usePromptAssistantChat } from '@/components/common/usePromptAssistantChat'
 import { useProjectRoot, joinPath } from '@/api/useProjectRoot'
 
 function CopyButton({ getText }: { getText: () => string }) {
@@ -475,6 +477,67 @@ export function AgentConfigWizard() {
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false)
+  const [promptOuterTab, setPromptOuterTab] = useState<'prompt' | 'assistant'>('prompt')
+
+  // Agent Context notes (config/llm_contexts/{agent_id}.md) — a separate file on disk the
+  // assistant reads/patches by default, saved via its own explicit Save button (never by the
+  // wizard's own Save/Update). Lifted here (rather than owned inside SystemPromptEditorModal)
+  // so the assistant chat can read/write it even before that modal is ever opened.
+  const effectiveAgentId = form.agent_id || 'new-agent'
+  const [agentContextText, setAgentContextText] = useState('')
+  const [agentContextExists, setAgentContextExists] = useState(false)
+  const [agentContextLoading, setAgentContextLoading] = useState(true)
+  const [agentContextSaving, setAgentContextSaving] = useState(false)
+  const [agentContextSavedText, setAgentContextSavedText] = useState('')
+  const [agentContextError, setAgentContextError] = useState<string | null>(null)
+  const agentContextDirty = agentContextText !== agentContextSavedText
+
+  useEffect(() => {
+    setAgentContextLoading(true)
+    api.getAgentContext(effectiveAgentId)
+      .then(resp => {
+        setAgentContextText(resp.text)
+        setAgentContextSavedText(resp.text)
+        setAgentContextExists(resp.exists)
+      })
+      .catch(e => setAgentContextError(String(e)))
+      .finally(() => setAgentContextLoading(false))
+  }, [effectiveAgentId])
+
+  async function saveAgentContext() {
+    setAgentContextSaving(true)
+    setAgentContextError(null)
+    try {
+      await api.saveAgentContext(effectiveAgentId, agentContextText)
+      setAgentContextSavedText(agentContextText)
+      setAgentContextExists(true)
+    } catch (e) {
+      setAgentContextError(String(e))
+    } finally {
+      setAgentContextSaving(false)
+    }
+  }
+
+  // One shared chat — rendered both in this wizard's own "LLM Assistant" tab and inside
+  // SystemPromptEditorModal's "LLM Assistant" tab, so switching between them never loses
+  // or duplicates the conversation.
+  const promptChat = usePromptAssistantChat({
+    agentId: effectiveAgentId,
+    systemPrompt: form.system_prompt,
+    onApplySystemPrompt: text => setField('system_prompt', text),
+    agentContextText,
+    agentContextExists,
+    onApplyAgentContext: setAgentContextText,
+    agentConfig: {
+      agent_id: effectiveAgentId,
+      pair: form.pair,
+      broker: form.broker,
+      snapshot_profile: form.snapshot_profile,
+      decision_prompt_profile: form.decision_prompt_profile,
+      event_triggers: form.event_triggers,
+      allowed_tools: form.allowed_tools,
+    },
+  })
 
   const llmNames = useMemo(() => Object.keys(cfg?.modules?.llm ?? {}), [cfg])
   const brokerNames = useMemo(() => Object.keys(cfg?.modules?.broker ?? {}), [cfg])
@@ -950,32 +1013,71 @@ export function AgentConfigWizard() {
                   </label>
 
                   <div className="col-span-full">
-                    <div className="flex items-center justify-between mb-1">
-                      <span title={TIPS.system_prompt} className="text-xs text-gray-300">
-                        System Prompt
-                        <span className="text-gray-500 font-normal ml-1">({'{pair}'}, {'{comment}'})</span>
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <CopyButton getText={() => form.system_prompt} />
-                        <button
-                          type="button"
-                          title="Prompt Library"
-                          onClick={() => setLibraryOpen(true)}
-                          className="inline-flex items-center text-gray-500 hover:text-gray-300 transition-colors"
-                        >
-                          <BookOpen className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Open in editor"
-                          onClick={() => setSystemPromptModalOpen(true)}
-                          className="inline-flex items-center text-gray-500 hover:text-gray-300 transition-colors"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                    <div className="flex items-center gap-1 border-b border-gray-700 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setPromptOuterTab('prompt')}
+                        className={[
+                          'px-3 py-1.5 text-xs transition-colors',
+                          promptOuterTab === 'prompt'
+                            ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                            : 'text-white hover:text-gray-300',
+                        ].join(' ')}
+                      >
+                        Prompt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPromptOuterTab('assistant')}
+                        className={[
+                          'px-3 py-1.5 text-xs transition-colors flex items-center gap-1',
+                          promptOuterTab === 'assistant'
+                            ? 'text-emerald-300 border-b-2 border-emerald-400 -mb-px'
+                            : 'text-white hover:text-gray-300',
+                        ].join(' ')}
+                      >
+                        <Bot className="w-3 h-3" />
+                        LLM Assistant
+                      </button>
                     </div>
-                    <textarea title={TIPS.system_prompt} rows={8} value={form.system_prompt} onChange={e => setField('system_prompt', e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" />
+
+                    {/* Always mounted (never unmounted on tab switch) so the chat history
+                        survives switching to Prompt and back — only hidden via CSS, same
+                        convention as the EventComposer wizard's Editor/LLM Assistant tabs. */}
+                    <div className={promptOuterTab === 'assistant' ? '' : 'hidden'} style={{ height: 480 }}>
+                      <PromptAssistantPanel chat={promptChat} />
+                    </div>
+
+                    {promptOuterTab === 'prompt' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span title={TIPS.system_prompt} className="text-xs text-gray-300">
+                            System Prompt
+                            <span className="text-gray-500 font-normal ml-1">({'{pair}'}, {'{comment}'})</span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <CopyButton getText={() => form.system_prompt} />
+                            <button
+                              type="button"
+                              title="Prompt Library"
+                              onClick={() => setLibraryOpen(true)}
+                              className="inline-flex items-center text-gray-500 hover:text-gray-300 transition-colors"
+                            >
+                              <BookOpen className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Open in editor"
+                              onClick={() => setSystemPromptModalOpen(true)}
+                              className="inline-flex items-center text-gray-500 hover:text-gray-300 transition-colors"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <textarea title={TIPS.system_prompt} rows={8} value={form.system_prompt} onChange={e => setField('system_prompt', e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" />
+                      </div>
+                    )}
                   </div>
 
                   <div title={TIPS.event_triggers} className="text-xs text-gray-300 col-span-8">
@@ -1173,17 +1275,18 @@ export function AgentConfigWizard() {
 
       {systemPromptModalOpen && (
         <SystemPromptEditorModal
-          agentConfig={{
-            agent_id: form.agent_id || 'new-agent',
-            pair: form.pair,
-            broker: form.broker,
-            snapshot_profile: form.snapshot_profile,
-            decision_prompt_profile: form.decision_prompt_profile,
-            event_triggers: form.event_triggers,
-            allowed_tools: form.allowed_tools,
-          }}
+          agentId={effectiveAgentId}
           systemPrompt={form.system_prompt}
           onChangeSystemPrompt={text => setField('system_prompt', text)}
+          assistant={<PromptAssistantPanel chat={promptChat} />}
+          agentContextText={agentContextText}
+          agentContextExists={agentContextExists}
+          agentContextLoading={agentContextLoading}
+          agentContextSaving={agentContextSaving}
+          agentContextDirty={agentContextDirty}
+          agentContextError={agentContextError}
+          onChangeAgentContext={setAgentContextText}
+          onSaveAgentContext={() => void saveAgentContext()}
           onClose={() => setSystemPromptModalOpen(false)}
         />
       )}

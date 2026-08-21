@@ -1,55 +1,28 @@
 /**
- * PromptAssistantPanel — full-height LLM chat for discussing and rewriting an
- * Agent's system_prompt (and its per-agent context notes file).
+ * PromptAssistantPanel — full-height LLM chat view for discussing and rewriting
+ * an Agent's system_prompt (and its per-agent context notes file).
+ * Purely presentational — all state/logic lives in usePromptAssistantChat (own
+ * file, a Fast Refresh requirement: this file must only export the component).
+ * Create the chat once with the hook and pass it into as many
+ * `<PromptAssistantPanel chat={...} />` renderings as needed — e.g. the Agent
+ * Config wizard's own "LLM Assistant" tab AND the fullscreen
+ * SystemPromptEditorModal's "LLM Assistant" tab — and both stay in sync since
+ * they share one state object.
  *
- * Unlike ScriptAssistantPanel/EntityAssistantPanel (collapsible bottom strip),
- * this fills its own tab — the extra room is used for a specific-analysis
- * picker (pull one past decision + its raw snapshot into the discussion,
- * instead of always just "the last one") and opt-in agent-config context.
+ * Unlike ScriptAssistantPanel/EntityAssistantPanel, this fills its own tab —
+ * the extra room is used for a specific-analysis picker (pull one past
+ * decision + its raw snapshot into the discussion, instead of always just
+ * "the last one") and opt-in agent-config context.
  *
- * Reuses the exact patch/full-block syntax from assistantShared as-is:
- * target "script" == the System Prompt, target "config" == the Agent
- * Context notes file. Same wire format, no changes needed to the shared
- * parser/MessageBubble — only the instructions in prompt_assistant.md differ.
+ * Reuses the exact patch/full-block/diff/tool-call-proposal machinery from
+ * assistantShared as-is: target "script" == the System Prompt, target
+ * "config" == the Agent Context notes file.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { ArrowLeft, Bot, Check, CornerDownLeft, Loader2, Pencil, Search, Trash2, X } from 'lucide-react'
-import { api, type AgentLastInputResponse, type EntityHistoryEntry } from '@/api/client'
-import {
-  applyDiffHunk,
-  applyPatch,
-  buildParsedResponse,
-  type AssistantMessage,
-  type ParsedResponse,
-} from '@/components/common/assistantShared'
+import type { EntityHistoryEntry } from '@/api/client'
 import { MessageBubble } from '@/components/common/MessageBubble'
-
-export interface AgentConfigSummary {
-  agent_id: string
-  pair?: string
-  broker?: string
-  snapshot_profile?: string
-  decision_prompt_profile?: string
-  event_triggers?: string[]
-  allowed_tools?: string[]
-}
-
-export interface PromptAssistantPanelProps {
-  agentId: string
-  systemPrompt: string
-  onApplySystemPrompt: (text: string) => void
-  agentContextText: string
-  agentContextExists: boolean
-  onApplyAgentContext: (text: string) => void
-  agentConfig: AgentConfigSummary
-}
-
-const CONTEXT_FILE = 'prompt_assistant.md'
-
-function numbered(text: string): string {
-  if (!text.trim()) return '(empty)'
-  return text.split('\n').map((l, i) => `${String(i + 1).padStart(4, ' ')} | ${l}`).join('\n')
-}
+import type { PromptAssistantChat } from '@/components/common/usePromptAssistantChat'
 
 function summarizeEntry(entry: EntityHistoryEntry): string {
   const out = entry.output as Record<string, unknown> | null
@@ -64,169 +37,31 @@ function summarizeEntry(entry: EntityHistoryEntry): string {
   return `${entry.timestamp ?? '?'} — ${label}`
 }
 
-function extractSnapshot(entry: EntityHistoryEntry): Record<string, unknown> | null {
-  const input = entry.input as Record<string, unknown> | null
-  const snap = input?.market_snapshot
-  return snap && typeof snap === 'object' ? (snap as Record<string, unknown>) : null
-}
-
-export function PromptAssistantPanel({
-  agentId,
-  systemPrompt,
-  onApplySystemPrompt,
-  agentContextText,
-  agentContextExists,
-  onApplyAgentContext,
-  agentConfig,
-}: PromptAssistantPanelProps) {
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [autoWrite, setAutoWrite] = useState(false)
-  const [history, setHistory] = useState<AssistantMessage[]>([])
-
-  const [analyses, setAnalyses] = useState<EntityHistoryEntry[]>([])
-  const [analysesLoading, setAnalysesLoading] = useState(false)
-  const [analysisFilter, setAnalysisFilter] = useState('')
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [previewEntry, setPreviewEntry] = useState<EntityHistoryEntry | null>(null)
-  const [selectedAnalysis, setSelectedAnalysis] = useState<EntityHistoryEntry | null>(null)
-  const [includeSnapshot, setIncludeSnapshot] = useState(true)
-  const [includeAgentConfig, setIncludeAgentConfig] = useState(false)
-  const [lastInput, setLastInput] = useState<AgentLastInputResponse | null>(null)
+export function PromptAssistantPanel({ chat }: { chat: PromptAssistantChat }) {
+  const {
+    history, input, setInput, loading, error,
+    autoWrite, setAutoWrite, send, clearChat,
+    analysesLoading, analysisFilter, setAnalysisFilter, filteredAnalyses,
+    pickerOpen, setPickerOpen, previewEntry, setPreviewEntry,
+    selectedAnalysis, setSelectedAnalysis,
+    includeSnapshot, setIncludeSnapshot, includeAgentConfig, setIncludeAgentConfig,
+    lastInput,
+    systemPrompt, agentContextText, onApplySystemPrompt, onApplyAgentContext,
+  } = chat
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
-  const historyRef = useRef(history); historyRef.current = history
-  const systemPromptRef = useRef(systemPrompt); systemPromptRef.current = systemPrompt
-  const agentContextRef = useRef(agentContextText); agentContextRef.current = agentContextText
-  const autoWriteRef = useRef(autoWrite); autoWriteRef.current = autoWrite
-  const onApplySystemPromptRef = useRef(onApplySystemPrompt); onApplySystemPromptRef.current = onApplySystemPrompt
-  const onApplyAgentContextRef = useRef(onApplyAgentContext); onApplyAgentContextRef.current = onApplyAgentContext
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history])
 
   useEffect(() => {
-    setAnalysesLoading(true)
-    api.getEntityHistory('agent', agentId, 50)
-      .then(setAnalyses)
-      .catch(() => setAnalyses([]))
-      .finally(() => setAnalysesLoading(false))
-  }, [agentId])
-
-  // Live, in-RAM-only on the backend — whatever this agent (AA/BA/GA) most recently
-  // actually received, e.g. a BA's upstream AA output. Always mixed into the LLM's
-  // context below (not opt-in) so prompt/output-format mismatches surface immediately.
-  useEffect(() => {
-    api.getAgentLastInput(agentId)
-      .then(setLastInput)
-      .catch(() => setLastInput(null))
-  }, [agentId])
-
-  const filteredAnalyses = useMemo(() => {
-    const q = analysisFilter.trim().toLowerCase()
-    if (!q) return analyses
-    return analyses.filter(a =>
-      summarizeEntry(a).toLowerCase().includes(q) || (a.timestamp ?? '').toLowerCase().includes(q),
-    )
-  }, [analyses, analysisFilter])
-
-  function buildContextData(): string {
-    const parts = [
-      `=== System Prompt (with line numbers) ===\n${numbered(systemPromptRef.current)}`,
-    ]
-    if (agentContextExists || agentContextRef.current.trim()) {
-      parts.push(`=== Agent Context Notes (config/llm_contexts/${agentId}.md, with line numbers) ===\n${numbered(agentContextRef.current)}`)
-    } else {
-      parts.push('=== Agent Context Notes ===\n(no notes file yet for this agent)')
-    }
-    if (includeAgentConfig) {
-      parts.push(`=== Agent Configuration ===\n\`\`\`json\n${JSON.stringify(agentConfig, null, 2)}\n\`\`\``)
-    }
-    if (lastInput?.available) {
-      parts.push(
-        `=== Last Received Input (live, ${lastInput.timestamp ?? '?'}) ===\n` +
-        `The exact text this agent's LLM most recently received as its user message — check whether ` +
-        `the prompt above actually handles/expects this, e.g. field names it references.\n` +
-        `Trigger: ${lastInput.trigger ?? '(unknown)'} · Source: ${lastInput.source ?? '(unknown)'}\n` +
-        (lastInput.user_message ?? '(empty)'),
-      )
-    }
-    if (selectedAnalysis) {
-      parts.push(
-        `=== Selected Analysis (${selectedAnalysis.timestamp ?? '?'}) ===\n` +
-        `Trigger: ${selectedAnalysis.trigger ?? '(unknown)'}\n` +
-        `\`\`\`json\n${JSON.stringify(selectedAnalysis.output, null, 2)}\n\`\`\``,
-      )
-      if (includeSnapshot) {
-        const snap = extractSnapshot(selectedAnalysis)
-        parts.push(
-          snap
-            ? `=== Raw Snapshot Data For Selected Analysis ===\n\`\`\`json\n${JSON.stringify(snap, null, 2)}\n\`\`\``
-            : '=== Raw Snapshot Data For Selected Analysis ===\n(not available for this entry)',
-        )
-      }
-    }
-    return parts.join('\n\n')
-  }
-
-  function appendMessage(msg: AssistantMessage) {
-    setHistory(h => [...h, msg])
-  }
-
-  function autoApplyParsed(parsed: ParsedResponse) {
-    for (const seg of parsed.segments) {
-      if (seg.type === 'full') {
-        if (seg.block.target === 'script') onApplySystemPromptRef.current(seg.block.code)
-        if (seg.block.target === 'config') onApplyAgentContextRef.current(seg.block.code)
-      }
-      if (seg.type === 'patch') {
-        const source = seg.block.target === 'script' ? systemPromptRef.current : agentContextRef.current
-        const { result } = applyPatch(source, seg.block)
-        if (seg.block.target === 'script') onApplySystemPromptRef.current(result)
-        if (seg.block.target === 'config') onApplyAgentContextRef.current(result)
-      }
-      if (seg.type === 'diffhunk') {
-        const source = seg.block.target === 'script' ? systemPromptRef.current : agentContextRef.current
-        const { result, error } = applyDiffHunk(source, seg.block)
-        if (!error) {
-          if (seg.block.target === 'script') onApplySystemPromptRef.current(result)
-          if (seg.block.target === 'config') onApplyAgentContextRef.current(result)
-        }
-      }
-    }
-  }
-
-  async function send(): Promise<void> {
-    const question = input.trim()
-    if (!question || loading) return
-    appendMessage({ role: 'user', content: question })
-    setInput('')
-    setLoading(true)
-    setError(null)
-    try {
-      const resp = await api.llmAssistantChat({
-        context_file: CONTEXT_FILE,
-        script: systemPromptRef.current,
-        question,
-        history: historyRef.current.map(({ role, content }) => ({ role, content })),
-        context_data: buildContextData(),
-        allow_change_proposals: true,
-      })
-      if (resp.error) { setError(resp.error); return }
-      const parsed = buildParsedResponse(resp.answer, resp.proposals)
-      if (autoWriteRef.current) autoApplyParsed(parsed)
-      appendMessage({ role: 'assistant', content: resp.answer, parsed })
-    } catch (e: unknown) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }, [])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
   return (
@@ -354,7 +189,7 @@ export function PromptAssistantPanel({
             </label>
 
             {history.length > 0 && (
-              <button type="button" onClick={() => { setHistory([]); setError(null) }}
+              <button type="button" onClick={clearChat}
                 title="Clear chat" className="text-gray-600 hover:text-red-400 transition-colors">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -391,12 +226,12 @@ export function PromptAssistantPanel({
 
       {/* ── Input ── */}
       <div className="flex-shrink-0 flex items-end gap-2 px-3 py-2 border-t border-gray-800">
-        <textarea value={input} onChange={e => setInput(e.target.value)}
+        <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown} rows={2}
           placeholder="Question or change request… (Enter to send, Shift+Enter for newline)"
           className="flex-1 resize-none bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
           disabled={loading} />
-        <button type="button" onClick={() => void send()} disabled={loading || !input.trim()}
+        <button type="button" onClick={send} disabled={loading || !input.trim()}
           title="Senden (Enter)"
           className="flex-shrink-0 flex items-center justify-center w-7 h-7 rounded bg-indigo-700 hover:bg-indigo-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
           <CornerDownLeft className="w-3.5 h-3.5" />
