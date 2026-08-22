@@ -4,7 +4,7 @@
  * Uses POST /agents/{id}/ask and shows the response in a chat-bubble style.
  */
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useDebounce } from '@/utils/useDebounce'
 import {
   api,
@@ -194,6 +194,11 @@ export function AgentChat() {
   const [candlesLoading, setCandlesLoading] = useState(false)
   const [candlesError, setCandlesError] = useState<string | null>(null)
   const [chartTimeframe, setChartTimeframe] = useState<'M5' | 'M15' | 'M30' | 'H1'>('M5')
+  // Naive wall-clock string, no "Z"/offset — same convention as ChartAnalysis.tsx's
+  // anchorDateTime/anchorIso, so candles/indicators agree on one anchor value instead
+  // of the indicator lines always tracking "now" while an anchored chart shows the past.
+  const [anchorDateTime, setAnchorDateTime] = useState('')
+  const anchorIso = useMemo(() => anchorDateTime ? `${anchorDateTime}:00` : null, [anchorDateTime])
   const [showAnalyses, setShowAnalyses] = useState(true)
   const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>([])
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null)
@@ -262,14 +267,14 @@ export function AgentChat() {
     setCandlesLoading(true)
     setCandlesError(null)
     try {
-      const data = await api.getAgentCandles(selectedAgent, chartTimeframe, fetchCount)
+      const data = await api.getAgentCandles(selectedAgent, chartTimeframe, fetchCount, anchorIso)
       setCandles(data)
     } catch (err) {
       setCandlesError(String(err))
     } finally {
       setCandlesLoading(false)
     }
-  }, [selectedAgent, chartTimeframe])
+  }, [selectedAgent, chartTimeframe, anchorIso])
 
   useEffect(() => {
     void refreshCandles()
@@ -325,25 +330,25 @@ export function AgentChat() {
     if (!showEma || !selectedAgent) { setEmaFastValues([]); setEmaSlowValues([]); return }
     const history = Math.min(500, candles.length + Math.max(dEmaFastPeriod, dEmaSlowPeriod))
     Promise.all([
-      api.calculateIndicator({ indicator: 'EMA', period: dEmaFastPeriod, timeframe: dEmaTf, history, agent_id: selectedAgent }),
-      api.calculateIndicator({ indicator: 'EMA', period: dEmaSlowPeriod, timeframe: dEmaTf, history, agent_id: selectedAgent }),
+      api.calculateIndicator({ indicator: 'EMA', period: dEmaFastPeriod, timeframe: dEmaTf, history, agent_id: selectedAgent, ...(anchorIso ? { start: anchorIso } : {}) }),
+      api.calculateIndicator({ indicator: 'EMA', period: dEmaSlowPeriod, timeframe: dEmaTf, history, agent_id: selectedAgent, ...(anchorIso ? { start: anchorIso } : {}) }),
     ]).then(([fast, slow]) => { setEmaFastValues(fast.values ?? []); setEmaSlowValues(slow.values ?? []) })
       .catch(() => { setEmaFastValues([]); setEmaSlowValues([]) })
-  }, [showEma, selectedAgent, dEmaFastPeriod, dEmaSlowPeriod, dEmaTf, candles.length])
+  }, [showEma, selectedAgent, dEmaFastPeriod, dEmaSlowPeriod, dEmaTf, candles.length, anchorIso])
 
   useEffect(() => {
     if (!showRsi || !selectedAgent) { setRsiValues([]); return }
-    api.calculateIndicator({ indicator: 'RSI', period: dRsiPeriod, timeframe: dRsiTf, history: Math.min(500, candles.length + dRsiPeriod), agent_id: selectedAgent })
+    api.calculateIndicator({ indicator: 'RSI', period: dRsiPeriod, timeframe: dRsiTf, history: Math.min(500, candles.length + dRsiPeriod), agent_id: selectedAgent, ...(anchorIso ? { start: anchorIso } : {}) })
       .then(r => setRsiValues(r.values ?? []))
       .catch(() => setRsiValues([]))
-  }, [showRsi, selectedAgent, dRsiPeriod, dRsiTf, candles.length])
+  }, [showRsi, selectedAgent, dRsiPeriod, dRsiTf, candles.length, anchorIso])
 
   useEffect(() => {
     if (!showAtr || !selectedAgent) { setAtrValues([]); return }
-    api.calculateIndicator({ indicator: 'ATR', period: dAtrPeriod, timeframe: dAtrTf, history: Math.min(500, candles.length + dAtrPeriod), agent_id: selectedAgent })
+    api.calculateIndicator({ indicator: 'ATR', period: dAtrPeriod, timeframe: dAtrTf, history: Math.min(500, candles.length + dAtrPeriod), agent_id: selectedAgent, ...(anchorIso ? { start: anchorIso } : {}) })
       .then(r => setAtrValues(r.values ?? []))
       .catch(() => setAtrValues([]))
-  }, [showAtr, selectedAgent, dAtrPeriod, dAtrTf, candles.length])
+  }, [showAtr, selectedAgent, dAtrPeriod, dAtrTf, candles.length, anchorIso])
 
   const overlayLines: ForexChartOverlayLine[] = showEma ? [
     { key: 'ema_fast', label: `EMA ${emaFastPeriod} ${emaTf}`, color: '#facc15', values: emaFastValues },
@@ -864,6 +869,25 @@ export function AgentChat() {
                           {n}
                         </button>
                       ))}
+                      <span className="inline-flex items-center gap-1 text-xs text-white">
+                        Anchor
+                        <input
+                          type="datetime-local"
+                          value={anchorDateTime}
+                          onChange={e => setAnchorDateTime(e.target.value)}
+                          className="bg-gray-900 border border-gray-700 rounded px-1 text-xs text-white"
+                          title="Kerzen/Indikatoren bis zu diesem Zeitpunkt laden statt live/jetzt"
+                        />
+                        {anchorDateTime && (
+                          <button
+                            onClick={() => setAnchorDateTime('')}
+                            className="px-1 text-gray-500 hover:text-gray-300"
+                            title="Anchor zurücksetzen (live)"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
                       <label className="ml-auto inline-flex items-center gap-1 text-xs text-white cursor-pointer select-none">
                         <input
                           type="checkbox"

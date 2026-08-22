@@ -34,6 +34,8 @@ export interface ForexChartMarker {
   color: string
   text?: string
   payload?: unknown
+  /** Bigger/bold text with a dark outline, so this marker stands out (e.g. trade start/end) — default styling otherwise. */
+  emphasis?: boolean
 }
 
 export interface ForexChartOverlayLine {
@@ -81,6 +83,10 @@ export interface ForexChartHandle {
   captureImage: () => string | null
   captureImageForPrint: () => string | null
   resetView: () => void
+  /** Fits ALL currently loaded candles into view, regardless of the range/initialRange
+   * setting — unlike resetView() (which shows min(range, loaded candles), so it can
+   * still crop a bigger loaded window down to a smaller configured range). */
+  fitAllCandles: () => void
   startDrawing: (tool: DrawingToolName, style: DrawingStyle) => void
   cancelDrawing: () => void
   addDrawing: (drawing: Drawing) => void
@@ -234,6 +240,26 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         for (const key of oscillatorSeriesRef.current.keys()) {
           chart.priceScale(key).applyOptions({ autoScale: true })
         }
+      }
+    },
+    fitAllCandles: () => {
+      const chart = chartRef.current
+      if (!chart) return
+      const realBars = orderedRef.current.length
+      // fitContent() fits the ENTIRE series including the 200 trailing whitespace
+      // (future-space) bars appended in the data-loading effect above, which leaves a
+      // large blank gap on one side instead of stretching just the real candles to
+      // fill the pane edge-to-edge. Set the logical range to exactly the real candle
+      // span instead. Degenerate case (0 or 1 real candles): nothing meaningful to
+      // stretch to fill the width, so fall back to fitContent().
+      if (realBars <= 1) {
+        chart.timeScale().fitContent()
+      } else {
+        chart.timeScale().setVisibleLogicalRange({ from: 0, to: realBars - 1 })
+      }
+      chart.priceScale('right').applyOptions({ autoScale: true })
+      for (const key of oscillatorSeriesRef.current.keys()) {
+        chart.priceScale(key).applyOptions({ autoScale: true })
       }
     },
     startDrawing: (tool: DrawingToolName, style: DrawingStyle) => {
@@ -606,6 +632,7 @@ export const ForexChart = forwardRef<ForexChartHandle, ForexChartProps>(function
         shape: marker.shape,
         color: marker.color,
         text: marker.text,
+        emphasis: marker.emphasis,
       }))
       .sort((a, b) => a.time - b.time)
     markerPrimitive.setMarkers(markerData, orderedRef.current)

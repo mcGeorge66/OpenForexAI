@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { TF_MINUTES } from '@/utils/indicators'
-import { useDebounce } from '@/utils/useDebounce'
-import { AlertCircle, Bot, Check, Copy, FileText, GitBranch, Loader2, Printer, RefreshCcw, BookOpen, X } from 'lucide-react'
+import { AlertCircle, Bot, Check, Copy, FileText, GitBranch, LineChart, Loader2, Printer, RefreshCcw, BookOpen, X } from 'lucide-react'
 import { TraceViewer } from '@/components/views/events/TraceViewer'
 import { OrderInvestigateModal } from '@/components/views/action/OrderInvestigateModal'
 import { kbImport } from '@/knowledgebase/kbImport'
@@ -11,18 +9,19 @@ import {
   api,
   type AnalysisRecord,
   type CandleBar,
-  type IndicatorValue,
   type OrderbookEntryDetail,
   type OrderbookEntrySummary,
 } from '@/api/client'
 import {
   ForexChart,
   type ForexChartHandle,
-  type ForexChartMarker,
-  type ForexChartOscillator,
-  type ForexChartOverlayLine,
-  type ForexChartPriceLine,
 } from '@/components/charts/ForexChart'
+import {
+  buildOrderAnalysisMarkers as buildAnalysisMarkers,
+  buildOrderMarkers as buildMarkers,
+  buildOrderPriceLines as buildPriceLines,
+  getTradeStartAt,
+} from './orderChartUtils'
 
 type StatusFilter = 'all' | 'open' | 'closed' | 'pending' | 'partially_filled' | 'rejected' | 'cancelled'
 type ChartTimeframe = 'M5' | 'M15' | 'M30' | 'H1'
@@ -67,12 +66,6 @@ function formatPrice(value?: number | null): string {
   return value.toFixed(5)
 }
 
-function getTradeStartAt(
-  entry: Pick<OrderbookEntrySummary, 'requested_at' | 'opened_at'> | null | undefined,
-): string | null {
-  return entry?.opened_at ?? entry?.requested_at ?? null
-}
-
 function tradeDuration(entry: Pick<OrderbookEntrySummary, 'requested_at' | 'opened_at' | 'closed_at'> | null | undefined): string {
   const start = entry?.opened_at ?? entry?.requested_at
   const end = entry?.closed_at
@@ -82,10 +75,6 @@ function tradeDuration(entry: Pick<OrderbookEntrySummary, 'requested_at' | 'open
   const hh = Math.floor(mins / 60).toString().padStart(2, '0')
   const mm = (mins % 60).toString().padStart(2, '0')
   return `${hh}:${mm}`
-}
-
-function getTradeEndAt(entry: Pick<OrderbookEntrySummary, 'closed_at'> | null | undefined): string | null {
-  return entry?.closed_at ?? null
 }
 
 function getTradeEndDisplay(
@@ -124,121 +113,13 @@ function getCloseDisplay(
   return 'running'
 }
 
-function findMarkerTimestamp(
-  candles: CandleBar[],
-  targetTimestamp: string | null,
-  targetPrice?: number | null,
-): string | null {
-  if (!targetTimestamp || candles.length === 0) return null
-  const targetMs = new Date(targetTimestamp).getTime()
-  if (!Number.isFinite(targetMs)) return null
-
-  const times = candles.map(c => new Date(c.timestamp).getTime()).filter(Number.isFinite)
-  if (times.length === 0) return null
-  const minMs = Math.min(...times)
-  const maxMs = Math.max(...times)
-  const sortedTimes = [...times].sort((a, b) => a - b)
-  const interval = sortedTimes.length > 1 ? sortedTimes[1] - sortedTimes[0] : 0
-  const tolerance = interval / 2
-  // Target falls outside the loaded candle range (even accounting for half a bar of
-  // slack) — there is no candle data to anchor this marker to, so don't show it
-  // rather than snapping it onto whichever edge candle happens to be closest.
-  if (targetMs < minMs - tolerance || targetMs > maxMs + tolerance) return null
-
-  const byTime = [...candles].sort(
-    (left, right) =>
-      Math.abs(new Date(left.timestamp).getTime() - targetMs) -
-      Math.abs(new Date(right.timestamp).getTime() - targetMs),
-  )
-  const nearby = byTime.slice(0, Math.min(8, byTime.length))
-
-  if (typeof targetPrice === 'number' && Number.isFinite(targetPrice)) {
-    const containing = nearby.find(candle => candle.low <= targetPrice && candle.high >= targetPrice)
-    if (containing) return containing.timestamp
-  }
-
-  return byTime[0]?.timestamp ?? null
+export interface OrderbookProps {
+  /** Switches the Action tab to Chart Analysis, focused on this order (chart, price
+   * lines, AA analysis text, and the assistant all loaded for it). */
+  onOpenInChartAnalysis?: (orderId: string) => void
 }
 
-function buildPriceLines(entry: OrderbookEntryDetail | null): ForexChartPriceLine[] {
-  if (!entry) return []
-  const overlays = entry.analysis_overlays?.levels ?? {}
-  const lines: ForexChartPriceLine[] = []
-  if (typeof entry.fill_price === 'number') {
-    lines.push({ price: entry.fill_price, title: 'Entry', color: '#38bdf8' })
-  } else {
-    lines.push({ price: entry.requested_price, title: 'Requested', color: '#38bdf8' })
-  }
-  if (typeof entry.close_price === 'number') {
-    lines.push({ price: entry.close_price, title: 'Exit', color: '#f59e0b' })
-  }
-  if (typeof entry.stop_loss === 'number') {
-    lines.push({ price: entry.stop_loss, title: 'SL', color: '#ef4444' })
-  }
-  if (typeof entry.take_profit === 'number') {
-    lines.push({ price: entry.take_profit, title: 'TP', color: '#22c55e' })
-  }
-  for (const value of overlays.support ?? []) {
-    lines.push({ price: value, title: 'Support', color: '#14b8a6' })
-  }
-  for (const value of overlays.resistance ?? []) {
-    lines.push({ price: value, title: 'Resistance', color: '#a855f7' })
-  }
-  return lines
-}
-
-function buildMarkers(entry: OrderbookEntryDetail | null, candles: CandleBar[]): ForexChartMarker[] {
-  if (!entry || candles.length === 0) return []
-  const entryPrice = entry.fill_price ?? entry.requested_price
-  const requestedTime = findMarkerTimestamp(candles, getTradeStartAt(entry), entryPrice)
-  const closedTime = findMarkerTimestamp(candles, getTradeEndAt(entry), entry.close_price)
-  const markers: ForexChartMarker[] = []
-  if (requestedTime) {
-    markers.push({
-      timestamp: requestedTime,
-      position: entry.direction === 'BUY' ? 'belowBar' : 'aboveBar',
-      shape: entry.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
-      color: '#38bdf8',
-      text: 'Start',
-    })
-  }
-  if (closedTime) {
-    markers.push({
-      timestamp: closedTime,
-      position: entry.direction === 'BUY' ? 'aboveBar' : 'belowBar',
-      shape: 'circle',
-      color: '#f59e0b',
-      text: 'End',
-    })
-  }
-  return markers
-}
-
-function buildAnalysisMarkers(records: AnalysisRecord[], candles: CandleBar[]): ForexChartMarker[] {
-  const markers: Array<ForexChartMarker | null> = records
-    .map(record => {
-      const timestamp = findMarkerTimestamp(candles, record.decided_at, null)
-      if (!timestamp) return null
-      const biasMatch = /"primary_bias"\s*:\s*"(BIAS_LONG|BIAS_SHORT|BIAS_NEUTRAL|BIAS_REVERSAL_LONG|BIAS_REVERSAL_SHORT)"/i.exec(
-        record.analysis_text ?? JSON.stringify(record.output ?? {}),
-      )
-      const bias = biasMatch?.[1]?.toUpperCase() ?? ''
-      const label = bias.includes('LONG') ? 'U' : bias.includes('SHORT') ? 'D' : 'N'
-      const conf = record.confidence != null ? Math.round(record.confidence * 100) + '%' : null
-      const text = conf != null ? label + '\n' + conf : label
-      return {
-        timestamp,
-        position: 'belowBar',
-        shape: 'square',
-        color: '#fb923c',
-        text,
-        payload: record,
-      } satisfies ForexChartMarker
-    })
-  return markers.filter((marker): marker is ForexChartMarker => marker !== null)
-}
-
-export function Orderbook() {
+export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
   const [entries, setEntries] = useState<OrderbookEntrySummary[]>([])
   const entriesRef = useRef<OrderbookEntrySummary[]>([])
   // Keep ref in sync so refreshEntries callback always sees latest entries
@@ -246,10 +127,6 @@ export function Orderbook() {
   const [selectedId, setSelectedId] = useState<string>('')
   const [selectedEntry, setSelectedEntry] = useState<OrderbookEntryDetail | null>(null)
   const [candles, setCandles] = useState<CandleBar[]>([])
-  const [emaFastValues, setEmaFastValues] = useState<IndicatorValue[]>([])
-  const [emaSlowValues, setEmaSlowValues] = useState<IndicatorValue[]>([])
-  const [rsiValues, setRsiValues] = useState<IndicatorValue[]>([])
-  const [atrValues, setAtrValues] = useState<IndicatorValue[]>([])
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -268,25 +145,6 @@ export function Orderbook() {
   const [draggingDivider, setDraggingDivider] = useState(false)
   const splitRootRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ForexChartHandle | null>(null)
-
-  // Indicator toggles + configurable params
-  const [showEma, setShowEma] = useState(false)
-  const [emaFastPeriod, setEmaFastPeriod] = useState(20)
-  const [emaSlowPeriod, setEmaSlowPeriod] = useState(50)
-  const [emaTf, setEmaTf] = useState('H1')
-  const dEmaFastPeriod = useDebounce(emaFastPeriod, 400)
-  const dEmaSlowPeriod = useDebounce(emaSlowPeriod, 400)
-  const dEmaTf = useDebounce(emaTf, 400)
-  const [showRsi, setShowRsi] = useState(false)
-  const [rsiPeriod, setRsiPeriod] = useState(7)
-  const [rsiTf, setRsiTf] = useState('H1')
-  const dRsiPeriod = useDebounce(rsiPeriod, 400)
-  const dRsiTf = useDebounce(rsiTf, 400)
-  const [showAtr, setShowAtr] = useState(false)
-  const [atrPeriod, setAtrPeriod] = useState(7)
-  const [atrTf, setAtrTf] = useState('H1')
-  const dAtrPeriod = useDebounce(atrPeriod, 400)
-  const dAtrTf = useDebounce(atrTf, 400)
 
   const refreshEntries = useCallback(async (forceBrokerSync = false) => {
     setLoading(true)
@@ -382,80 +240,6 @@ export function Orderbook() {
     const analysisMarkers = showAnalyses ? buildAnalysisMarkers(analysisRecords, candles) : []
     return [...tradeMarkers, ...analysisMarkers]
   }, [selectedEntry, candles, showAnalyses, analysisRecords])
-
-  useEffect(() => {
-    if (!showEma || !selectedEntry) { setEmaFastValues([]); setEmaSlowValues([]); return }
-    const history = Math.min(500, candles.length + Math.max(dEmaFastPeriod, dEmaSlowPeriod))
-    Promise.all([
-      api.calculateIndicator({ indicator: 'EMA', period: dEmaFastPeriod, timeframe: dEmaTf, history, pair: selectedEntry.pair, broker_name: selectedEntry.broker_name }),
-      api.calculateIndicator({ indicator: 'EMA', period: dEmaSlowPeriod, timeframe: dEmaTf, history, pair: selectedEntry.pair, broker_name: selectedEntry.broker_name }),
-    ]).then(([fast, slow]) => { setEmaFastValues(fast.values ?? []); setEmaSlowValues(slow.values ?? []) })
-      .catch(() => { setEmaFastValues([]); setEmaSlowValues([]) })
-  }, [showEma, selectedEntry, dEmaFastPeriod, dEmaSlowPeriod, dEmaTf, candles.length])
-
-  useEffect(() => {
-    if (!showRsi || !selectedEntry) { setRsiValues([]); return }
-    api.calculateIndicator({ indicator: 'RSI', period: dRsiPeriod, timeframe: dRsiTf, history: Math.min(500, candles.length + dRsiPeriod), pair: selectedEntry.pair, broker_name: selectedEntry.broker_name })
-      .then(r => setRsiValues(r.values ?? []))
-      .catch(() => setRsiValues([]))
-  }, [showRsi, selectedEntry, dRsiPeriod, dRsiTf, candles.length])
-
-  useEffect(() => {
-    if (!showAtr || !selectedEntry) { setAtrValues([]); return }
-    api.calculateIndicator({ indicator: 'ATR', period: dAtrPeriod, timeframe: dAtrTf, history: Math.min(500, candles.length + dAtrPeriod), pair: selectedEntry.pair, broker_name: selectedEntry.broker_name })
-      .then(r => setAtrValues(r.values ?? []))
-      .catch(() => setAtrValues([]))
-  }, [showAtr, selectedEntry, dAtrPeriod, dAtrTf, candles.length])
-
-  const overlayLines: ForexChartOverlayLine[] = showEma ? [
-    { key: 'ema_fast', label: `EMA ${emaFastPeriod}`, color: '#facc15', values: emaFastValues },
-    { key: 'ema_slow', label: `EMA ${emaSlowPeriod}`, color: '#60a5fa', values: emaSlowValues },
-  ] : []
-  const oscillators: ForexChartOscillator[] = [
-    ...(showRsi ? [{ key: 'rsi_primary', label: `RSI ${rsiPeriod}`, color: '#a78bfa', precision: 1, values: rsiValues }] : []),
-    ...(showAtr ? [{ key: 'atr_primary', label: `ATR ${atrPeriod}`, color: '#94a3b8', precision: 5, values: atrValues }] : []),
-  ]
-
-  const inputCls = 'w-10 bg-gray-800 border border-gray-600 rounded px-1 text-gray-200 text-xs text-center'
-  const selectCls = 'bg-gray-800 border border-gray-600 rounded px-1 text-gray-200 text-xs'
-  const tfOpts = Object.keys(TF_MINUTES)
-  const indicatorControls = selectedEntry ? (
-    <>
-      <span className="flex items-center gap-1.5">
-        <label className="flex items-center gap-1 cursor-pointer select-none">
-          <input type="checkbox" checked={showEma} onChange={e => setShowEma(e.target.checked)} className="accent-yellow-400" />
-          <span className={showEma ? 'text-yellow-400' : ''}>EMA</span>
-        </label>
-        <span className="inline-block w-2 h-2 rounded-full bg-yellow-400 shrink-0" title="Fast EMA" />
-        <input type="number" min={1} max={500} value={emaFastPeriod} onChange={e => setEmaFastPeriod(Math.max(1, Number(e.target.value)))} className={inputCls} title="Fast period" />
-        <span className="inline-block w-2 h-2 rounded-full bg-sky-400 shrink-0" title="Slow EMA" />
-        <input type="number" min={1} max={500} value={emaSlowPeriod} onChange={e => setEmaSlowPeriod(Math.max(1, Number(e.target.value)))} className={inputCls} title="Slow period" />
-        <select value={emaTf} onChange={e => setEmaTf(e.target.value)} className={selectCls}>
-          {tfOpts.map(tf => <option key={tf}>{tf}</option>)}
-        </select>
-      </span>
-      <span className="flex items-center gap-1.5">
-        <label className="flex items-center gap-1 cursor-pointer select-none">
-          <input type="checkbox" checked={showRsi} onChange={e => setShowRsi(e.target.checked)} className="accent-violet-400" />
-          <span className={showRsi ? 'text-violet-400' : ''}>RSI</span>
-        </label>
-        <input type="number" min={1} max={500} value={rsiPeriod} onChange={e => setRsiPeriod(Math.max(1, Number(e.target.value)))} className={inputCls} title="Period" />
-        <select value={rsiTf} onChange={e => setRsiTf(e.target.value)} className={selectCls}>
-          {tfOpts.map(tf => <option key={tf}>{tf}</option>)}
-        </select>
-      </span>
-      <span className="flex items-center gap-1.5">
-        <label className="flex items-center gap-1 cursor-pointer select-none">
-          <input type="checkbox" checked={showAtr} onChange={e => setShowAtr(e.target.checked)} className="accent-slate-400" />
-          <span className={showAtr ? 'text-slate-300' : ''}>ATR</span>
-        </label>
-        <input type="number" min={1} max={500} value={atrPeriod} onChange={e => setAtrPeriod(Math.max(1, Number(e.target.value)))} className={inputCls} title="Period" />
-        <select value={atrTf} onChange={e => setAtrTf(e.target.value)} className={selectCls}>
-          {tfOpts.map(tf => <option key={tf}>{tf}</option>)}
-        </select>
-      </span>
-    </>
-  ) : null
 
   const timeframeControls = useMemo(
     () => (
@@ -862,6 +646,19 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                           <Bot className="w-3.5 h-3.5" />
                           AI
                         </button>
+                        {onOpenInChartAnalysis && (
+                          <button
+                            onClick={event => {
+                              event.stopPropagation()
+                              onOpenInChartAnalysis(entry.id)
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-sky-400 hover:text-sky-300 text-xs"
+                            title="In Chart Analyse öffnen"
+                          >
+                            <LineChart className="w-3.5 h-3.5" />
+                            Chart
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -946,12 +743,9 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                 candles={candles}
                 priceLines={priceLines}
                 markers={markers}
-                overlayLines={overlayLines}
-                oscillators={oscillators}
                 ranges={[50, 100, 200, 400]}
                 initialRange={100}
                 controls={timeframeControls}
-                indicatorControls={indicatorControls}
                 onMarkerSelect={marker => {
                   if (marker.payload) {
                     setSelectedAnalysis(marker.payload as AnalysisRecord)

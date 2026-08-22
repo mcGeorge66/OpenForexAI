@@ -38,6 +38,8 @@ export interface CustomSeriesMarker {
   color: string
   /** A literal '\n' splits this into two drawn lines instead of one. */
   text?: string
+  /** Bigger/bold text with a dark outline, for markers that must stand out (e.g. trade start/end) — default styling otherwise. */
+  emphasis?: boolean
 }
 
 export interface CustomSeriesMarkersSpacing {
@@ -154,10 +156,23 @@ export class CustomSeriesMarkers implements ISeriesPrimitive {
                   const textStartY = goingUp
                     ? shapeCenterY + (spacing.shapeSize + spacing.shapeTextGap) * verticalPixelRatio
                     : shapeCenterY - (spacing.shapeSize + spacing.shapeTextGap) * verticalPixelRatio - (lines.length - 1) * spacing.lineGap * verticalPixelRatio
-                  ctx.font = `${10 * Math.min(horizontalPixelRatio, verticalPixelRatio)}px sans-serif`
+                  const scale = Math.min(horizontalPixelRatio, verticalPixelRatio)
+                  const fontSize = marker.emphasis ? 12 : 10
+                  ctx.font = `${marker.emphasis ? 'bold ' : ''}${fontSize * scale}px sans-serif`
                   ctx.textBaseline = 'middle'
+                  ctx.lineJoin = 'round'
                   for (let i = 0; i < lines.length; i++) {
-                    ctx.fillText(lines[i], xBmp, textStartY + i * spacing.lineGap * verticalPixelRatio)
+                    const ty = textStartY + i * spacing.lineGap * verticalPixelRatio
+                    if (marker.emphasis) {
+                      // Dark outline behind the fill so the label reads against any
+                      // candle color behind it, instead of just the flat marker color
+                      // (which could match/blend into similarly-colored candles).
+                      ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'
+                      ctx.lineWidth = 3 * scale
+                      ctx.strokeText(lines[i], xBmp, ty)
+                    }
+                    ctx.fillStyle = marker.color
+                    ctx.fillText(lines[i], xBmp, ty)
                   }
                 }
                 void extent // reserved for a future autoscaleInfo() that expands the price range to fit stacked text; not needed yet since markers already sit within the candle range in practice

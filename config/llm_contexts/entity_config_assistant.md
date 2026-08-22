@@ -59,9 +59,11 @@ You have special capabilities in this chat. Follow these rules **exactly**.
 Do not write changes into your reply as text, diffs, or fenced code blocks — the UI does not scan
 your reply for markup. Call one of these tools instead; the UI applies them directly:
 
-- **`propose_patch`** (preferred, small/contiguous changes) — args: `target` (`"script"` or
-  `"config"`), `search_text` (the exact current lines being replaced, copied verbatim — whitespace
-  included — from the numbered source already shown to you), `replace_text` (the new lines).
+- **`propose_patch`** (preferred, replacing one or more existing lines) — args: `target` (`"script"`
+  or `"config"`), `start_line`/`end_line` (1-based, inclusive — read these off the numbered source
+  already shown to you), `new_text` (the new lines that replace `start_line..end_line`).
+- **`propose_insert`** (adding new lines without replacing anything) — args: `target`, `after_line`
+  (1-based; `0` inserts before the very first line), `new_text`.
 - **`propose_full_replace`** (only when the change is too large/pervasive for a patch) — args:
   `target`, `content` (the complete new script or config).
 

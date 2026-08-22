@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Check, Copy, Eye, EyeOff, Printer, RefreshCcw, Trash2, Undo2 } from 'lucide-react'
+import { BookOpen, Check, Copy, Eye, EyeOff, Maximize2, MessageSquare, Printer, RefreshCcw, Trash2, Undo2 } from 'lucide-react'
 import { LineStyle, type UTCTimestamp } from 'lightweight-charts'
 
-import { api, type AnalysisRecord, type CandleBar, type InitialConsoleModuleItem } from '@/api/client'
+import { api, type AnalysisRecord, type CandleBar, type InitialConsoleModuleItem, type OrderbookEntryDetail } from '@/api/client'
 import { kbImport } from '@/knowledgebase/kbImport'
 import {
   ForexChart,
@@ -13,6 +13,15 @@ import {
   type ForexChartPriceLine,
   type SessionBandEntry,
 } from '@/components/charts/ForexChart'
+import { useAnnotationOverlay } from '@/components/charts/useAnnotationOverlay'
+import { ChartAssistantWindow } from '@/components/charts/ChartAssistantWindow'
+import type { ChartAssistantContext } from '@/components/charts/useChartAssistantChat'
+import {
+  buildOrderMarkers,
+  buildOrderPriceLines,
+  getTradeEndAt,
+  getTradeStartAt,
+} from '@/components/views/action/orderChartUtils'
 import { TF_MINUTES } from '@/utils/indicators'
 import {
   IndicatorsPanel,
@@ -165,13 +174,70 @@ function computeFutureBars(timeframe: string): number {
   return maxBars
 }
 
+// Shifts an ISO timestamp by a fixed duration in pure WALL-CLOCK terms — "close time
+// + 1 hour" means +1 hour on the clock face, not +1 hour of absolute UTC time. This
+// deliberately never touches the browser's own local timezone (no `new Date(iso)` +
+// getHours()/toISOString() round-trip, which silently reinterprets the string through
+// whatever zone the browser/OS happens to be set to): every timestamp in this system —
+// order times, candle times, and the anchor sent to /candles — is a broker-local
+// wall-clock string throughout, matching how PromptWorkbench's own anchor field
+// already works (it appends a naive "T23:59:59", never converts). The offset suffix
+// on the input (if any, e.g. "+03:00") is intentionally ignored, not converted through —
+// only the calendar numbers matter here. Returns "YYYY-MM-DDTHH:mm", ready to use
+// directly as an <input type="datetime-local"> value.
+function shiftWallClock(iso: string, deltaMs: number): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(iso)
+  if (!m) return null
+  const [, y, mo, d, h, mi, s] = m.map(v => Number(v ?? 0))
+  const shifted = new Date(Date.UTC(y, mo - 1, d, h, mi, s) + deltaMs)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export function ChartAnalysis() {
+// Mirrors the former /orderbook/{id}/investigate endpoint's read-only tool set
+// (openforexai/management/api.py:_ORDER_INVESTIGATE_ALLOWED_TOOLS) — order-focus
+// mode gets at least as much investigative reach as the modal it replaces.
+const ORDER_FOCUS_ALLOWED_TOOLS = [
+  'get_order', 'get_order_trace', 'get_order_book',
+  'get_agent_config', 'get_ec_config', 'get_ec_runs', 'get_agent_decisions',
+  'get_candles', 'calculate_indicator', 'get_swing_levels',
+]
+
+export interface ChartAnalysisProps {
+  /** Set by Orderbook's "Open in Chart Analysis" button — loads that order's pair/
+   * timeframe/candles, price lines, and feeds its data to the assistant. */
+  focusOrderId?: string | null
+  /** Called once the order above has been loaded (or failed to load), so the caller
+   * can clear focusOrderId and avoid re-triggering on unrelated re-renders. */
+  onFocusOrderConsumed?: () => void
+}
+
+export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnalysisProps = {}) {
   // Controls
   const [pair, setPair] = useState('')
   const [timeframe, setTimeframe] = useState('M5')
   const [candleCount, setCandleCount] = useState(200)
+  // Optional historical anchor (datetime-local, "YYYY-MM-DDTHH:mm") — load candles
+  // ending at this point instead of live/latest. Same single field/mechanism in both
+  // modes: order-focus populates it with the order's own close time (see the
+  // "Order-focus mode" effect) so it's visible instead of a hidden server-side value;
+  // editing it manually works the same way free mode's does.
+  const [anchorDateTime, setAnchorDateTime] = useState('')
+  // Bumped by order-focus mode whenever it (re)loads a new order's candle window, so
+  // loadData can tell "this particular fetch was requested by order-focus" apart from
+  // a manual Reload or the 30s auto-refresh — even if focusedOrder happens not to have
+  // changed identity. See loadData below and the "Order-focus mode" effect for the two
+  // ends of this handshake.
+  const [orderFocusToken, setOrderFocusToken] = useState(0)
+  // Last orderFocusToken for which we've already told the chart to refit — guards
+  // resetView() to fire exactly once per order-focus load.
+  const lastResetTokenRef = useRef(0)
+
+  // Assistant / order-focus mode
+  const [showAssistant, setShowAssistant] = useState(false)
+  const [focusedOrder, setFocusedOrder] = useState<OrderbookEntryDetail | null>(null)
 
   // Broker
   const [brokerName, setBrokerName] = useState<string | null>(null)
@@ -250,6 +316,77 @@ export function ChartAnalysis() {
 
   const chartRef = useRef<ForexChartHandle | null>(null)
 
+  // Assistant-drawn annotations (zone_marker/trade_marker/candle_marker) — same
+  // rendering the Simulation tab uses, so a marker the assistant sets here looks
+  // and behaves identically to one set there.
+  const annotationOverlay = useAnnotationOverlay(chartRef, candles)
+
+  const orderPriceLines = useMemo(() => buildOrderPriceLines(focusedOrder), [focusedOrder])
+  const orderMarkers = useMemo(() => buildOrderMarkers(focusedOrder, candles), [focusedOrder, candles])
+
+  // Diagnostic, not decorative: shows exactly what candle range actually loaded and,
+  // in order-focus, whether the order's own open/close time falls outside it — the
+  // one thing a screenshot of the chart alone can't tell either of us when a marker is
+  // missing. Answers "is the window wrong, or is the marker logic wrong" on sight.
+  const loadedRangeInfo = useMemo(() => {
+    if (candles.length === 0) return null
+    const first = candles[0].timestamp
+    const last = candles[candles.length - 1].timestamp
+    let outOfRange: 'start' | 'end' | 'both' | null = null
+    if (focusedOrder) {
+      const startAt = getTradeStartAt(focusedOrder)
+      const endAt = getTradeEndAt(focusedOrder)
+      const startBefore = !!startAt && new Date(startAt).getTime() < new Date(first).getTime()
+      const endAfter = !!endAt && new Date(endAt).getTime() > new Date(last).getTime()
+      outOfRange = startBefore && endAfter ? 'both' : startBefore ? 'start' : endAfter ? 'end' : null
+    }
+    return { count: candles.length, first, last, outOfRange }
+  }, [candles, focusedOrder])
+
+  // Naive wall-clock string, no "Z"/offset — see shiftWallClock's comment for why.
+  const anchorIso = useMemo(() => anchorDateTime ? `${anchorDateTime}:00` : null, [anchorDateTime])
+
+  const assistantContext: ChartAssistantContext = useMemo(() => {
+    if (!focusedOrder) return { pair, brokerName, timeframe, candleCount, candleAnchor: anchorIso }
+    const lines = [
+      '=== Focused Order ===',
+      `Order id: ${focusedOrder.id}`,
+      `Agent id: ${focusedOrder.agent_id}`,
+      `Direction: ${focusedOrder.direction}`,
+      `Signal confidence: ${focusedOrder.signal_confidence}`,
+      `Requested price: ${focusedOrder.requested_price} (${focusedOrder.requested_at})`,
+      `Fill price: ${focusedOrder.fill_price ?? '-'}${focusedOrder.opened_at ? ` (${focusedOrder.opened_at})` : ''}`,
+      `Close price: ${focusedOrder.close_price ?? '-'}${focusedOrder.closed_at ? ` (${focusedOrder.closed_at})` : ''}`,
+      `Stop loss: ${focusedOrder.stop_loss ?? '-'}`,
+      `Take profit: ${focusedOrder.take_profit ?? '-'}`,
+      `Status: ${focusedOrder.status}`,
+      focusedOrder.close_reason ? `Close reason: ${focusedOrder.close_reason}` : null,
+      focusedOrder.close_reasoning ? `Close reasoning: ${focusedOrder.close_reasoning}` : null,
+      (focusedOrder.pnl_pips != null || focusedOrder.pnl_account_currency != null)
+        ? `Result: ${focusedOrder.pnl_pips ?? '-'} pips / ${focusedOrder.pnl_account_currency ?? '-'} account currency`
+        : null,
+      '=== Entry Reasoning (short) ===',
+      focusedOrder.entry_reasoning || '(none)',
+      '=== Original Analysis (full) ===',
+      focusedOrder.analysis_text ?? '(none)',
+      // The three below are also on `focusedOrder` already (no extra fetch needed) but
+      // were previously omitted here, unlike the old Orderbook "Ask AI" endpoint which
+      // dumped the entire serialized order record — restoring parity with that.
+      '=== Decision Context (AA, structured) ===',
+      JSON.stringify(focusedOrder.decision_context ?? {}, null, 2),
+      '=== Analysis Overlays (levels/indicators shown to the AA) ===',
+      JSON.stringify(focusedOrder.analysis_overlays ?? {}, null, 2),
+      '=== Market Context Snapshot (raw data the AA saw) ===',
+      JSON.stringify(focusedOrder.market_context_snapshot ?? {}, null, 2),
+      '=== End Focused Order ===',
+    ].filter((line): line is string => line !== null)
+    return {
+      pair, brokerName, timeframe, candleCount, candleAnchor: anchorIso,
+      extraSystemPrompt: lines.join('\n'),
+      extraAllowedTools: ORDER_FOCUS_ALLOWED_TOOLS,
+    }
+  }, [pair, brokerName, timeframe, candleCount, focusedOrder, anchorIso])
+
   // ── Resizable bottom panel ─────────────────────────────────────────────────
   const [bottomHeight, setBottomHeight] = useState(300)
   const resizingRef = useRef(false)
@@ -290,13 +427,16 @@ export function ChartAnalysis() {
     void api.getInitialConsole().then(res => {
       const connected = res.broker.items.filter(b => b.status === 'connected')
       setBrokers(connected)
-      if (connected.length > 0) setBrokerName(b => b ?? connected[0].name)
+      // Order-focus mode sets its own broker once the order loads — picking a default
+      // here first would otherwise race the (async) order fetch and cause a visible
+      // pair/broker swap + candle reload a moment after the page already rendered.
+      if (connected.length > 0 && !focusOrderId) setBrokerName(b => b ?? connected[0].name)
     }).catch(() => {})
-  }, [])
+  }, [focusOrderId])
 
   useEffect(() => {
-    if (!pair && availablePairs.length > 0) setPair(availablePairs[0])
-  }, [availablePairs, pair])
+    if (!pair && !focusOrderId && availablePairs.length > 0) setPair(availablePairs[0])
+  }, [availablePairs, pair, focusOrderId])
 
   // ── Indicator computation ──────────────────────────────────────────────────
 
@@ -315,6 +455,7 @@ export function ChartAnalysis() {
           pair,
           broker_name: brokerName,
           ...(ind.smoothPeriod && ind.smoothPeriod > 1 ? { smooth_period: ind.smoothPeriod } : {}),
+          ...(anchorIso ? { start: anchorIso } : {}),
         })
         if (ind.name === 'BB') {
           type BBRaw = { timestamp: string; value: { upper: number; middle: number; lower: number } }
@@ -336,7 +477,7 @@ export function ChartAnalysis() {
     }))
 
     return results
-  }, [candleCount, pair, timeframe, brokerName])
+  }, [candleCount, pair, timeframe, brokerName, anchorIso])
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -344,13 +485,46 @@ export function ChartAnalysis() {
     if (!pair) return
     setLoading(true)
     setError(null)
+    // Captured now (not read fresh after the await) so this fetch is tied to the
+    // order-focus request that was pending when it started, not whatever the token
+    // happens to be once the response comes back.
+    const requestedResetToken = orderFocusToken
     try {
+      // One fetch mechanism for both modes: candleCount + anchorDateTime. Free mode
+      // leaves anchorDateTime empty (live/latest). Order-focus mode pre-fills it from
+      // the order's own close time before this runs (see the "Order-focus mode"
+      // effect) — same field, same code path, just populated automatically instead of
+      // left for the user to set. Sent as a naive wall-clock string (no "Z"/offset) —
+      // see shiftWallClock's comment above for why converting through the browser's
+      // local timezone here would be wrong. Uses the shared anchorIso memo (defined
+      // above) rather than a local re-derivation, so candles/indicators/DXY/swing
+      // levels all agree on exactly the same anchor value.
       const [newCandles, analyses] = await Promise.all([
-        api.getCandles(pair, timeframe, candleCount, brokerName),
+        api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso),
         api.getAnalyses({ pair, limit: 300 }),
       ])
       setCandles(newCandles)
       setAnalysisRecords(analyses)
+      // Order-focus mode loaded a fresh candle window for this fetch — sync candleCount
+      // down if the backend came back short (e.g. near a data boundary, so the chart's
+      // own visible-range fit doesn't leave a request/response mismatch) and refit the
+      // chart's viewport so the trade's Start/End markers are actually on screen.
+      // Guarded to fire exactly once per order-focus load (not on the manual Reload
+      // button, nor on the refetch that the candleCount adjustment itself triggers —
+      // without the lastResetTokenRef check, a persistently-short response (backend
+      // consistently returning one fewer candle than asked, e.g. right at the edge of
+      // available history) would re-trigger this same block on every subsequent load
+      // forever, ratcheting candleCount down 200 → 199 → 198 → ... → 1 in a runaway
+      // fetch loop that starves the UI — every toolbar click was still handled, but
+      // between two re-renders a click's effect was immediately clobbered by the next
+      // loop iteration's setCandles/setIndicators, making every tool look broken).
+      if (requestedResetToken !== 0 && requestedResetToken !== lastResetTokenRef.current) {
+        lastResetTokenRef.current = requestedResetToken
+        if (newCandles.length > 0 && newCandles.length !== candleCount) {
+          setCandleCount(newCandles.length)
+        }
+        chartRef.current?.resetView()
+      }
       const updated = await recomputeIndicators(newCandles, indicatorsRef.current)
       setIndicators(updated)
 
@@ -362,6 +536,7 @@ export function ChartAnalysis() {
         history: Math.min(candleCount, 100),
         pair,
         broker_name: brokerName,
+        ...(anchorIso ? { start: anchorIso } : {}),
       }).then(r => {
         type DXYRaw = { timestamp: string; value: DXYEntry }
         const raw = r.values as unknown as DXYRaw[]
@@ -375,15 +550,60 @@ export function ChartAnalysis() {
       setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair, timeframe, candleCount, brokerName])
+  }, [pair, timeframe, candleCount, brokerName, orderFocusToken, anchorIso])
 
   useEffect(() => { void loadData() }, [loadData])
 
-  // Auto-refresh every 30 seconds
+  // ── Order-focus mode — triggered by Orderbook's "Open in Chart Analysis" button.
+  // Loads the order, switches pair/broker to match it, and sets the anchor to the
+  // trade's own close time + 1 hour — fixed, no span math, no dynamic candle count.
+  // candleCount is left exactly as-is (whatever's currently in the "Candles" field,
+  // default 200); loadData (above) then fetches that many candles ending at the
+  // anchor, same as a manual anchor edit in free mode would. Frozen once loaded (see
+  // the auto-refresh guard below) until leaveOrderFocus() clears it.
   useEffect(() => {
+    if (!focusOrderId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const entry = await api.getOrderbookEntry(focusOrderId)
+        if (cancelled) return
+        setFocusedOrder(entry)
+        setPair(entry.pair)
+        setBrokerName(entry.broker_name)
+        const endAt = getTradeEndAt(entry)
+        setAnchorDateTime(endAt ? shiftWallClock(endAt, 60 * 60_000) ?? '' : '')
+        // Tell loadData a chart refit is owed once this order's candles land — see
+        // loadData and lastResetTokenRef above. Deliberately does NOT auto-open the
+        // Assistant window — the user opens it explicitly (toolbar toggle) when wanted.
+        setOrderFocusToken(t => t + 1)
+      } catch (err) {
+        if (!cancelled) setError(String(err))
+      } finally {
+        if (!cancelled) onFocusOrderConsumed?.()
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusOrderId])
+
+  const leaveOrderFocus = useCallback(() => {
+    setFocusedOrder(null)
+    setCandleCount(200)
+    setAnchorDateTime('')
+  }, [])
+
+  // Auto-refresh every 30 seconds — skipped while viewing a frozen order-focus window:
+  // re-fetching "the latest candles" on a timer makes sense for a live chart, but not
+  // for a closed historical trade — worse, it can reset the chart's pan/zoom out from
+  // under the user every 30s for no benefit. Order-focus stays frozen until
+  // leaveOrderFocus() clears focusedOrder, same as PromptWorkbench never re-fetches its
+  // own loaded window on a timer.
+  useEffect(() => {
+    if (focusedOrder) return
     const id = setInterval(() => { void loadData() }, 30_000)
     return () => clearInterval(id)
-  }, [loadData])
+  }, [loadData, focusedOrder])
 
   // ── Swing levels ───────────────────────────────────────────────────────────
 
@@ -394,7 +614,7 @@ export function ChartAnalysis() {
       const baseCount = swingVisibleOnly ? visibleCandleCount : candleCount
       const chartMinutes = baseCount * (TF_MINUTES[timeframe] ?? 5)
       const swingLookback = Math.max(10, Math.ceil(chartMinutes / (TF_MINUTES[swingTf] ?? 60)))
-      const res = await api.executeTool('get_swing_levels', { timeframe: swingTf, max_levels: swingCount, lookback: swingLookback, atr_period: swingAtrPeriod, min_gap_atr: swingMinGapAtr, price_source: swingPriceSource, sort_by: swingSortByRef.current }, null, brokerName, null, pair)
+      const res = await api.executeTool('get_swing_levels', { timeframe: swingTf, max_levels: swingCount, lookback: swingLookback, atr_period: swingAtrPeriod, min_gap_atr: swingMinGapAtr, price_source: swingPriceSource, sort_by: swingSortByRef.current, ...(anchorIso ? { start: anchorIso } : {}) }, null, brokerName, null, pair)
       const result = res.result as SwingResult
       const lines: ForexChartPriceLine[] = [
         ...(result.highs ?? []).map(h => ({
@@ -425,7 +645,7 @@ export function ChartAnalysis() {
     } finally {
       setSwingLoading(false)
     }
-  }, [pair, swingEnabled, swingTf, swingCount, swingAtrPeriod, swingMinGapAtr, candleCount, visibleCandleCount, swingVisibleOnly, timeframe, swingLineWidth, swingLineStyle, swingPriceSource, brokerName])
+  }, [pair, swingEnabled, swingTf, swingCount, swingAtrPeriod, swingMinGapAtr, candleCount, visibleCandleCount, swingVisibleOnly, timeframe, swingLineWidth, swingLineStyle, swingPriceSource, brokerName, anchorIso])
 
   useEffect(() => { void loadSwingLevels() }, [loadSwingLevels])
 
@@ -806,6 +1026,25 @@ ${analysisSection}`
           </span>
         ) : null}
 
+        {/* Mode indicator — always visible regardless of whether the Assistant window
+            is open, since that's now closed by default even in order-focus mode. Kept
+            as one short, fixed-width label (not "Order-Fokus: EURUSD BUY") so it doesn't
+            shift the rest of the toolbar when switching modes; full detail is in the
+            tooltip instead. Clicking it while focused leaves focus immediately. */}
+        {focusedOrder ? (
+          <button
+            onClick={leaveOrderFocus}
+            title={`Order-Fokus: ${focusedOrder.pair} ${focusedOrder.direction} — klicken um zur freien Chart-Analyse zu wechseln`}
+            className="text-xs text-indigo-300 border border-indigo-700 rounded px-2 py-0.5 bg-indigo-900/20 hover:bg-indigo-900/40"
+          >
+            🔒 Order
+          </button>
+        ) : (
+          <span className="text-xs text-gray-500 border border-gray-700 rounded px-2 py-0.5 bg-gray-900/40" title="Freie Chart-Analyse">
+            🔓 Frei
+          </span>
+        )}
+
         {/* Timeframe */}
         <div className="flex items-center gap-1">
           {TIMEFRAMES.map(tf => (
@@ -835,6 +1074,32 @@ ${analysisSection}`
           />
         </div>
 
+        {/* Anchor — same field/mechanism in both modes: load candles ending at this
+            point instead of live/latest. Order-focus pre-fills it from the order's own
+            close time (see the "Order-focus mode" effect) so the anchor is visible;
+            editing it manually re-fetches around the new point either way. */}
+        <div
+          className="flex items-center gap-1 text-xs text-white"
+          title="Kerzen bis zu diesem Zeitpunkt laden statt der aktuellsten. Leer lassen für Live-Daten. Im Order-Fokus automatisch auf den Close-Zeitpunkt der Order gesetzt."
+        >
+          <span>Anchor</span>
+          <input
+            type="datetime-local"
+            value={anchorDateTime}
+            onChange={e => setAnchorDateTime(e.target.value)}
+            className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
+          />
+          {anchorDateTime && (
+            <button
+              onClick={() => setAnchorDateTime('')}
+              title="Anchor zurücksetzen (Live-Daten)"
+              className="text-gray-500 hover:text-gray-300"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
         {/* Reload */}
         <button
           onClick={() => void loadData()}
@@ -846,6 +1111,23 @@ ${analysisSection}`
         </button>
 
         {error && <span className="text-xs text-red-400 truncate max-w-48">{error}</span>}
+
+        {/* Loaded-range diagnostic — see loadedRangeInfo above for why this exists. */}
+        {loadedRangeInfo && (
+          <span
+            className={`text-xs rounded px-2 py-0.5 border ${
+              loadedRangeInfo.outOfRange
+                ? 'text-amber-300 border-amber-700 bg-amber-900/20'
+                : 'text-gray-500 border-gray-700 bg-gray-900/40'
+            }`}
+            title={`Geladen: ${loadedRangeInfo.first} → ${loadedRangeInfo.last} (${loadedRangeInfo.count} Kerzen)`}
+          >
+            {loadedRangeInfo.count}× {loadedRangeInfo.first.slice(0, 16).replace('T', ' ')} → {loadedRangeInfo.last.slice(0, 16).replace('T', ' ')}
+            {loadedRangeInfo.outOfRange === 'both' && ' ⚠ Order-Start+Ende außerhalb!'}
+            {loadedRangeInfo.outOfRange === 'start' && ' ⚠ Order-Start außerhalb!'}
+            {loadedRangeInfo.outOfRange === 'end' && ' ⚠ Order-Ende außerhalb!'}
+          </span>
+        )}
 
         {/* Active tool indicator */}
         {activeTool && (
@@ -866,6 +1148,13 @@ ${analysisSection}`
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => chartRef.current?.fitAllCandles()}
+            title="Alle geladenen Kerzen in den sichtbaren Bereich einpassen"
+            className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-white hover:text-white text-xs flex items-center gap-1"
+          >
+            <Maximize2 className="w-3 h-3" /> Fit
+          </button>
           <button
             onClick={() => setPanMode(m => !m)}
             className={`px-2 py-1 rounded border text-xs flex items-center gap-1 ${
@@ -910,11 +1199,35 @@ ${analysisSection}`
                 <BookOpen className="w-3 h-3" /> → KB
               </button>
           }
+          <button
+            onClick={() => setShowAssistant(v => !v)}
+            className={`px-2 py-1 rounded border text-xs flex items-center gap-1 ${
+              showAssistant
+                ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
+                : 'border-gray-700 bg-gray-900 text-gray-300 hover:text-white'
+            }`}
+          >
+            <MessageSquare className="w-3 h-3" /> Assistant
+          </button>
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="flex-1 min-h-0 p-2">
+      {/* Chart — min-h floor so a wrapped (multi-row) toolbar combined with the
+          fixed-height bottom panel can never squeeze this to 0px. The Assistant is a
+          free-floating window (rendered below, outside this layout) rather than a
+          docked sibling here, so it can never affect the chart's own width/sizing. */}
+      <div className="flex-1 min-h-[240px] relative">
+        {error && (
+          <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between gap-3 px-3 py-2 rounded border border-red-800 bg-red-950/90 text-xs text-red-200 shadow-lg">
+            <span className="truncate">Kerzen konnten nicht geladen werden: {error}</span>
+            <button
+              onClick={() => void loadData()}
+              className="flex-shrink-0 px-2 py-1 rounded border border-red-700 bg-red-900/60 hover:bg-red-900 text-red-100"
+            >
+              Erneut versuchen
+            </button>
+          </div>
+        )}
         <ForexChart
           ref={chartRef}
           candles={candles}
@@ -922,8 +1235,8 @@ ${analysisSection}`
           futureBars={computeFutureBars(timeframe)}
           overlayLines={overlayLines}
           oscillators={oscillators}
-          markers={analysisMarkers}
-          priceLines={swingLines}
+          markers={[...analysisMarkers, ...orderMarkers, ...annotationOverlay.markers]}
+          priceLines={[...swingLines, ...orderPriceLines]}
           ranges={[50, 100, 200, 500]}
           initialRange={candleCount}
           panMode={panMode}
@@ -946,6 +1259,15 @@ ${analysisSection}`
           }}
         />
       </div>
+
+      {showAssistant && (
+        <ChartAssistantWindow
+          overlay={annotationOverlay}
+          context={assistantContext}
+          focusedOrder={focusedOrder}
+          onClose={() => setShowAssistant(false)}
+        />
+      )}
 
       {/* Resize handle */}
       <div

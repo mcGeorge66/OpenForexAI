@@ -36,9 +36,11 @@ your reply for markup. Call one of these tools instead; the UI applies them dire
 `target: "script"` for the **System Prompt** and `target: "config"` for the **Agent Context
 notes** (reusing the same two target names OpenForexAI's other editors use for these fields).
 
-- **`propose_patch`** (preferred, small/contiguous changes) — args: `target`, `search_text` (the
-  exact current lines being replaced, copied verbatim — whitespace included — from the numbered
-  source already shown to you), `replace_text` (the new lines).
+- **`propose_patch`** (preferred, replacing one or more existing lines) — args: `target`,
+  `start_line`/`end_line` (1-based, inclusive — read these off the numbered source already shown
+  to you), `new_text` (the new lines that replace `start_line..end_line`).
+- **`propose_insert`** (adding new lines without replacing anything) — args: `target`, `after_line`
+  (1-based; `0` inserts before the very first line), `new_text`.
 - **`propose_full_replace`** (only when the change is too large/pervasive for a patch) — args:
   `target`, `content` (the complete new System Prompt or Agent Context text).
 

@@ -60,13 +60,18 @@ function formatMoney(v: number | null | undefined): string {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`
 }
 
+// "Capped Scroll Box" pattern — see docs/ui-patterns.md. Collapsed state keeps the
+// full text in the DOM (never truncated) inside a fixed max-height, scrollable
+// container, so a scrollbar is always an alternative to clicking "Show more".
+// "Show more" removes the height cap entirely for a fully unbounded view.
+const CAPPED_BOX_MAX_HEIGHT = '16rem'
+
 function AssistantMessageBubble({ msg, toolLines }: { msg: ChatMessage; toolLines: string[] }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const lines = msg.content.split('\n')
   const isLong = lines.length > COLLAPSED_MAX_LINES
-  const shown = expanded || !isLong ? msg.content : lines.slice(0, COLLAPSED_MAX_LINES).join('\n')
 
   const copy = () => {
     void navigator.clipboard.writeText(msg.content).then(() => {
@@ -82,8 +87,12 @@ function AssistantMessageBubble({ msg, toolLines }: { msg: ChatMessage; toolLine
           msg.error ? 'bg-red-900/30 text-red-300' : 'bg-gray-800 text-gray-200'
         }`}
       >
-        {shown}
-        {!expanded && isLong && <span className="text-gray-500">{'\n…'}</span>}
+        <div
+          className={!expanded && isLong ? 'overflow-y-auto pr-1' : undefined}
+          style={!expanded && isLong ? { maxHeight: CAPPED_BOX_MAX_HEIGHT } : undefined}
+        >
+          {msg.content}
+        </div>
         {toolLines.length > 0 && (
           <div
             className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono"

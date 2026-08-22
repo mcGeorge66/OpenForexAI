@@ -109,10 +109,11 @@ export const api = {
                     post<AgentQueryResponse>(`/agents/${encodeURIComponent(agentId)}/ask`, { question, timeout, ...(history?.length ? { history } : {}), ...(llmName ? { llm_name: llmName } : {}) }),
   executeAgent:   (agentId: string, body: AgentExecuteRequest) =>
                     post<AgentExecuteResponse>(`/agents/${encodeURIComponent(agentId)}/execute`, body),
-  getAgentCandles: (agentId: string, timeframe = 'M5', count = 100) =>
-                    get<CandleBar[]>(
-                      `/agents/${encodeURIComponent(agentId)}/candles?timeframe=${encodeURIComponent(timeframe)}&count=${count}`,
-                    ),
+  getAgentCandles: (agentId: string, timeframe = 'M5', count = 100, start?: string | null) => {
+                    const q = new URLSearchParams({ timeframe, count: String(count) })
+                    if (start) q.set('start', start)
+                    return get<CandleBar[]>(`/agents/${encodeURIComponent(agentId)}/candles?${q.toString()}`)
+                  },
   triggerAgent:    (agentId: string) =>
                     post<{ message_id: string; status: string; broker_name: string; pair: string; candle_timestamp: string }>(
                       `/agents/${encodeURIComponent(agentId)}/trigger`, {}),
@@ -784,11 +785,12 @@ export interface LLMAssistantChatRequest {
 }
 
 export interface LLMAssistantProposal {
-  type: 'patch' | 'full'
+  type: 'patch' | 'insert' | 'full'
   target: 'script' | 'config'
-  search_text?: string | null
-  replace_text?: string | null
-  content?: string | null
+  start_line?: number | null
+  end_line?: number | null
+  after_line?: number | null
+  text?: string | null
 }
 
 export interface LLMAssistantChatResponse {

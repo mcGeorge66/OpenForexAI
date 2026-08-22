@@ -241,15 +241,20 @@ export function buildParsedResponse(answer: string, proposals: LLMAssistantPropo
   if (text) segments.push({ type: 'text', content: text })
 
   for (const p of proposals ?? []) {
-    if (p.type === 'patch' && typeof p.search_text === 'string' && typeof p.replace_text === 'string') {
+    if (p.type === 'patch' && typeof p.start_line === 'number' && typeof p.end_line === 'number' && typeof p.text === 'string') {
       segments.push({
-        type: 'diffhunk',
-        block: { kind: 'diffhunk', target: p.target, searchText: p.search_text, replaceText: p.replace_text },
+        type: 'patch',
+        block: { kind: 'patch', target: p.target, startLine: p.start_line, endLine: p.end_line, code: p.text, insert: false },
       })
-    } else if (p.type === 'full' && typeof p.content === 'string') {
+    } else if (p.type === 'insert' && typeof p.after_line === 'number' && typeof p.text === 'string') {
+      segments.push({
+        type: 'patch',
+        block: { kind: 'patch', target: p.target, startLine: p.after_line, endLine: p.after_line, code: p.text, insert: true },
+      })
+    } else if (p.type === 'full' && typeof p.text === 'string') {
       segments.push({
         type: 'full',
-        block: { kind: 'full', target: p.target, lang: p.target === 'script' ? 'python' : 'json', code: p.content },
+        block: { kind: 'full', target: p.target, lang: p.target === 'script' ? 'python' : 'json', code: p.text },
       })
     }
   }

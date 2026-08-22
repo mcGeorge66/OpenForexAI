@@ -94,6 +94,15 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
             const targetLabel = block.target === 'script' ? 'Script' : 'Config'
             const canApply = block.target === 'script' || (block.target === 'config' && !!onApplyConfig)
 
+            // Old lines are read directly from the CURRENT source by line number — never
+            // asked of the model — so they're always accurate even if the model's own
+            // recollection of that text would have drifted (the failure mode that made
+            // the earlier search-text-based version unreliable for prose).
+            const source = block.target === 'script' ? currentScript : currentConfig
+            const sourceLines = source.split('\n')
+            const oldLines = block.insert ? [] : sourceLines.slice(Math.max(0, block.startLine - 1), block.endLine)
+            const newLines = block.code.split('\n')
+
             return (
               <div key={i} className="rounded border border-indigo-800/60 overflow-hidden">
                 <div className="flex items-center justify-between px-2 py-1 bg-gray-900 border-b border-indigo-800/40">
@@ -105,8 +114,8 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
                     </button>
                     {canApply && !autoWrite && (
                       <button type="button" onClick={() => {
-                        const source = block.target === 'script' ? currentScript : currentConfig
-                        const { result, error } = applyPatch(source, block)
+                        const src = block.target === 'script' ? currentScript : currentConfig
+                        const { result, error } = applyPatch(src, block)
                         if (error) { setPatchErrors(s => ({ ...s, [i]: error })); return }
                         if (block.target === 'script') onApplyScript(result)
                         if (block.target === 'config') onApplyConfig?.(result)
@@ -119,7 +128,20 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
                     {canApply && autoWrite && <span className="text-[10px] text-indigo-400 italic">auto-applied</span>}
                   </div>
                 </div>
-                <pre className="px-3 py-2 text-[11px] font-mono text-indigo-300 overflow-x-auto whitespace-pre bg-gray-950">{block.code}</pre>
+                <pre className="px-3 py-2 text-[11px] font-mono overflow-x-auto whitespace-pre bg-gray-950">
+                  {oldLines.map((l, li) => (
+                    <div key={`o${li}`} className="text-red-400">
+                      <span className="text-gray-600 select-none">{String(block.startLine + li).padStart(4, ' ')} | </span>
+                      {`- ${l}`}
+                    </div>
+                  ))}
+                  {newLines.map((l, li) => (
+                    <div key={`n${li}`} className="text-emerald-400">
+                      <span className="text-gray-600 select-none">{String((block.insert ? block.startLine + 1 : block.startLine) + li).padStart(4, ' ')} | </span>
+                      {`+ ${l}`}
+                    </div>
+                  ))}
+                </pre>
                 {patchErrors[i] && (
                   <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-red-400 bg-red-900/20 border-t border-red-800/40">
                     <AlertTriangle className="w-3 h-3 flex-shrink-0" />{patchErrors[i]}
@@ -134,10 +156,23 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
             const targetLabel = block.target === 'script' ? 'Script' : 'Config'
             const canApply = block.target === 'script' || (block.target === 'config' && !!onApplyConfig)
 
+            // Locate the hunk in the CURRENT source to number lines — DiffHunkBlock
+            // itself has no line numbers (it's applied by exact text match, not
+            // position), so this is display-only and best-effort: falls back to no
+            // numbers if the text can't be found (e.g. the source changed since).
+            const source = block.target === 'script' ? currentScript : currentConfig
+            const matchIndex = source.indexOf(block.searchText)
+            const startLine = matchIndex === -1 ? null : source.slice(0, matchIndex).split('\n').length
+            const searchLines = block.searchText.split('\n')
+            const replaceLines = block.replaceText.split('\n')
+            const rangeLabel = startLine === null
+              ? null
+              : searchLines.length <= 1 ? `L${startLine}` : `L${startLine}–L${startLine + searchLines.length - 1}`
+
             return (
               <div key={i} className="rounded border border-indigo-800/60 overflow-hidden">
                 <div className="flex items-center justify-between px-2 py-1 bg-gray-900 border-b border-indigo-800/40">
-                  <span className="text-[10px] font-mono text-indigo-400">diff {targetLabel}</span>
+                  <span className="text-[10px] font-mono text-indigo-400">diff {targetLabel}{rangeLabel ? ` · ${rangeLabel}` : ''}</span>
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={() => { void navigator.clipboard.writeText(block.replaceText).then(() => markCopied(i)) }}
                       className="flex items-center gap-1 text-[10px] text-white hover:text-gray-300 transition-colors">
@@ -160,8 +195,18 @@ export function MessageBubble({ msg, autoWrite, currentScript, currentConfig = '
                   </div>
                 </div>
                 <pre className="px-3 py-2 text-[11px] font-mono overflow-x-auto whitespace-pre bg-gray-950">
-                  {block.searchText.split('\n').map((l, li) => <div key={`s${li}`} className="text-red-400">{`- ${l}`}</div>)}
-                  {block.replaceText.split('\n').map((l, li) => <div key={`r${li}`} className="text-emerald-400">{`+ ${l}`}</div>)}
+                  {searchLines.map((l, li) => (
+                    <div key={`s${li}`} className="text-red-400">
+                      {startLine !== null && <span className="text-gray-600 select-none">{String(startLine + li).padStart(4, ' ')} | </span>}
+                      {`- ${l}`}
+                    </div>
+                  ))}
+                  {replaceLines.map((l, li) => (
+                    <div key={`r${li}`} className="text-emerald-400">
+                      {startLine !== null && <span className="text-gray-600 select-none">{String(startLine + li).padStart(4, ' ')} | </span>}
+                      {`+ ${l}`}
+                    </div>
+                  ))}
                 </pre>
                 {patchErrors[i] && (
                   <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-red-400 bg-red-900/20 border-t border-red-800/40">

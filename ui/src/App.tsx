@@ -202,6 +202,10 @@ function MainApp() {
   const [section, setSection] = useState<TopSection>('action')
   const [subItems, setSubItems] = useState<Record<TopSection, string>>(DEFAULT_SUB)
   const [savedMonitorFilters, setSavedMonitorFilters] = useState<SavedMonitorFilter[]>([])
+  // Orderbook's "Open in Chart Analysis" button sets this and switches the Action
+  // sub-view to chart_analysis; ChartAnalysis consumes it (loads the order, then
+  // clears it via onFocusOrderConsumed) so re-visiting the tab later doesn't re-trigger.
+  const [chartAnalysisFocusOrderId, setChartAnalysisFocusOrderId] = useState<string | null>(null)
 
   const activeSub = subItems[section]
   const monitorSubItems = savedMonitorFilters.map(filter => ({ id: filter.id, label: filter.name }))
@@ -246,6 +250,11 @@ function MainApp() {
     setSubItems(prev => ({ ...prev, [section]: id }))
   }
 
+  const openOrderInChartAnalysis = (orderId: string) => {
+    setSubItems(prev => ({ ...prev, action: 'chart_analysis' }))
+    setChartAnalysisFocusOrderId(orderId)
+  }
+
   const handleHandbook = (lang: 'en' | 'de') => {
     const file = resolveHandbookFile(section, activeSub, lang)
     window.open(
@@ -264,8 +273,13 @@ function MainApp() {
       case 'action':
         if (activeSub === 'initial') return <InitialPage />
         if (activeSub === 'chat') return <AgentChat />
-        if (activeSub === 'orderbook') return <Orderbook />
-        if (activeSub === 'chart_analysis') return <ChartAnalysis />
+        if (activeSub === 'orderbook') return <Orderbook onOpenInChartAnalysis={openOrderInChartAnalysis} />
+        if (activeSub === 'chart_analysis') return (
+          <ChartAnalysis
+            focusOrderId={chartAnalysisFocusOrderId}
+            onFocusOrderConsumed={() => setChartAnalysisFocusOrderId(null)}
+          />
+        )
         if (activeSub === 'event_log') return <EventLogView />
         if (activeSub === 'prompt_workbench') return <PromptWorkbench />
         if (activeSub === 'llm_checker') return <LlmChecker />

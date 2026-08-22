@@ -29,15 +29,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Check, Copy, Play, RefreshCcw, RotateCcw, Square, StepForward, Trash2 } from 'lucide-react'
-import { LineStyle, type UTCTimestamp } from 'lightweight-charts'
+import { LineStyle } from 'lightweight-charts'
 import {
   api,
   type CalculationBlock,
   type CandleBar,
   type InitialConsoleModuleItem,
-  type PromptWorkbenchAnnotation,
-  type PromptWorkbenchAnnotationRemoval,
-  type PromptWorkbenchChatResponse,
   type PromptWorkbenchContextPreviewResponse,
   type PromptWorkbenchSavedConfig,
   type PromptWorkbenchToolEvent,
@@ -52,7 +49,7 @@ import {
   type ForexChartOverlayLine,
   type ForexChartPriceLine,
 } from '@/components/charts/ForexChart'
-import type { Drawing } from '@/components/charts/drawing/types'
+import { useAnnotationOverlay, pipSize, type TaggedAnnotation } from '@/components/charts/useAnnotationOverlay'
 import { IndicatorsPanel } from '@/components/charts/IndicatorsPanel'
 import {
   INDICATOR_DEFS,
@@ -78,35 +75,6 @@ import {
   type SnapshotToolBlockForm,
 } from '@/components/common/snapshotBlocksHelpers'
 import { TF_MINUTES } from '@/utils/indicators'
-
-function toUnixTime(iso: string): UTCTimestamp {
-  return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp
-}
-
-function pipSize(price: number): number {
-  return price > 20 ? 0.01 : 0.0001
-}
-
-// Tagged with the color selected at send time, so overlapping results from
-// different questions/runs stay visually distinguishable on the chart.
-type TaggedAnnotation = PromptWorkbenchAnnotation & { _color: string }
-
-// Identifies an annotation for upsert-by-id merging: a `change`/`new` call with
-// the same key replaces the previous entry instead of piling up next to it. A
-// trade's open and close legs share a trade_id but are corrected independently,
-// hence the `action` suffix — everything else has exactly one record per id.
-function annotationKey(a: { kind: string }): string {
-  if (a.kind === 'zone') return `zone:${(a as Extract<PromptWorkbenchAnnotation, { kind: 'zone' }>).zone_id}`
-  if (a.kind === 'candle_marker') return `candle_marker:${(a as Extract<PromptWorkbenchAnnotation, { kind: 'candle_marker' }>).marker_id}`
-  const trade = a as Extract<PromptWorkbenchAnnotation, { kind: 'trade' }>
-  return `trade:${trade.trade_id}:${trade.action}`
-}
-
-function removalKey(r: PromptWorkbenchAnnotationRemoval): string {
-  if (r.kind === 'zone') return `zone:${r.zone_id}`
-  if (r.kind === 'candle_marker') return `candle_marker:${r.marker_id}`
-  return `trade:${r.trade_id}:${r.action}`
-}
 
 // Analyse-tab indicator config for a saved Workbench Config — deliberately excludes
 // `data`/`bbData` (computed values, recalculated fresh against whatever candles the
@@ -144,7 +112,6 @@ function normalizeIndicatorInstance(raw: Record<string, unknown>, index: number)
 
 const TIMEFRAMES = Object.keys(TF_MINUTES).filter(tf => tf !== 'M1')
 const REASONING_EFFORTS = ['none', 'low', 'medium', 'high']
-const DEFAULT_ANNOTATION_COLOR = '#f59e0b'
 
 type ToolTab = 'analyse' | 'snapshot' | 'ba' | 'context'
 
@@ -251,7 +218,11 @@ export function PromptWorkbench() {
     setCandleCount(clamped)
     setCandleCountInput(String(clamped))
   }
+  // datetime-local string (YYYY-MM-DDTHH:mm), naive wall-clock — same convention as
+  // ChartAnalysis.tsx's anchorDateTime/anchorIso, so a saved simulation anchor means
+  // exactly the same point in time there and here.
   const [anchorDate, setAnchorDate] = useState('')
+  const anchorIso = useMemo(() => anchorDate ? `${anchorDate}:00` : null, [anchorDate])
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -358,7 +329,7 @@ export function PromptWorkbench() {
           pair,
           broker_name: brokerName,
           ...(ind.smoothPeriod && ind.smoothPeriod > 1 ? { smooth_period: ind.smoothPeriod } : {}),
-          ...(anchorDate ? { start: `${anchorDate}T23:59:59` } : {}),
+          ...(anchorIso ? { start: anchorIso } : {}),
         })
         if (ind.name === 'BB') {
           type BBRaw = { timestamp: string; value: { upper: number; middle: number; lower: number } }
@@ -379,7 +350,7 @@ export function PromptWorkbench() {
       }
     }))
     return results
-  }, [candleCount, pair, timeframe, brokerName, anchorDate])
+  }, [candleCount, pair, timeframe, brokerName, anchorIso])
 
   function addIndicator(name: IndicatorName) {
     const def = INDICATOR_DEFS.find(d => d.name === name)!
@@ -418,36 +389,21 @@ export function PromptWorkbench() {
 
   // ── Agent-drawn annotation state — declared before loadCandles, which calls
   // clearAnnotations() on every fresh candle set (stale zones/trade lines from
-  // a previous load no longer apply).
-  const [annotations, setAnnotations] = useState<TaggedAnnotation[]>([])
-  // stepOnce is called in a tight while-loop by Run (handleRunToggle) that captures a single
-  // stepOnce closure up front and keeps calling it — it never picks up a fresher closure as
-  // annotations changes turn-to-turn the way a fresh render/click would. Without this ref,
-  // every step during Run would send the annotations snapshot from when Run was first
-  // clicked, so trade_marker's id generator would never see a previous trade as "used" and
-  // would keep assigning the same id (e.g. always "AA") instead of incrementing.
-  const annotationsRef = useRef<TaggedAnnotation[]>(annotations)
-  useEffect(() => { annotationsRef.current = annotations }, [annotations])
-  const renderedDrawingIdsRef = useRef<Set<string>>(new Set())
-  const renderedDrawingContentRef = useRef<Map<string, string>>(new Map())
-  const [annotationColor, setAnnotationColor] = useState(DEFAULT_ANNOTATION_COLOR)
-
-  const clearAnnotations = useCallback(() => {
-    for (const drawing of chartRef.current?.getDrawings() ?? []) {
-      chartRef.current?.removeDrawing(drawing.id)
-    }
-    renderedDrawingIdsRef.current.clear()
-    renderedDrawingContentRef.current.clear()
-    setAnnotations([])
-  }, [])
+  // a previous load no longer apply). Rendering itself (state, DrawingManager
+  // diffing, marker derivation) lives in useAnnotationOverlay, shared with the
+  // Chart Analysis assistant so both render zone_marker/trade_marker/candle_marker
+  // tool calls identically instead of two implementations.
+  const {
+    annotations, annotationsRef, annotationColor, setAnnotationColor,
+    clearAnnotations, applyAnnotationUpdates, markers: annotationMarkers,
+  } = useAnnotationOverlay(chartRef, candles)
 
   const loadCandles = useCallback(async () => {
     if (!pair) return
     setLoading(true)
     setError(null)
     try {
-      const start = anchorDate ? `${anchorDate}T23:59:59` : null
-      const data = await api.getCandles(pair, timeframe, candleCount, brokerName, start)
+      const data = await api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso)
       setCandles(data)
       candleAnchorRef.current = data.length > 0
         ? data.reduce((newest, c) => c.timestamp > newest ? c.timestamp : newest, data[0].timestamp)
@@ -462,7 +418,7 @@ export function PromptWorkbench() {
     } finally {
       setLoading(false)
     }
-  }, [pair, timeframe, candleCount, brokerName, anchorDate, recomputeIndicators, clearAnnotations])
+  }, [pair, timeframe, candleCount, brokerName, anchorIso, recomputeIndicators, clearAnnotations])
 
   useEffect(() => { void loadCandles() }, [loadCandles])
 
@@ -744,27 +700,10 @@ export function PromptWorkbench() {
   // ── Agent-drawn annotations (zone_marker / trade_marker / candle_marker) ──
   // Accumulated client-side across turns — the backend keeps no session state,
   // each response only returns the annotations created during that one call.
-  // (State + clearAnnotations are declared further up, before loadCandles.)
-  const tagAnnotations = useCallback(
-    (list: PromptWorkbenchAnnotation[]): TaggedAnnotation[] => list.map(a => ({ ...a, _color: annotationColor })),
-    [annotationColor],
-  )
-
-  // Applies one turn's worth of annotation changes: op='new'/'change' upsert by
-  // id (a 'change' with the same id replaces the previous entry in place),
-  // op='delete' drops it. Without this, correcting or removing a marking would
-  // just pile a second record next to the old one instead of fixing it.
-  const applyAnnotationUpdates = useCallback((resp: PromptWorkbenchChatResponse) => {
-    if (!resp.annotations?.length && !resp.removed_annotation_ids?.length) return
-    const removedKeys = new Set((resp.removed_annotation_ids ?? []).map(removalKey))
-    const incoming = tagAnnotations(resp.annotations ?? [])
-    const incomingKeys = new Set(incoming.map(annotationKey))
-    setAnnotations(prev => [
-      ...prev.filter(a => !removedKeys.has(annotationKey(a)) && !incomingKeys.has(annotationKey(a))),
-      ...incoming,
-    ])
-  }, [tagAnnotations])
-
+  // State, tagAnnotations/applyAnnotationUpdates, marker derivation, and the
+  // DrawingManager zone/trade-line rendering all live in useAnnotationOverlay
+  // now (destructured above) — kept here is only what's PWB-specific: which
+  // trades are currently open, for tradeStatusText below.
   const openTrades = useMemo(() => {
     const open = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
     for (const a of annotations) {
@@ -774,125 +713,6 @@ export function PromptWorkbench() {
     }
     return open
   }, [annotations])
-
-  const tradeMarkers: ForexChartMarker[] = useMemo(() => annotations
-    .filter((a): a is Extract<TaggedAnnotation, { kind: 'trade' }> => a.kind === 'trade')
-    .map(a => ({
-      timestamp: a.timestamp,
-      position: a.action === 'open' ? 'belowBar' : 'aboveBar',
-      shape: a.action === 'open' ? (a.direction === 'short' ? 'arrowDown' : 'arrowUp') : 'circle',
-      color: a._color,
-      // Line 1: ID + direction/action as single letters (S/L, O/C) + candle number.
-      // Line 2 (if present): the free-text note — its own line via CustomSeriesMarkers.
-      text: (() => {
-        const dirLetter = a.direction === 'short' ? 'S' : a.direction === 'long' ? 'L' : ''
-        const actionLetter = a.action === 'open' ? 'O' : 'C'
-        const line1 = `[${a.trade_id}] ${dirLetter}${actionLetter} #${a.candle_number}`
-        return a.note ? `${line1}\n${a.note}` : line1
-      })(),
-    })), [annotations])
-
-  const candleMarkers: ForexChartMarker[] = useMemo(() => annotations
-    .filter((a): a is Extract<TaggedAnnotation, { kind: 'candle_marker' }> => a.kind === 'candle_marker')
-    .map(a => ({
-      timestamp: a.timestamp,
-      position: a.position === 'above' ? 'aboveBar' : 'belowBar',
-      shape: a.position === 'above' ? 'arrowDown' : 'arrowUp',
-      color: a._color,
-      text: `[${a.marker_id}] #${a.candle_number} ${a.text}`,
-    })), [annotations])
-
-  // Draw/update/remove zones and closed-trade lines as annotations change —
-  // DrawingManager is imperative (chartRef.add/removeDrawing), so this diffs
-  // against what's already on the chart: unchanged content is left alone, a
-  // corrected (op='change') zone/trade is removed and redrawn, and one that
-  // dropped out of `annotations` (op='delete') is removed outright.
-  useEffect(() => {
-    const zonesById = new Map<string, Extract<TaggedAnnotation, { kind: 'zone' }>>()
-    const opensByTradeId = new Map<string, Extract<TaggedAnnotation, { kind: 'trade' }>>()
-    const closedTradeIds = new Set<string>()
-    for (const a of annotations) {
-      if (a.kind === 'zone') zonesById.set(a.zone_id, a)
-      else if (a.kind === 'trade' && a.action === 'open') opensByTradeId.set(a.trade_id, a)
-      else if (a.kind === 'trade' && a.action === 'close') closedTradeIds.add(a.trade_id)
-    }
-
-    // Drop drawings whose annotation no longer exists (deleted) or whose
-    // matching leg disappeared (a closed trade's line needs both legs present).
-    for (const drawingId of [...renderedDrawingIdsRef.current]) {
-      const stillWanted = drawingId.startsWith('zone_')
-        ? zonesById.has(drawingId.slice(5))
-        : drawingId.startsWith('trade_')
-          ? opensByTradeId.has(drawingId.slice(6)) && closedTradeIds.has(drawingId.slice(6))
-          : true
-      if (!stillWanted) {
-        chartRef.current?.removeDrawing(drawingId)
-        renderedDrawingIdsRef.current.delete(drawingId)
-        renderedDrawingContentRef.current.delete(drawingId)
-      }
-    }
-
-    for (const zone of zonesById.values()) {
-      const drawingId = `zone_${zone.zone_id}`
-      const startMs = new Date(zone.start_timestamp).getTime()
-      const endMs = new Date(zone.end_timestamp).getTime()
-      const inRange = candles.filter(c => {
-        const t = new Date(c.timestamp).getTime()
-        return t >= Math.min(startMs, endMs) && t <= Math.max(startMs, endMs)
-      })
-      if (inRange.length === 0) continue
-      const contentKey = `${zone.start_timestamp}|${zone.end_timestamp}|${zone.heading}|${zone._color}`
-      if (renderedDrawingContentRef.current.get(drawingId) === contentKey) continue
-      if (renderedDrawingIdsRef.current.has(drawingId)) chartRef.current?.removeDrawing(drawingId)
-      const high = Math.max(...inRange.map(c => c.high))
-      const low = Math.min(...inRange.map(c => c.low))
-      const heightPips = (high - low) / pipSize(high)
-      const drawing: Drawing = {
-        id: drawingId,
-        tool: 'rect',
-        points: [
-          { time: toUnixTime(zone.start_timestamp), price: high },
-          { time: toUnixTime(zone.end_timestamp), price: low },
-        ],
-        style: { color: zone._color, lineStyle: LineStyle.Solid, lineWidth: 1, fillColor: zone._color, fillOpacity: 0.12 },
-        label: `[${zone.zone_id}] ${zone.heading}`,
-        sublabel: `#${zone.start_candle_number}–#${zone.end_candle_number} · ${inRange.length} candles, ${heightPips.toFixed(1)} pips`,
-        visible: true,
-        selected: false,
-      }
-      chartRef.current?.addDrawing(drawing)
-      renderedDrawingIdsRef.current.add(drawingId)
-      renderedDrawingContentRef.current.set(drawingId, contentKey)
-    }
-
-    for (const a of annotations) {
-      if (a.kind !== 'trade' || a.action !== 'close') continue
-      const openAnn = opensByTradeId.get(a.trade_id)
-      if (!openAnn) continue
-      const drawingId = `trade_${a.trade_id}`
-      const contentKey = `${openAnn.timestamp}|${openAnn.price}|${openAnn.direction}|${a.timestamp}|${a.price}|${openAnn._color}`
-      if (renderedDrawingContentRef.current.get(drawingId) === contentKey) continue
-      if (renderedDrawingIdsRef.current.has(drawingId)) chartRef.current?.removeDrawing(drawingId)
-      const candleCountSpan = Math.abs(openAnn.candle_number - a.candle_number)
-      const priceDiff = openAnn.direction === 'short' ? openAnn.price - a.price : a.price - openAnn.price
-      const pips = priceDiff / pipSize(a.price)
-      const drawing: Drawing = {
-        id: drawingId,
-        tool: 'trendline',
-        points: [
-          { time: toUnixTime(openAnn.timestamp), price: openAnn.price },
-          { time: toUnixTime(a.timestamp), price: a.price },
-        ],
-        style: { color: openAnn._color, lineStyle: LineStyle.Solid, lineWidth: 2 },
-        label: `${candleCountSpan} candles, ${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`,
-        visible: true,
-        selected: false,
-      }
-      chartRef.current?.addDrawing(drawing)
-      renderedDrawingIdsRef.current.add(drawingId)
-      renderedDrawingContentRef.current.set(drawingId, contentKey)
-    }
-  }, [annotations, candles])
 
   const tradeStatusText = useCallback((): string => {
     if (openTrades.size === 0) return 'Currently no simulated trades are open.'
@@ -1271,7 +1091,7 @@ ${transcript}`
   }, [
     total, stepSize, fifoEnabled, allowTradeDelete, simulationAllowedTools, decisionScript, decisionScriptConfigText,
     decisionScriptAllowedTools, memoryKey, promptText, pair, brokerName, timeframe, candleCount, llmName,
-    reasoningEffort, applyAnnotationUpdates, indicators, swingEnabled, swingLines, snapshotPipelineFields,
+    reasoningEffort, applyAnnotationUpdates, annotationsRef, indicators, swingEnabled, swingLines, snapshotPipelineFields,
     step1Mode, ecScript, ecScriptConfigText, ecScriptAllowedTools,
   ])
 
@@ -1345,7 +1165,11 @@ ${transcript}`
     setPair(found.pair)
     setTimeframe(found.timeframe)
     setCandleCount(found.candle_count)
-    setAnchorDate(found.anchor_date)
+    // Configs saved before the anchor field gained a time component stored a plain
+    // "YYYY-MM-DD" date, which a datetime-local input can't display — fall back to
+    // the old fixed end-of-day time so those saved anchors still resolve to what they
+    // used to mean, instead of showing up blank.
+    setAnchorDate(/^\d{4}-\d{2}-\d{2}$/.test(found.anchor_date) ? `${found.anchor_date}T23:59` : found.anchor_date)
     setAnnotationColor(found.annotation_color)
     setStepSize(found.step_size)
     setFifoEnabled(found.fifo_enabled ?? false)
@@ -1574,10 +1398,10 @@ ${transcript}`
           />
         </div>
 
-        <div className="flex items-center gap-1 text-xs text-white" title="Optional: Kerzen bis zu diesem Datum laden statt der aktuellsten. Leer lassen für Live-Daten.">
-          <span>Anchor date</span>
+        <div className="flex items-center gap-1 text-xs text-white" title="Optional: Kerzen bis zu diesem Zeitpunkt laden statt der aktuellsten. Leer lassen für Live-Daten.">
+          <span>Anchor</span>
           <input
-            type="date"
+            type="datetime-local"
             value={anchorDate}
             onChange={e => setAnchorDate(e.target.value)}
             className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
@@ -1670,7 +1494,7 @@ ${transcript}`
           <ForexChart
             ref={chartRef}
             candles={candles}
-            markers={[...boundaryMarkers, ...tradeMarkers, ...candleMarkers]}
+            markers={[...boundaryMarkers, ...annotationMarkers]}
             overlayLines={overlayLines}
             oscillators={oscillators}
             priceLines={swingLines}

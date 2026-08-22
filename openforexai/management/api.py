@@ -2248,12 +2248,16 @@ async def get_agent_candles(
     agent_id: str,
     timeframe: str = "M5",
     count: int = 100,
+    start: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent candles for a specific AA agent.
 
     Resolves pair and broker from ``system_config.agents[agent_id]`` and maps the
     configured broker module name to its live adapter short_name before querying
     the DataContainer.
+
+    *start*, when given, anchors the read to a historical point instead of "now"
+    (see the `/candles` endpoint / `DataContainer.get_candles`).
     """
     if _data_container is None:
         raise HTTPException(status_code=503, detail="DataContainer not available")
@@ -2281,12 +2285,20 @@ async def get_agent_candles(
     if tf not in {"M5", "M15", "M30", "H1", "H4", "D1"}:
         raise HTTPException(status_code=422, detail=f"Unsupported timeframe: {timeframe!r}")
 
+    start_dt: datetime | None = None
+    if start:
+        try:
+            start_dt = datetime.fromisoformat(start)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid start timestamp: {start!r}") from None
+
     limit = max(1, min(count, 500))
     candles = await _data_container.get_candles(
         broker_name=broker_instance.short_name,
         pair=str(pair).upper(),
         timeframe=tf,
         limit=limit,
+        start=start_dt,
     )
     return [
         {
@@ -3559,8 +3571,21 @@ async def investigate_order(entry_id: str, req: OrderInvestigateRequest) -> Orde
 async def get_orderbook_entry_candles(
     entry_id: str,
     timeframe: str = "M5",
-    count: int = 2000,
+    count: int = 500,
 ) -> list[dict[str, Any]]:
+    """Return a candle window bracketing one order's actual trade (open→close), padded
+    on both sides.
+
+    Anchors the fetch directly at the trade's own close time (via DataContainer.
+    get_candles' `start` param) instead of always pulling the most recent `count`
+    candles and discarding whatever doesn't fall in the order's window — for an order
+    from days or weeks ago, that old approach wasted a large, unbounded fetch just to
+    throw away nearly all of it, and still silently depended on "now" happening to be
+    close enough to actually reach back to the order's time at all. `count` is a floor,
+    not a fixed size: for a closed order the window is sized from the trade's own
+    span + padding (never less than `count`), so a long-running trade still gets a
+    wide enough fetch instead of being cut off.
+    """
     if _repository is None:
         raise HTTPException(status_code=503, detail="Repository not available")
     if _data_container is None:
@@ -3574,22 +3599,35 @@ async def get_orderbook_entry_candles(
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Order book entry {entry_id!r} not found")
 
+    candle_delta = _timeframe_delta(tf)
+    start_anchor = entry.opened_at or entry.requested_at
+    pad_candles = 80
+    # A still-open order has no closed_at to anchor on — fall back to "now" (no start
+    # param), same as before. A closed order anchors the fetch right after its own
+    # close instead of pulling from real "now".
+    fetch_start = (entry.closed_at + candle_delta * pad_candles) if entry.closed_at else None
+
+    if entry.closed_at and start_anchor:
+        span_candles = max(0, int((entry.closed_at - start_anchor) / candle_delta))
+        needed = span_candles + max(pad_candles, int(span_candles * 0.3)) + pad_candles
+    else:
+        needed = count
+    limit = max(200, min(max(count, needed), 5000))
+
     candles = await _data_container.get_candles(
         broker_name=entry.broker_name,
         pair=entry.pair,
         timeframe=tf,
-        limit=max(200, min(count, 5000)),
+        limit=limit,
+        start=fetch_start,
     )
     candles = sorted(candles, key=lambda candle: candle.timestamp)
     if not candles:
         return []
 
-    candle_delta = _timeframe_delta(tf)
-    start_anchor = entry.opened_at or entry.requested_at
     end_anchor = entry.closed_at or candles[-1].timestamp
-    pre_candles = max(80, min(count, 5000))
-    window_start = start_anchor - (candle_delta * pre_candles)
-    window_end = end_anchor + (candle_delta * 80)
+    window_start = start_anchor - (candle_delta * pad_candles)
+    window_end = end_anchor + (candle_delta * pad_candles)
     windowed = [candle for candle in candles if window_start <= candle.timestamp <= window_end]
     source = windowed or candles
     return [
@@ -5701,11 +5739,13 @@ class LLMAssistantChatRequest(BaseModel):
     )
 
 class LLMAssistantProposal(BaseModel):
-    type: Literal["patch", "full"]
+    type: Literal["patch", "insert", "full"]
     target: Literal["script", "config"]
-    search_text: str | None = None
-    replace_text: str | None = None
-    content: str | None = None
+    start_line: int | None = None    # patch: first line to replace (1-based, inclusive)
+    end_line: int | None = None      # patch: last line to replace (1-based, inclusive)
+    after_line: int | None = None    # insert: insert after this line (0 = at the very start)
+    text: str | None = None         # patch/insert: new_text; full: content
+
 
 class LLMAssistantChatResponse(BaseModel):
     answer: str
@@ -5740,32 +5780,46 @@ def _resolve_file_refs(text: str) -> str:
 # Structured alternative to the old free-text <<<PATCH>>>/fenced-diff markup — the
 # model calls one of these instead of writing a change proposal as text, so the
 # UI never has to guess/regex-detect which of N textual conventions it used this
-# time. search_text/content must be copied verbatim from the numbered source
-# shown in context, not retyped from memory, so the exact-match apply succeeds.
+# time. Positioned by explicit line numbers (not by asking the model to reproduce
+# the old text verbatim) — the old text is read directly from the CURRENT source
+# by the UI itself for display/apply, so the model reproducing it imperfectly
+# (common for prose like a system prompt, less so for code) can never break the
+# patch. Line numbers are exactly what the pre-tool-call <<<PATCH SCRIPT L50>>>
+# markup used, and were reliable — only the markup syntax around them was fragile.
 _PROPOSE_PATCH_TOOL: dict[str, Any] = {
     "name": "propose_patch",
     "description": (
-        "Propose replacing one exact, contiguous block of existing lines in the script or "
-        "config with new lines. search_text must match the CURRENT content verbatim "
-        "(whitespace included) — copy it directly from the numbered source already shown to "
-        "you, character for character, not from memory. Call this once per distinct change; "
-        "never call it more than once for alternative versions of the same change — decide on "
-        "one and propose only that one."
+        "Propose replacing lines start_line..end_line (1-based, inclusive, from the numbered "
+        "source already shown to you) in the script or config with new_text. Call this once "
+        "per distinct change; never call it more than once for alternative versions of the "
+        "same change — decide on one and propose only that one."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "target": {"type": "string", "enum": ["script", "config"]},
-            "search_text": {
-                "type": "string",
-                "description": "Exact existing lines to replace, copied verbatim from the source shown above.",
-            },
-            "replace_text": {
-                "type": "string",
-                "description": "The new lines that replace search_text.",
-            },
+            "start_line": {"type": "integer", "description": "First line to replace (1-based, inclusive)."},
+            "end_line": {"type": "integer", "description": "Last line to replace (1-based, inclusive). Equal to start_line for a single line."},
+            "new_text": {"type": "string", "description": "The new lines that replace start_line..end_line."},
         },
-        "required": ["target", "search_text", "replace_text"],
+        "required": ["target", "start_line", "end_line", "new_text"],
+    },
+}
+
+_PROPOSE_INSERT_TOOL: dict[str, Any] = {
+    "name": "propose_insert",
+    "description": (
+        "Propose inserting new lines after line after_line (1-based; use 0 to insert before "
+        "the very first line) in the script or config, without replacing anything."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "enum": ["script", "config"]},
+            "after_line": {"type": "integer", "description": "Insert after this line number (0 = insert at the very start)."},
+            "new_text": {"type": "string", "description": "The new lines to insert."},
+        },
+        "required": ["target", "after_line", "new_text"],
     },
 }
 
@@ -5889,7 +5943,10 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
 
     try:
         llm, call_kwargs = _resolve_assistant_llm(req.llm_name)
-        tools = [_PROPOSE_PATCH_TOOL, _PROPOSE_FULL_REPLACE_TOOL] if req.allow_change_proposals else []
+        tools = (
+            [_PROPOSE_PATCH_TOOL, _PROPOSE_INSERT_TOOL, _PROPOSE_FULL_REPLACE_TOOL]
+            if req.allow_change_proposals else []
+        )
         response = await llm.complete_with_tools(
             system_prompt=system_prompt,
             messages=[{"role": "user", "content": user_message}],
@@ -5902,13 +5959,24 @@ async def llm_assistant_chat(req: LLMAssistantChatRequest) -> LLMAssistantChatRe
             target = args.get("target")
             if target not in ("script", "config"):
                 continue
-            if call.name == "propose_patch" and isinstance(args.get("search_text"), str) and isinstance(args.get("replace_text"), str):
+            if (
+                call.name == "propose_patch"
+                and isinstance(args.get("start_line"), int) and isinstance(args.get("end_line"), int)
+                and isinstance(args.get("new_text"), str)
+            ):
                 proposals.append(LLMAssistantProposal(
                     type="patch", target=target,
-                    search_text=args["search_text"], replace_text=args["replace_text"],
+                    start_line=args["start_line"], end_line=args["end_line"], text=args["new_text"],
+                ))
+            elif (
+                call.name == "propose_insert"
+                and isinstance(args.get("after_line"), int) and isinstance(args.get("new_text"), str)
+            ):
+                proposals.append(LLMAssistantProposal(
+                    type="insert", target=target, after_line=args["after_line"], text=args["new_text"],
                 ))
             elif call.name == "propose_full_replace" and isinstance(args.get("content"), str):
-                proposals.append(LLMAssistantProposal(type="full", target=target, content=args["content"]))
+                proposals.append(LLMAssistantProposal(type="full", target=target, text=args["content"]))
         return LLMAssistantChatResponse(answer=response.content or "", proposals=proposals)
     except HTTPException:
         raise
