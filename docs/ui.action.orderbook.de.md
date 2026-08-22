@@ -2,466 +2,565 @@
 
 # Orderbook — Handbuch
 
-Das **Orderbook** ist die operative Inspektionsseite für alle Trade-Einträge. Es zeigt eine vollständige Tabelle aller Orders und — bei Auswahl eines Eintrags — einen verknüpften Chart, der den exakten Marktkontext der Trade-Position darstellt. Das Orderbook ist das primäre Werkzeug zur Nachanalyse von Trades, zur Überprüfung offener Positionen und zur Fehlersuche bei der Trade-Ausführung.
+Das **Orderbook** ist die vollständige Handelshistorie und Inspektionsseite für alle von OpenForexAI verwalteten Positionen. Es zeigt eine strukturierte Tabelle aller Orders — offen, geschlossen, abgelehnt und storniert — zusammen mit einem verknüpften Chart, das den Marktkontext des ausgewählten Trades zeigt. Zusätzlich stehen pro Zeile vier Werkzeuge zur Verfügung: die gespeicherte AA-Analyse öffnen, den Event-Trace ansehen, eine KI-Chat-Untersuchung starten und der Order in der vollständigen Chart-Analyse öffnen. Das Orderbook ist bewusst **reine Inspektion** — Trades werden hier nicht platziert, geändert oder geschlossen; dafür nutzen Sie die Broker-Plattform direkt oder Agent Chat / Initial.
 
 ---
 
-## 1. Filterleiste
+## Inhaltsverzeichnis
 
-Die Filterleiste befindet sich oben auf der Orderbook-Seite und steuert, welche Einträge in der Tabelle geladen und angezeigt werden.
+1. [Seitenaufbau](#1-seitenaufbau)
+2. [Filterleiste](#2-filterleiste)
+3. [Trade-Tabelle — Spalten](#3-trade-tabelle--spalten)
+4. [Aktionen pro Zeile: Open, Trace, AI, Chart](#4-aktionen-pro-zeile-open-trace-ai-chart)
+5. [Schließgründe im Detail](#5-schließgründe-im-detail)
+6. [Trade-Detail-Chart](#6-trade-detail-chart)
+7. [Chart-Steuerung](#7-chart-steuerung)
+8. [AA-Analyse- und Recommendation-Popup](#8-aa-analyse--und-recommendation-popup)
+9. [Print und Knowledgebase-Export](#9-print-und-knowledgebase-export)
+10. [Typische Arbeitsabläufe](#10-typische-arbeitsabläufe)
+11. [Szenarien und Beispiele](#11-szenarien-und-beispiele)
+12. [Schnellreferenz](#12-schnellreferenz)
+13. [Häufige Fragen](#13-häufige-fragen)
 
-### 1.1 Status-Filter
+---
 
-Die Status-Filter-Buttons erlauben die Einschränkung der angezeigten Trades nach ihrem aktuellen Status:
+## 1. Seitenaufbau
+
+Die Seite ist vertikal in zwei Bereiche geteilt, getrennt durch eine verschiebbare Trennlinie:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  FILTER: [alle] [offen] [geschlossen] [abgelehnt]  Max: [__]    │
+│          [Refresh] [Print] [→ KB]                                │
+├───────────────────────────────────────────────────────────────────┤
+│  TRADE-TABELLE                                                   │
+│  Pair | Von | Bis | HH:MM | Id | Units | Stake | Ergebnis |     │
+│  Close | Analysis: [Open] [Trace] [AI] [Chart]                   │
+├══════════════════════ TRENNLINIE ═══════════════════════════════╡
+│  TRADE-DETAIL-CHART                                              │
+│  Info-Boxen: Entry/Exit · SL/TP · Support/Resistance · Indikat. │
+│  [Show the Analyses] [M5] [M15] [M30] [H1]                       │
+│  Chart mit Kerzen + Entry/Exit/SL/TP-Linien + Start/End-Marker   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Ein Klick auf eine Zeile wählt den Trade aus und lädt den zugehörigen Chart unten. Tabelle und Chart bleiben synchron. Die Trennlinie kann zwischen 28 % und 72 % der Seitenhöhe verschoben werden (kleiner Griff in der Mitte der Linie) — die Aufteilung wird nicht gespeichert und setzt sich bei jedem Öffnen der Seite auf etwa 50/50 zurück.
+
+Das Auswählen einer Zeile navigiert **nicht** weg vom Orderbook — der eingebettete Chart unten ist eine schlanke, reine Vorschau. Für tiefere technische Analyse (eigene Indikatoren, Swing Levels, Zeichenwerkzeuge) nutzen Sie den **Chart**-Button (Abschnitt 4), um denselben Trade in der vollständigen Chart-Analyse zu öffnen.
+
+---
+
+## 2. Filterleiste
+
+Die Filterleiste befindet sich oben auf der Seite und steuert, welche Einträge geladen und in der Tabelle angezeigt werden.
+
+### 2.1 Status-Filter
+
+Es gibt genau **vier** Filter-Buttons — es gibt **keinen** eigenen Button für stornierte Trades (siehe unten):
 
 | Filter | Bedeutung |
 |--------|-----------|
-| **alle** | Zeigt alle Trade-Einträge unabhängig vom Status. Standard nach dem Öffnen der Seite. |
-| **offen** | Zeigt nur Positionen, die derzeit aktiv beim Broker offen sind. |
-| **geschlossen** | Zeigt nur bereits abgeschlossene Positionen (durch SL, TP, manuelle Schließung oder Sync). |
-| **abgelehnt** | Zeigt Einträge, bei denen die Trade-Ausführung abgelehnt wurde (z. B. durch Risikoprüfung oder Broker-Ablehnung). |
-| **storniert** | Zeigt Einträge, die storniert wurden, bevor sie ausgeführt wurden. |
+| **alle** | Zeigt alle Trade-Einträge unabhängig vom Status. Standard nach dem Öffnen der Seite. Einziger Weg, um `CANCELLED`-Einträge zu sehen. |
+| **offen** | Zeigt Positionen mit Status `PENDING` (übermittelt, noch nicht bestätigt), `OPEN` (voll bestätigt) **oder** `PARTIALLY_FILLED` — alle drei zusammen, nicht nur voll offene Positionen. |
+| **geschlossen** | Zeigt abgeschlossene Positionen, unabhängig vom konkreten Schließgrund (SL, TP, Trailing Stop, Agent-Schließung, Broker-Zwangsschließung oder Sync-Erkennung). |
+| **abgelehnt** | Zeigt Einträge, bei denen die Order-Übermittlung an den Broker abgelehnt wurde, bevor die Position je existierte. |
 
-**Empfehlung:** Verwenden Sie den Filter **offen** regelmäßig, um einen schnellen Überblick über alle aktiven Positionen zu erhalten. Den Filter **abgelehnt** ist besonders nützlich bei der Fehlersuche, wenn erwartet wurde, dass Trades ausgeführt werden, aber keine offenen Positionen sichtbar sind.
+**Wichtig:** Es gibt in der UI **keinen** Button „storniert"/„cancelled". Trades mit Status `CANCELLED` (Entscheidung getroffen, Order gebaut, aber nie an den Broker gesendet — z. B. weil das System zwischen Entscheidung und Ausführung suspendiert wurde, oder ein Duplikat-Guard ausgelöst hat) sind ausschließlich über den Filter **alle** sichtbar, indem Sie in der Close-Spalte nach `CANCELLED` suchen. Wenn Sie prüfen wollen, warum ein erwarteter Trade fehlt: zuerst **abgelehnt**, dann **alle** durchsuchen — nicht davon ausgehen, dass es einen dedizierten Filter dafür gibt.
 
-### 1.2 Max Orders
+### 2.2 Max Orders
 
-Das **Max Orders**-Feld begrenzt die Anzahl der angezeigten Einträge in der Tabelle. Dies ist bei großen Historien mit hunderten von Trades nützlich, um die Ladezeit zu reduzieren.
+Das **Max Orders**-Feld begrenzt die Anzahl der geladenen Einträge. Die Änderung wird erst beim Verlassen des Feldes (Blur) oder mit Enter übernommen — reines Eintippen lädt noch nichts neu.
 
-- **Standardwert:** 50 (je nach Konfiguration)
-- **Eingabe:** Ganzzahl ≥ 1
-- **Anwendung:** Nach Verlassen des Feldes oder Drücken von Enter wird die Tabelle neu geladen.
+- **Minimum:** 1 (kleinere Werte werden automatisch angehoben)
+- **Kein festes Maximum**, aber sehr hohe Werte verlangsamen das Laden
+- **Standardwert beim Öffnen der Seite: 7.** Das ist bewusst klein — die Seite lädt schnell und zeigt nur die letzten paar Trades. Erhöhen Sie den Wert sofort, wenn Sie eine echte Review-Session statt eines schnellen Blicks auf die letzten Aktivitäten machen wollen.
 
-Für die tägliche Kontrolle reichen meist 20–30 Einträge. Für eine vollständige historische Analyse kann der Wert auf 500 oder mehr erhöht werden.
+Für die tägliche Kontrolle reicht der Standardwert oder ein leicht erhöhter Wert (z. B. 20). Für eine vollständige historische Analyse auf 200–500 oder mehr erhöhen.
 
-### 1.3 Refresh-Button
+### 2.3 Refresh-Button
 
-Der **Refresh**-Button lädt die Trade-Tabelle manuell neu. Das Orderbook hat kein automatisches Polling — Sie bestimmen, wann neue Daten geladen werden.
+Der **Refresh**-Button lädt die Tabelle neu und erzwingt dabei zusätzlich einen **Broker-Sync** für jede in der Tabelle vorkommende Kombination aus Broker und Pair, bevor die lokale Datenbank erneut gelesen wird. Das bedeutet: Refresh kann merklich länger dauern als ein reines Neuladen — es fragt aktiv jede relevante Broker-Verbindung nach dem aktuellen Stand ab, statt nur lokale Daten neu zu lesen. Ein Spinner-Icon zeigt den Ladevorgang an.
 
-Ein Spinner-Icon erscheint während des Ladevorgangs. Der Button ist während des Ladens deaktiviert.
+**Wann Refresh verwenden:** nach einem vermuteten neuen Trade, der noch nicht in der Tabelle erschienen ist, oder wenn Sie vermuten, dass der lokale Status einer Position vom Broker-Stand abweicht.
 
-**Wann Refresh verwenden:**
-- Nach einem vermuteten neuen Trade (z. B. wenn im Monitor ein `order_placed`-Event sichtbar war).
-- Wenn Sie die aktuellsten Informationen zu offenen Positionen benötigen.
-- Nach einem Broker-Sync, um den aktualisierten Status zu sehen.
+### 2.4 Print-Button
 
-### 1.4 Print-Button
+Erzeugt sofort einen druckfertigen Report für den aktuell ausgewählten Trade. Nur aktiv, wenn ein Trade ausgewählt ist. **Es gibt hier keinen Optionen-Dialog** mit Checkboxen (diesen Dialog gibt es nur bei der Print-Funktion der Chart-Analyse, nicht im Orderbook) — ein Klick auf Print schließt immer alles ein. Details in Abschnitt 9.
 
-Der **Print**-Button öffnet den Print-Dialog für den aktuell in der Tabelle ausgewählten Eintrag. Er ist nur aktiv, wenn ein Trade ausgewählt ist.
+### 2.5 → KB-Button
 
-Der Print-Dialog bietet Optionen, was in den Ausdruck einbezogen werden soll:
-- Chart (aktuelle Chart-Darstellung des Trades)
-- Kerzen-Daten (OHLCV der relevanten Kerzen)
-- Analyse-Daten (AA-Analyse-Snapshot, wenn vorhanden)
-
-Nach der Auswahl öffnet sich der Browser-Druckdialog mit einer druckoptimierten HTML-Ansicht.
+Exportiert den ausgewählten Trade als formatiertes Markdown-Dokument direkt in die Knowledgebase, in einen automatisch verwalteten „Import"-Ordner, mit einem Titel wie `Orderbook_2026-08-21T14-32-10`. Ebenfalls nur aktiv bei ausgewähltem Trade. Details in Abschnitt 9.
 
 ---
 
-## 2. Trade-Tabelle
+## 3. Trade-Tabelle — Spalten
 
-Die **Trade-Tabelle** ist das Herzstück des Orderbuchs. Jede Zeile repräsentiert einen Trade-Eintrag. Ein Klick auf eine Zeile wählt den Eintrag aus und lädt den zugehörigen Chart im unteren Bereich.
+Jede Zeile repräsentiert einen Trade-Eintrag. Ein Klick auf eine Zeile wählt sie aus und lädt den zugehörigen Chart.
 
-### 2.1 Spalten der Tabelle
+### Pair
 
-#### Pair
+Zeigt in der ersten Zeile das **Währungspaar** (z. B. `EUR_USD`), in der zweiten Zeile **Richtung** (`BUY`/`SELL`) und **Status**.
 
-Zeigt das **Währungspaar** (z. B. `EUR_USD`), die **Handelsrichtung** (`BUY` oder `SELL`) und den **Status** des Eintrags (z. B. `open`, `closed`).
+Wenn der Eintrag noch nicht vom Broker bestätigt wurde, erscheint ein **Warnsymbol** neben dem Pair. Dies ist ein normaler, kurzfristiger Zustand — löst sich typischerweise innerhalb von Sekunden auf. Bleibt es länger als eine Minute bestehen, die Broker-Verbindung auf der Initial-Seite prüfen.
 
-Wenn der Eintrag noch nicht vom Broker bestätigt wurde (z. B. Order kurz nach Ausführung, noch kein Broker-Callback empfangen), erscheint ein **Warnsymbol** (Ausrufezeichen) neben dem Pair. Dies ist ein normaler kurzfristiger Zustand und kein Fehler.
+### Von (From)
 
-#### Von (From)
+Der **Öffnungszeitpunkt** — der vom Broker bestätigte `opened_at`-Wert, falls vorhanden, sonst der lokal erfasste `requested_at`-Wert.
 
-Der **Startzeitpunkt** der Trade-Position — wann die Position eröffnet wurde.
+- **Gelb/amber:** Es liegt noch kein bestätigter `opened_at`-Wert vor, nur die lokale Anfragezeit. Löst sich nach Broker-Bestätigung auf.
+- **Normal:** Vom Broker bestätigt und maßgeblich.
 
-- **Grau/weiß:** Zeitstempel wurde vom Broker bestätigt.
-- **Gelb:** Zeitstempel ist nur lokal (noch kein Broker-Timestamp empfangen). Dieser Zustand ist kurzfristig und löst sich nach dem nächsten Sync-Check auf.
+Tipp: Ein gelber Zeitstempel bei einem längst geschlossenen Trade deutet meist darauf hin, dass die Broker-Bestätigung für die Eröffnung nie empfangen oder nie zurücksynchronisiert wurde — lohnt einen direkten Abgleich mit der Broker-Plattform.
 
-Der Zeitstempel wird in der lokalen Zeitzone des Systems angezeigt.
+### Bis (To)
 
-#### Bis (To)
+Der **Schließzeitpunkt**. Bei offenen Positionen leer. Bei `REJECTED`- oder `CANCELLED`-Einträgen (die nie einen echten Schließzeitpunkt hatten) wird hier derselbe Wert wie in „Von" angezeigt, damit die Zeile nicht mit zwei Strichen unvollständig wirkt.
 
-Der **Endzeitpunkt** der Position — wann die Position geschlossen wurde. Bei offenen Positionen ist dieses Feld leer oder zeigt einen Platzhalter.
+Gleiche Farbcodierung wie „Von": Gelb bedeutet, es liegt nur ein lokal erfasster „Close angefordert"-Zeitstempel ohne bestätigtes `closed_at` vor.
 
-Wie bei **Von** wird Gelb angezeigt, wenn der Zeitstempel nur lokal ist.
+### Dauer (HH:MM)
 
-#### Dauer (HH:MM)
+Die Dauer der Position, berechnet von „Von" bis „Bis".
 
-Die **Dauer der Position** in Stunden und Minuten, berechnet aus dem Unterschied zwischen **Von** und **Bis**. Bei offenen Positionen wird die aktuelle Laufzeit in Echtzeit angezeigt (bzw. bei manuellem Refresh aktualisiert).
+- `00:15` — 15 Minuten
+- `04:32` — 4 Stunden 32 Minuten
+- `—` — noch kein „Bis"-Zeitstempel (Position offen); die Dauer wird **nicht** live für offene Positionen berechnet — ein Refresh ist nötig, um sie zu aktualisieren.
 
-Beispiele:
-- `00:23` — Position lief 23 Minuten
-- `02:45` — Position lief 2 Stunden und 45 Minuten
-- `14:30` — Position lief 14 Stunden und 30 Minuten (z. B. über Nacht)
+### Id
 
-#### ID
+Die **Broker-Order-ID** in Monospace-Schrift. Zeigt `-`, solange noch keine Broker-ID zugewiesen wurde.
 
-Die **Broker-Order-ID** — die eindeutige Kennung, unter der diese Position beim Broker registriert ist. Diese ID kann verwendet werden, um die Position direkt in der Broker-Plattform nachzuschlagen.
+### Units
 
-- Zeigt `-`, wenn noch keine Broker-ID zugewiesen wurde (Position wurde noch nicht bestätigt).
-- Die ID ist unveränderlich und bleibt auch nach dem Schließen der Position erhalten.
+Die **Positionsgröße** in Einheiten der Basiswährung, mit Tausendertrennzeichen formatiert (z. B. `10,000`). Wird vom BA-Agent basierend auf der konfigurierten Positionsgrößen-Logik berechnet.
 
-#### Einheiten (Units)
+### Stake
 
-Die **Positionsgröße** in Währungseinheiten (Lots oder Units je nach Broker-Konvention). Formatiert mit Tausenderpunkt für bessere Lesbarkeit.
+**Dies ist ein Dollarbetrag, keine Prozentangabe.** Die Spalte zeigt `stake_estimate` — den nominalen Positionswert, berechnet als Eröffnungs-Referenzpreis mal Units — mit zwei Dezimalstellen und einem abschließenden `$` (z. B. `12.345,67 $`).
 
-Beispiele:
-- `1.000` — 1.000 Units (Standard Micro-Lot in manchen Broker-Systemen)
-- `10.000` — 10.000 Units
-- `100.000` — 100.000 Units (Standard Lot)
+**Achtung, Formatierungs-Falle:** Der Wert wird im Code immer im deutschen Zahlenformat gerendert (Punkt als Tausendertrennzeichen, Komma als Dezimaltrennzeichen) — unabhängig davon, welche Sprache die restliche UI gerade verwendet. `12.345,67 $` bedeutet also zwölftausenddreihundertfünfundvierzig Dollar und 67 Cent.
 
-Die Positionsgröße wird vom BA-Agent basierend auf dem konfigurierten Risiko-Prozentsatz und dem Kontoguthaben berechnet.
+Lesen Sie diese Spalte **nicht** als „Risiko in % vom Eigenkapital" — dafür müssten Sie SL-Abstand und Units selbst zum Kontostand in Relation setzen; die Stake-Spalte allein sagt das nicht aus.
 
-#### Einsatz % (Stake)
+### Ergebnis (Result)
 
-Der **geschätzte prozentuale Einsatz** dieser Position am Gesamtkontoguthaben. Dieser Wert gibt an, wie viel Prozent des Kontos durch diese Position riskiert werden (basierend auf dem Stop-Loss-Abstand zum Entry).
+Der Gewinn oder Verlust in Kontowährung, auf zwei Dezimalstellen.
 
-Angezeigt mit 2 Dezimalstellen, z. B.:
-- `1.00` — 1% des Kontoguthabens riskiert
-- `2.50` — 2.5% des Kontoguthabens riskiert
+- **Grün:** Ergebnis ≥ 0
+- **Rot:** Ergebnis < 0
+- `—`: bei offenen Positionen (kein Live-P&L in dieser Spalte — dafür Broker-Plattform oder GA-Monitor prüfen) oder bei abgelehnten/stornierten Trades, für die nie eine Position existierte.
 
-Der Einsatz-Prozentsatz wird zum Zeitpunkt der Trade-Eröffnung berechnet und ändert sich danach nicht mehr (auch wenn das Konto-Guthaben schwankt).
+### Close (Schließgrund)
 
-#### Ergebnis (P&L — Result)
+Der Grund, warum der Trade geschlossen wurde, oder — falls kein Grund gespeichert ist — ein Status-Fallback-Text. Siehe Abschnitt 5 für die exakten Werte. Unter dem Hauptwert steht eine zweite Zeile mit dem gespeicherten Freitext-Schließgrund, oder — falls keiner gespeichert ist — dem Status als Wiederholung.
 
-Das **Gewinn- oder Verlustkonto** dieser Position in der Kontowährung.
+### Analysis
 
-- **Grün** (≥ 0): Position im Gewinn oder break-even
-- **Rot** (< 0): Position im Verlust
-
-Bei **offenen Positionen** zeigt das Ergebnis den aktuellen unrealisierten Gewinn/Verlust zum Zeitpunkt des letzten Refresh.
-
-Bei **geschlossenen Positionen** zeigt das Ergebnis den endgültigen realisierten Gewinn/Verlust.
-
-Das P&L wird vom Broker übermittelt und beinhaltet Spread und ggf. Swaps.
-
-#### Schließgrund (Close)
-
-Der **Schließgrund** erklärt, warum und wie eine Position geschlossen wurde. Für offene Positionen ist dieses Feld leer.
-
-### 2.2 Schließgründe im Detail
-
-Die Schließgründe sind codierte Werte, die den Auslöser für das Schließen der Position beschreiben:
-
-#### SL — Stop Loss
-
-```
-Schließgrund: SL
-```
-
-Die Position wurde durch den **Stop-Loss** geschlossen. Der Preis hat das Stop-Loss-Level erreicht und der Broker hat die Position automatisch mit einem Verlust geschlossen.
-
-- Dies ist der normale Verlust-Exit-Mechanismus.
-- Stop-Loss-Orders liegen beim Broker und werden auch ohne aktive OpenForexAI-Verbindung ausgeführt.
-- OpenForexAI erkennt den SL-Abschluss beim nächsten Sync-Check und aktualisiert den Status in der Datenbank.
-
-#### TP — Take Profit
-
-```
-Schließgrund: TP
-```
-
-Die Position wurde durch den **Take-Profit** geschlossen. Der Preis hat das Take-Profit-Level erreicht und der Broker hat die Position automatisch mit einem Gewinn geschlossen.
-
-- Dies ist der normale Gewinn-Exit-Mechanismus.
-- Wie SL-Orders liegen TP-Orders beim Broker und werden unabhängig von OpenForexAI ausgeführt.
-
-#### SYNC_DETECTED
-
-```
-Schließgrund: SYNC_DETECTED
-```
-
-OpenForexAI hat beim Sync-Check festgestellt, dass eine Position, die lokal als offen gespeichert war, beim Broker nicht mehr existiert. Dies tritt auf, wenn:
-
-- Die Position durch SL oder TP geschlossen wurde, während OpenForexAI keine Verbindung hatte.
-- Die Position manuell über die Broker-Plattform (außerhalb von OpenForexAI) geschlossen wurde.
-- Der Broker die Position aus einem anderen Grund geschlossen hat (z. B. Margin-Call, Wochenend-Schließung).
-
-OpenForexAI markiert die Position dann mit `SYNC_DETECTED` und versucht, das tatsächliche P&L und den genauen Schließzeitpunkt vom Broker abzurufen.
-
-**Interpretation:** `SYNC_DETECTED` ist kein Fehler, sondern ein Signal, dass die Position außerhalb des normalen OpenForexAI-Exit-Flows geschlossen wurde. Prüfen Sie die Broker-Plattform für Details zum tatsächlichen Schließgrund.
-
-#### MANUELL
-
-```
-Schließgrund: MANUELL
-```
-
-Die Position wurde manuell über OpenForexAI oder direkt über die Broker-Plattform geschlossen (z. B. über einen manuellen Close-Befehl).
-
-#### ABGELEHNT
-
-```
-Schließgrund: ABGELEHNT
-```
-
-Der Trade wurde abgelehnt, bevor er erfolgreich ausgeführt werden konnte. Mögliche Gründe:
-
-- **Broker-Ablehnung:** Unzureichendes Margin, ungültige Parameter, Broker-seitige Einschränkungen.
-- **Risikoprüfung:** OpenForexAI hat den Trade intern abgelehnt (z. B. maximales tägliches Risiko überschritten, Duplikat-Signal erkannt).
-- **Konfigurationsfehler:** Ungültige SL/TP-Werte, falsche Positionsgröße.
-
-Details zum Ablehnungsgrund sind in der Analysis-Spalte oder im Monitor einsehbar.
+Vier kleine Aktions-Buttons: **Open**, **Trace**, **AI** und **Chart**. Jeder öffnet ein anderes Werkzeug für genau diesen Trade — siehe nächster Abschnitt für die Details und wann welcher Button der richtige ist.
 
 ---
 
-## 3. Analyse-Spalte und AA-Analyse-Popup
+## 4. Aktionen pro Zeile: Open, Trace, AI, Chart
 
-### 3.1 Analysis-Button
+Alle vier Buttons beantworten im weiteren Sinne „erzähl mir mehr über diesen Trade" — aber jeweils eine andere Art von Frage. Die richtige Wahl spart Zeit.
 
-Die letzte Spalte der Tabelle enthält für jeden Trade-Eintrag einen **„Open"**-Button in der Analysis-Spalte (sofern eine AA-Analyse zu diesem Trade vorhanden ist).
+### Open (Dokument-Symbol) — AA-Analyse-Popup
 
-### 3.2 AA-Analyse-Popup
+Öffnet ein Popup mit dem vollständigen, gespeicherten Analysetext des AA-Agents zu diesem Trade — unverändert, ohne weitere Werkzeugaufrufe. Der schnellste Weg, um wortgetreu zu lesen, was die Analyse tatsächlich gesagt hat. Details in Abschnitt 8.
 
-Ein Klick auf **„Open"** öffnet ein Popup-Fenster, das den vollständigen gespeicherten Analysetext des AA-Agents für diesen Trade-Eintrag zeigt.
+**Verwenden, wenn:** Sie eine konkrete Frage haben, deren Antwort wörtlich im Analysetext steht (z. B. „welchen Setup-Typ hat die Analyse hier genannt?").
 
-Das Popup enthält:
+### Trace (Verzweigungs-Symbol, grün) — Event-Trace-Ansicht
 
-- **Vollständiger Analysetext** — die gesamte Ausgabe des AA-Agents zum Zeitpunkt der Entscheidung
-- **Copy-Button** — kopiert den Analysetext in die Zwischenablage
-- **Close-Button** — schließt das Popup
+Öffnet die kausale Event-Kette zu diesem Trade: Zuerst wird nach einem Event mit passender `correlation`-ID gesucht; falls keines gefunden wird, fällt die Suche zurück auf einen Scan der letzten `order_request`/`order_placed`-Events nach einem Payload-Treffer. Danach wird derselbe TraceViewer angezeigt, der auch an anderer Stelle im System verwendet wird.
 
-Dies ist nützlich, um zu verstehen, welche Marktbedingungen und welche LLM-Begründung zur Entscheidung für diesen Trade geführt haben.
+**Verwenden, wenn:** Sie den technischen Ablauf verstehen wollen — welcher Agent hat gefeuert, welche Events wurden in welcher Reihenfolge publiziert, hat ein Guard oder EC eingegriffen — statt der Handelslogik selbst. Kann kein Event aufgelöst werden (z. B. weil der Trade älter ist als das Event-Logging, oder es sich um einen synthetischen/nachgetragenen Eintrag handelt), erscheint eine explizite „kein Event gefunden"-Meldung statt einer leeren Ansicht.
+
+### AI (Roboter-Symbol, indigo) — „Ask AI"-Untersuchungs-Chat
+
+Öffnet ein freischwebendes (verschiebbares, größenveränderbares) Chat-Fenster mit einem echten Tool-Calling-Agent, der bereits den vollständigen Datensatz dieses Trades kennt (AA-Analyse, P&L, Schließbegründung). Anders als ein statisches Popup kann der Agent während des Gesprächs aktiv weitere Daten abrufen — Event-Trace, die live laufende Agent-/EC-Konfiguration, EC-Run-Historie, Marktkerzen/Indikatoren/Swing Levels — über dieselbe eingeschränkte Tool-Auswahl, die auch der Order-Fokus-Assistent der Chart-Analyse nutzt (`get_order`, `get_order_trace`, `get_order_book`, `get_agent_config`, `get_ec_config`, `get_ec_runs`, `get_agent_decisions`, `get_candles`, `calculate_indicator`, `get_swing_levels`).
+
+Da es sich um ein freischwebendes Fenster statt eines zentrierten Modals handelt, blockiert es die Tabelle im Hintergrund nicht — Sie können weiterklicken oder scrollen (das Fenster bleibt aber an den Trade gebunden, für den es geöffnet wurde; für einen anderen Trade ein neues Fenster öffnen statt zu erwarten, dass es der Auswahl folgt).
+
+**Verwenden, wenn:** Sie eine Frage in natürlicher Sprache zu **genau diesem einen Trade** haben und eine zusammengefasste Antwort statt Rohdaten wollen — z. B. „warum wurde diese Order hier geschlossen?" oder „wenn ich den Entry-Filter anpassen will, wo mache ich das?". Es ist schnelles Q&A zu einem einzelnen Trade, kein Chart-Werkzeug.
+
+**Stattdessen Chart verwenden, wenn:** die Frage eigentlich den **Markt** betrifft, nicht den Order-Datensatz — „zeig mir das gegen EMA und Swing Levels", „was hat der Preis in der Stunde vor dem Entry auf M15 gemacht", „lass mich eine Trendlinie einzeichnen". Der AI-Chat kann Indikatorwerte in Worten beschreiben, aber keinen interaktiven Chart liefern.
+
+### Chart (Liniendiagramm-Symbol, hellblau) — In Chart Analyse öffnen
+
+**Neu.** Wechselt den Action-Tab zur **Chart-Analyse** mit diesem Trade vorgeladen: Die Kerzen werden um das Zeitfenster des Trades verankert, und dieselben Entry/Exit/SL/TP-Preislinien sowie Start/End-Marker, die im eingebetteten Orderbook-Chart zu sehen sind, werden auch dort gezeichnet — jetzt aber innerhalb des vollständigen Chart-Werkzeugs, in dem Sie Indikatoren (EMA, RSI, ATR und weitere) hinzufügen, Swing Levels aktivieren, auf dem Chart zeichnen und mit dem Chart-Analyse-Assistenten sprechen können, der die Trade-Daten bereits im Kontext hat.
+
+**Beispiel:** Sie prüfen in der Tabelle einen geschlossenen Trade mit negativem Ergebnis und wollen ihn gegen EMA-Trend und Swing Levels sehen, bevor Sie beurteilen, ob der Stop sinnvoll platziert war — Klick auf **Chart** in dieser Zeile. Die Chart-Analyse öffnet sich mit dem Zeitfenster des Trades bereits geladen und den Preislinien bereits gezeichnet; anschließend fügen Sie EMA(20) hinzu und aktivieren Swing Levels im Indikator-Panel — etwas, was der eingebettete Orderbook-Chart allein nicht mehr kann.
+
+**Empfehlung:** Greifen Sie zu **AI**, wenn Sie eine Antwort in Textform zu genau einem Trade wollen. Greifen Sie zu **Chart**, wenn Sie den Markt selbst mit echten Chart-Werkzeugen betrachten wollen, oder wenn die Textbeschreibung des AI-Chats („Preis war nahe einem Swing-High") nicht reicht und Sie es sehen wollen. Die beiden Buttons sind keine Doppelung — sie wurden bewusst so gebaut, dass sie nebeneinander existieren.
 
 ---
 
-## 4. Resize-Trennlinie
+## 5. Schließgründe im Detail
 
-Die **Trennlinie** zwischen der Trade-Tabelle und dem Chart-Bereich kann per Maus nach oben oder unten verschoben werden. Dies erlaubt es, mehr Platz für die Tabelle oder für den Chart zu reservieren.
+Der Wert in der Close-Spalte kommt direkt aus dem `close_reason`-Enum im Backend, wenn einer gespeichert ist; fehlt er, greift ein Status-Fallback.
 
-- Tabelle kann auf 28–72 % der Gesamtseitenhöhe eingestellt werden.
-- Der Rest wird vom Chart eingenommen.
+### SL_HIT — Stop Loss
+
+Der Preis hat das Stop-Loss-Level erreicht, der Broker hat die Position automatisch mit Verlust geschlossen. Dies ist der normale, geplante Verlust-Exit — das Risikomanagement hat funktioniert. Slippage kann das tatsächliche Ergebnis leicht vom theoretischen Risikobetrag abweichen lassen.
+
+**Analysefrage:** War die Stop-Platzierung angesichts der Marktstruktur beim Entry sinnvoll? Nutzen Sie den **Chart**-Button für eine genauere Prüfung mit Swing Levels.
+
+### TP_HIT — Take Profit
+
+Der Preis hat das Take-Profit-Level erreicht, der Broker hat die Position automatisch mit Gewinn geschlossen. Der normale, geplante Gewinn-Exit.
+
+### TRAILING_STOP — Trailing Stop ausgelöst
+
+Die Position hatte einen Trailing Stop konfiguriert, und der Preis hat sich weit genug zurückbewegt, um ihn auszulösen, bevor das eigentliche Take-Profit-Level erreicht wurde. Typischerweise ein kleinerer Gewinn als ein vollständiger TP-Treffer, aber ein früherer Gewinnschutz.
+
+### AGENT_CLOSED — Von einem Agenten aktiv geschlossen
+
+Ein BA- oder GA-Agent hat die Position direkt geschlossen, außerhalb des SL/TP-Mechanismus — zum Beispiel, weil eine aktualisierte AA-Analyse die Grundlage des Setups mitten im Trade widerlegt hat. Für das „Warum" ist **AI** oder **Trace** auf dieser Zeile der schnellste Weg.
+
+### BROKER_CLOSED — Vom Broker zwangsweise geschlossen
+
+Der Broker hat die Position aus einem Grund geschlossen, der außerhalb der Kontrolle von OpenForexAI liegt — Margin Call, Konto-Einschränkung oder eine broker-seitige Risikomaßnahme. Prüfen Sie die Broker-Plattform direkt; das System zeichnet hier nur auf, was der Broker getan hat.
+
+### SYNC_DETECTED
+
+OpenForexAI hat bei einem regulären Sync-Check festgestellt, dass eine als offen geführte Position beim Broker nicht mehr existiert. Dies ist das Sicherheitsnetz für Schließungen, die passieren, während OpenForexAI nicht aktiv zuschaut (ein `SL_HIT`/`TP_HIT`/`BROKER_CLOSED`-Ereignis beim Broker, das wegen einer Verbindungslücke oder eines Polling-Abstands nicht in Echtzeit erfasst wurde).
+
+**Wann dies auftritt:** eine broker-seitige Schließung zwischen zwei Sync-Zyklen; eine manuelle Schließung direkt auf der Broker-Plattform; oder inkonsistente Broker-API-Antworten über mehrere Checks, die eine Sicherheits-Schließung auslösen.
+
+**Interpretation:** kein Fehler, sondern ein Signal, dass die Position außerhalb des normalen OpenForexAI-Exit-Flows geschlossen wurde. Prüfen Sie die Broker-Plattform für den tatsächlichen Grund.
+
+### REJECTED — Order vor Eröffnung abgelehnt
+
+Die Order wurde nie zu einer Position. Häufige Gründe: unzureichendes Margin, geschlossener Markt (z. B. Wochenend-Gap), ungültige Positionsgröße (unter dem Broker-Minimum), zu weiter Spread zum Zeitpunkt der Übermittlung, oder ein vom Broker ausgesetztes/gesperrtes Instrument. Ein `REJECTED`-Eintrag hat keine bestätigten Von/Bis-Zeitstempel, keine Fill-abgeleiteten Units und kein Ergebnis.
+
+**Analysefrage:** Häufen sich `REJECTED`-Einträge bei einem bestimmten Pair oder zu bestimmten Tageszeiten, braucht der BA-Agent eventuell einen Spread-Filter oder Session-Zeitbeschränkungen.
+
+### Fallback-Werte in der Close-Spalte
+
+Nicht jeder Eintrag hat einen gespeicherten `close_reason`. Fehlt er, zeigt die Spalte stattdessen:
+
+| Angezeigter Wert | Wann |
+|---|---|
+| `REJECTED` | Status ist `REJECTED`, kein eigener Schließgrund gespeichert |
+| `CANCELLED` | Status ist `CANCELLED` — Order wurde gebaut, aber nie an den Broker gesendet |
+| `closed` (klein) | Status ist `CLOSED`, aber kein `close_reason` gespeichert — als „geschlossen, Grund nicht erfasst" lesen, nicht als Fehler |
+| `running` | Position noch offen — Standardtext für jeden Status, der nicht REJECTED, CANCELLED oder CLOSED ist |
+
+Die kleingeschriebenen Fallback-Texte (`closed`, `running`) sind keine eigenständigen Schließgründe — sie bedeuten nur „kein spezifischer Grund gespeichert".
 
 ---
 
-## 5. Trade-Detail-Chart
+## 6. Trade-Detail-Chart
 
-Wenn ein Trade-Eintrag in der Tabelle ausgewählt wird, lädt der **Trade-Detail-Chart** im unteren Bereich der Seite und zeigt den Kursverlauf zum Zeitpunkt des Trades mit allen relevanten Preisniveaus und Analyse-Markern.
+Wird ein Trade in der Tabelle ausgewählt, lädt der Chart-Bereich unten eine schlanke Vorschau des Preisverlaufs um diesen Trade herum. Der Chart ist absichtlich minimal — nur Kerzen, Preislinien und Marker. **Seit der letzten Änderung gibt es hier keine Indikator-Steuerung mehr** — keine EMA-/RSI-/ATR-Checkboxen, keine Perioden-Eingabefelder, keine Timeframe-Dropdowns pro Indikator. Wenn Sie Indikatoren, Swing Levels oder Zeichenwerkzeuge für diesen Trade brauchen, nutzen Sie den **Chart**-Button (Abschnitt 4), um ihn in der vollständigen Chart-Analyse zu öffnen — suchen Sie nicht nach Indikator-Reglern auf dieser Seite, sie wurden bewusst entfernt, damit das Orderbook auf Trade-Review fokussiert bleibt statt das Chart-Werkzeug zu duplizieren.
 
-### 5.1 Chart-Kopfzeile (Info-Boxes)
-
-Die Kopfzeile des Charts zeigt die wichtigsten Kennzahlen der ausgewählten Position in kompakten Info-Boxen:
+### 6.1 Kopfzeile (Info-Boxen)
 
 | Box | Inhalt |
 |-----|--------|
-| **Pair · Richtung** | Währungspaar (z. B. `EUR_USD`) und Trade-Richtung (`BUY` / `SELL`) |
-| **Entry** | Tatsächlicher Einstiegspreis der Position |
-| **Exit** | Tatsächlicher Ausstiegspreis (bei offener Position: aktueller Kurs) |
-| **SL** | Stop-Loss-Level (absoluter Preis) |
-| **TP** | Take-Profit-Level (absoluter Preis) |
-| **Support** | Identifizierte Support-Niveaus aus der AA-Analyse |
-| **Resistance** | Identifizierte Widerstands-Niveaus aus der AA-Analyse |
-| **Indikatoren** | Name und aktueller Wert aktiver Indikatoren |
+| **Pair · Richtung** | z. B. `EUR_USD · BUY`, darunter AA-Entscheidung / Konfidenz / Setup-Typ |
+| **Entry / Exit** | Fill-Preis (oder angeforderter Preis, falls nicht gefüllt) und Exit-Preis |
+| **SL / TP** | Stop-Loss- und Take-Profit-Preisniveau |
+| **Support / Resistance** | Support-/Resistance-Preisniveaus aus dem gespeicherten Analyse-Overlay **zum Zeitpunkt des Trades** — ein statischer, gespeicherter Snapshot, keine Live-Neuberechnung |
+| **Indikatoren** | Name-und-Wert-Badges für die Indikatoren, die die AA-Analyse als Kontext für diesen Trade gespeichert hat — ebenfalls statisch und rein lesend, hier nicht konfigurierbar |
 
-### 5.2 Visuelle Marker im Chart
+Die Support/Resistance- und Indikatoren-Boxen sehen aus wie Steuerelemente, sind es aber nicht — es gibt nichts anzuklicken oder zu konfigurieren. Sie zeigen, was der AA-Agent zum Entscheidungszeitpunkt gespeichert hat. Ein Strich bedeutet meist, dass der Analyse-Datensatz keinen Overlay-Snapshot enthielt — nicht, dass zu diesem Zeitpunkt nichts existierte.
 
-Der Trade-Detail-Chart visualisiert die Trade-Daten durch farbige Marker und Linien:
+### 6.2 Preislinien im Chart
 
-#### Entry-Pfeil (cyan)
+- **Entry (cyan):** Fill-Preis, falls die Order gefüllt wurde, sonst der ursprünglich angeforderte Preis.
+- **Exit (amber):** Exit-Preis, nur gezeichnet, sobald die Order tatsächlich geschlossen ist.
+- **SL (rot):** Stop-Loss-Niveau.
+- **TP (grün):** Take-Profit-Niveau.
+- **Support (türkis) / Resistance (violett):** je eine Linie pro Level aus dem gespeicherten Analyse-Overlay-Snapshot — dieselben Daten wie in der Info-Box oben.
 
-Ein **cyan-farbiger Pfeil** markiert den genauen Einstiegspunkt der Position auf der Zeitachse:
-- Bei einem **BUY**: Pfeil zeigt nach oben
-- Bei einem **SELL**: Pfeil zeigt nach unten
+Alle diese Linien sind einfache, über die gesamte Chart-Breite gezeichnete horizontale Preislinien (nicht auf den Zeitraum Entry-bis-Exit begrenzt) — sie markieren Preisniveaus, keine Zeitspanne.
 
-Der Pfeil befindet sich genau auf der Kerze, bei der der Trade eröffnet wurde.
+### 6.3 Start-/End-Marker
 
-#### Exit-Pfeil (amber/orange)
+- **Start-Marker:** ein hervorgehobener Pfeil (aufwärts bei BUY, abwärts bei SELL) an der Kerze nächst dem Öffnungszeitpunkt, positioniert unterhalb der Kerze bei BUY, oberhalb bei SELL.
+- **End-Marker:** ein hervorgehobener Kreis an der Kerze nächst dem Schließzeitpunkt, positioniert oberhalb der Kerze bei BUY, unterhalb bei SELL.
 
-Ein **amber-/orangefarbener Pfeil** markiert den Ausstiegspunkt der Position:
-- Bei geschlossenen BUY-Positionen: Pfeil zeigt nach unten (Verkauf zum Exit)
-- Bei geschlossenen SELL-Positionen: Pfeil zeigt nach oben (Rückkauf zum Exit)
-- Bei offenen Positionen: kein Exit-Pfeil sichtbar
-
-#### SL-Linie (rot)
-
-Eine **rote horizontale Linie** zeigt das Stop-Loss-Level an. Die Linie erstreckt sich über den Zeitraum der Position und zeigt visuell, wie nah der Preis dem Stop-Loss kam.
-
-#### TP-Linie (grün)
-
-Eine **grüne horizontale Linie** zeigt das Take-Profit-Level an. Die Linie zeigt, welches Ziel der Trade hatte.
-
-#### S/R-Linien (Grau/gedämpft)
-
-Horizontale Linien in gedämpften Grautönen zeigen die **Support- und Resistance-Niveaus**, die vom AA-Agent zum Zeitpunkt der Analyse identifiziert wurden. Diese Linien helfen zu verstehen, in welchem Kontext der Trade platziert wurde.
-
-#### Analyse-Marker (Toggle)
-
-Wenn die **„Show the Analyses"**-Checkbox aktiviert ist, werden **Analyse-Marker** auf dem Chart eingeblendet. Jeder Marker repräsentiert einen Analyse-Zyklus des AA-Agents, der in der Nähe des Trades stattfand.
-
-Ein Klick auf einen Analyse-Marker öffnet das **AA Recommendation Popup** (siehe unten).
-
-### 5.3 Chart-Steuerung
-
-#### Timeframe-Buttons
-
-| Button | Beschreibung |
-|--------|-------------|
-| **M5** | 5-Minuten-Kerzen — Details der unmittelbaren Ein- und Ausstiegsdynamik |
-| **M15** | 15-Minuten-Kerzen — kurzfristige Struktur und Trend |
-| **H1** | 1-Stunden-Kerzen — übergeordneter Trendkontext |
-
-Nach dem Wechsel des Timeframes wird der Chart neu geladen. Die Kerzen-Anzahl passt sich an, um den Trade-Zeitraum plus Kontext abzudecken.
-
-**Empfehlung:** Beginnen Sie die Nachanalyse bei H1, um den übergeordneten Kontext zu verstehen, dann wechseln Sie zu M15 und M5 für die Detail-Analyse des Einstiegs und Ausstiegs.
-
-#### Indikatoren
-
-Indikatoren können direkt im Orderbook-Chart hinzugefügt werden:
-
-- **EMA** — Exponentieller Gleitender Durchschnitt mit konfigurierbarer Periode und eigenem Timeframe-Dropdown
-- **RSI** — Relative Stärke Index in separatem Oszillator-Panel
-- **ATR** — Average True Range für Volatilitäts-Kontext
-
-Alle Perioden-Eingaben akzeptieren Ganzzahlen ≥ 1. Die Timeframe-Dropdowns erlauben einen abweichenden Berechnungs-Timeframe (z. B. EMA 20 auf H1 auch wenn der Chart auf M5 steht).
-
-#### Print-Funktion
-
-Der **Print**-Button öffnet den Druck-Dialog. Optionen:
-- **Chart** einschließen (Checkbox)
-- **Candle Data** einschließen (OHLCV-Daten)
-- **Analysis** einschließen (AA-Analyse-Daten)
-
-Nach Auswahl: Browser-Druckdialog mit optimierter HTML-Ansicht.
-
-### 5.4 Show the Analyses — Analyse-Marker-Toggle
-
-Die **„Show the Analyses"**-Checkbox im Chartbereich lädt und zeigt alle Analyse-Marker des AA-Agents für den angezeigten Zeitraum.
-
-- **Aktiviert:** Alle AA-Analyse-Ergebnisse in der Nähe des Trades werden als farbige Marker auf dem Chart eingeblendet.
-- **Deaktiviert:** Chart ohne Analyse-Marker, nur Preis und Indikatoren.
-
-**Farbe der Marker** gibt einen schnellen Überblick über die jeweilige Entscheidung:
-- Grün-Marker: BUY-Entscheidung
-- Rot-Marker: SELL-Entscheidung
-- Grau-Marker: HOLD-Entscheidung
-
-Ein Klick auf einen Marker öffnet das AA Recommendation Popup.
+Beide Marker nutzen dieselbe Snapping-Logik (`findMarkerTimestamp`), die auf die nächstgelegene geladene Kerze zum tatsächlichen Zeitstempel des Trades einrastet — und, wichtig: **zeigt gar keinen Marker**, wenn der Zeitstempel des Trades deutlich außerhalb des aktuell geladenen Kerzen-Fensters liegt, statt ihn fälschlich an eine Rand-Kerze zu heften. Fehlt ein Start- oder End-Marker nach der Auswahl eines Trades, ist das meist ein Hinweis, dass das geladene Kerzen-Fenster nicht weit genug zurück- oder vorreicht — Timeframe wechseln oder den **Chart**-Button nutzen, der das Kerzen-Fenster gezielt um den Trade verankert.
 
 ---
 
-## 6. AA Recommendation Popup
+## 7. Chart-Steuerung
 
-Das **AA Recommendation Popup** wird geöffnet durch Klick auf einen Analyse-Marker im Chart.
+Die einzigen Steuerelemente am eingebetteten Chart, in einer schmalen Zeile darüber:
 
-Es zeigt die vollständigen Detaildaten einer einzelnen Analyse-Empfehlung:
+### Show the Analyses — Checkbox
 
-### 6.1 Kennzahlen-Grid (4 Spalten)
+Standardmäßig aktiviert. Blendet jeden AA-Analyse-Zyklus, der für das Pair dieses Trades im relevanten Zeitfenster erfasst wurde, als kleine, **orangefarbene Quadrat-Marker** ein, beschriftet mit `U`, `D` oder `N` und der Konfidenz in Prozent darunter.
 
-| Feld | Beschreibung |
-|------|-------------|
-| **Decision** | Die Handelsentscheidung: BUY, SELL oder HOLD |
-| **Confidence** | Konfidenzwert der Entscheidung (0–100%) |
-| **Order Start** | Signal-Zeitpunkt — wann das Signal erzeugt wurde |
-| **Entry Quality** | Bewertung der Einstiegsqualität (z. B. Strong, Moderate, Weak) |
+- **`U`** — die `primary_bias` der Analyse war long-orientiert (`BIAS_LONG` oder `BIAS_REVERSAL_LONG`)
+- **`D`** — die Bias war short-orientiert (`BIAS_SHORT` oder `BIAS_REVERSAL_SHORT`)
+- **`N`** — Bias war neutral, oder das Feld ließ sich aus dem Datensatz nicht auslesen
 
-### 6.2 Decision JSON
+Wichtig: Diese Beschriftung zeigt **ausschließlich die Richtungs-Bias** — nicht, ob die Analyse den Moment als guten Entry-Zeitpunkt eingestuft hat (`order_start_signal`). Alle Marker haben dieselbe Farbe und Form; nur Buchstabe und Konfidenzwert unterscheiden sich.
 
-Der vollständige strukturierte Output der AA-Entscheidung als JSON-Text:
+Ein Klick auf einen Marker öffnet das AA-Recommendation-Popup für genau diesen Analyse-Zyklus (Abschnitt 8).
 
-```json
-{
-  "decision": "BUY",
-  "confidence": 78,
-  "entry": 1.08542,
-  "stop_loss": 1.08320,
-  "take_profit": 1.08920,
-  "reasoning": "Der Preis hat einen klaren Aufwärtstrend auf H1...",
-  "entry_quality": "Strong"
-}
-```
+**Wann aktivieren:** wenn Sie den analytischen Kontext um einen Trade sehen wollen, nicht nur den Trade selbst. Beispiel: Ging ein Trade in den Verlust — gab es nachfolgende `D`/`N`-Zyklen, die zeigen, dass die Bias sich gegen die Trade-Richtung gedreht hat, während die Position noch offen war?
 
-Ein **Copy-Button** kopiert den vollständigen JSON-Text in die Zwischenablage.
+### Timeframe-Buttons
 
-### 6.3 Decision Snapshot
+**Verfügbar:** M5, M15, M30, H1 (kein H4 oder D1 — diese gibt es nur in der Chart-Analyse).
 
-Der vollständige **Market-Snapshot** zum Zeitpunkt der Entscheidung — die Marktdaten, die das LLM zur Entscheidungsfindung verwendet hat.
+Wechselt den Chart auf den gewählten Timeframe und lädt bis zu 2000 Kerzen dafür neu. Preislinien und Start-/End-Marker werden automatisch neu positioniert.
 
-Dieser Snapshot ist besonders wertvoll für die Nachanalyse:
-- Welche Kerzen hat das LLM gesehen?
-- Welche Indikatorwerte lagen vor?
-- Welche Swing Levels waren aktiv?
+**Typische Nutzung:** H1 für den übergeordneten Kontext, M15 für das Entry-Timing, M5 für die exakten Entry-/Exit-Kerzen. Verschwindet ein Start- oder End-Marker beim Wechsel, siehe den Hinweis am Ende von Abschnitt 6 zu Markern außerhalb des geladenen Fensters.
 
-Ein **Copy-Button** kopiert den vollständigen Snapshot in die Zwischenablage.
+### Kerzen-Bereich-Shortcuts
 
-**Wichtig:** Der Decision Snapshot ist nur vorhanden, wenn der AA-Agent im Snapshot-Modus läuft und die Daten gespeichert hat. Bei manchen Konfigurationen kann dieses Feld leer sein.
+Der Chart selbst (nicht spezifisch für das Orderbook) bietet Schnellzugriffe auf die letzten 50 / 100 / 200 / 400 Kerzen, standardmäßig 100. Diese ändern nur, wie viele der geladenen Kerzen gerade sichtbar sind — sie laden keine neuen Daten nach, und ein Timeframe- oder Trade-Wechsel setzt die Ansicht auf den Standardwert zurück.
 
 ---
 
-## 7. Typische Arbeitsabläufe
+## 8. AA-Analyse- und Recommendation-Popup
 
-### 7.1 Tägliche P&L-Überprüfung
+### 8.1 AA-Analyse-Popup (Open-Button)
 
-1. Orderbook öffnen.
-2. Filter auf **geschlossen** setzen, Max Orders auf 20–50.
-3. **Refresh** klicken.
-4. Ergebnis-Spalte (P&L) durchsehen: Wo war Gewinn, wo Verlust?
-5. Auf einzelne Trades klicken, um den Chart zu sehen: War der Trade-Kontext nachvollziehbar?
-6. Bei Verlust-Trades: Analysis-Button klicken, um die AA-Begründung zu lesen.
+**Inhalt:**
+- Der vollständige gespeicherte Analysetext des AA-Agents zu diesem Trade.
+- Ein **Copy-Button**, um den Text in die Zwischenablage zu kopieren.
+- Ein **Close-Button**, um das Popup zu schließen.
 
-### 7.2 Offene Positionen überwachen
+Dies ist die definitive Antwort auf „was hat das System gedacht, als es entschieden hat, einzusteigen?". Bei einem Verlust-Trade zeigt dieses Popup, ob die Analyse angesichts der damals verfügbaren Informationen vernünftig war (und der Verlust einfach Pech oder ungünstige Ausführung war), oder ob die Analyse selbst fehlerhaft war.
 
-1. Filter auf **offen** setzen.
-2. **Refresh** klicken.
-3. Prüfen: Wie nah ist der Preis am SL oder TP?
-4. Chart auswählen und Chart-Timeframe auf M5 setzen — Momentum sehen.
-5. Bei Bedarf: In den Broker-Account einloggen für direkte Kontrolle.
+### 8.2 AA-Recommendation-Popup (Klick auf einen Chart-Marker)
 
-### 7.3 Warum wurde kein Trade ausgeführt?
+Wird durch Klick auf einen `U`/`D`/`N`-Marker geöffnet (erfordert aktivierte „Show the Analyses"-Checkbox).
 
-Wenn ein erwarteter Trade nicht im Orderbook erscheint:
+Ein 4-Spalten-Grid zeigt:
+- **Decision** — das Entscheidungsfeld der AA für diesen Zyklus
+- **Confidence** — der Konfidenzwert aus dem LLM-Output
+- **Order Start** — der `order_start_signal`-Wert (Einstiegsbereitschaft)
+- **Entry Quality** — die gespeicherte Bewertung der Einstiegsqualität
 
-1. Filter auf **abgelehnt** setzen.
-2. **Refresh** klicken — gibt es einen abgelehnten Eintrag für das erwartete Pair?
-3. Falls ja: Analysis-Button öffnen — welcher Ablehnungsgrund wurde notiert?
-4. Falls kein abgelehnter Eintrag: Filter auf **alle** setzen und nach dem Zeitraum suchen.
-5. Falls gar kein Eintrag: Im Monitor prüfen — hat der AA-Agent überhaupt ein Signal generiert? (Agent Events Tab: `agent_signal_generated`?)
+Darunter:
+- **Decision JSON** — die vollständige Entscheidungsausgabe (bzw. der gespeicherte Analysetext, falls vorhanden), mit Copy-Button.
+- **Decision Snapshot** — der vollständige Markt-Snapshot, den die AA zum Zeitpunkt dieser Analyse erhalten hat, mit Schema-Version-Tag (falls gespeichert) und eigenem Copy-Button. Dieser Abschnitt erscheint nur, wenn tatsächlich ein Snapshot mit dem Datensatz gespeichert wurde — ältere Einträge oder Konfigurationen ohne Snapshot-Speicherung zeigen hier schlicht nichts an.
 
-### 7.4 SYNC_DETECTED untersuchen
-
-1. Eintrag mit `SYNC_DETECTED` in der Tabelle auswählen.
-2. Chart öffnen — wann wurde die Position geschlossen?
-3. Hat der Preis SL oder TP erreicht? (Linien im Chart prüfen)
-4. Analysis öffnen — welche Analyse lag zugrunde?
-5. In der Broker-Plattform den Schließgrund verifizieren (z. B. war es SL oder manuell).
-
-### 7.5 Trade-Analyse für Optimierung
-
-Um zu verstehen, ob der System-Prompt verbessert werden sollte:
-
-1. Filter auf **geschlossen** setzen, längeren Zeitraum mit mehr Max Orders laden.
-2. Verlust-Trades identifizieren (rote Ergebnis-Werte).
-3. Für jeden Verlust-Trade:
-   a. Chart öffnen, H1-Timeframe wählen — übergeordneter Kontext klar?
-   b. „Show the Analyses" aktivieren — welche Signale wurden generiert?
-   c. Analysis öffnen — was hat das LLM begründet?
-   d. Gab es Muster? (z. B. alle Verluste bei starken News, alle Verluste in Ranging-Märkten)
-4. Erkannte Muster als Grundlage für Prompt-Optimierungen nutzen.
+**Warum der Snapshot hier wertvoll ist:** Bei der Nachanalyse eines historischen Trades zeigt der Snapshot exakt, welche Daten der Agent damals hatte — nicht was Sie heute sehen, sondern was zu jener Kerze zu jenem Zeitpunkt existierte. Dies ist der zuverlässigste Weg, eine KI-Handelsentscheidung nachträglich zu prüfen.
 
 ---
 
-## 8. Häufige Fragen
+## 9. Print und Knowledgebase-Export
 
-**F: Warum zeigt die Ergebnis-Spalte bei einer offenen Position einen Verlust, obwohl der Trade in die richtige Richtung geht?**
+Beide Aktionen sind erst aktiv, wenn ein Trade ausgewählt ist, und beide bauen auf **denselben zugrundeliegenden Report-Inhalt** auf — nur das Ziel unterscheidet sich.
 
-A: Das P&L bei offenen Positionen beinhaltet den Spread. Direkt nach Trade-Eröffnung ist die Position um den Spread-Betrag im Minus. Dies ist normal. Das P&L aktualisiert sich nach einem manuellen Refresh.
+### 9.1 Print-Button
+
+Ein Klick auf Print öffnet sofort ein neues Browser-Fenster und schreibt einen eigenständigen, druckoptimierten HTML-Report — es gibt **keinen Auswahl-Dialog** mit Checkboxen (diesen gibt es nur bei der Print-Funktion der Chart-Analyse, nicht hier). Der Report enthält immer:
+
+- **Timing** — Von/Bis-Zeitstempel und den Close-Status-Text
+- **Execution** — Entry-Preis, Exit-Preis, SL/TP, Units
+- **Result** — Stake-Schätzung, P&L, AA-Entscheidung, Konfidenz
+- **AA Context** — die gespeicherten Indikator-Badges und Support-/Resistance-Level aus dem Analyse-Overlay
+- **Chart** — ein Screenshot des Charts exakt so, wie er aktuell aussieht (welcher Timeframe und Show-the-Analyses-Zustand zuletzt eingestellt war)
+- **AA Analysis** — der vollständige Analysetext auf einer eigenen Seite (mit erzwungenem Seitenumbruch davor)
+
+Das Fenster löst nach dem Laden automatisch den nativen Druckdialog des Browsers aus. Von dort aus können Sie physisch drucken, als PDF speichern oder Ränder/Ausrichtung/Skalierung über die Browser-Druckeinstellungen anpassen.
+
+**Tipp:** Stellen Sie Timeframe und „Show the Analyses" so ein, wie sie im Ausdruck erscheinen sollen, **bevor** Sie auf Print klicken — das erfasste Chart-Bild zeigt genau das, was aktuell gerendert ist, keine feste Standardansicht.
+
+### 9.2 → KB-Button
+
+Baut denselben Inhalt als Markdown-Dokument statt als HTML/Print-Report und speichert ihn über `kbImport` in der Knowledgebase, in einem automatisch verwalteten „Import"-Ordner mit dem Titel `Orderbook_<Zeitstempel>`. Das Markdown enthält dasselbe Chart-Bild (eingebettet), Result-/Timing-/Execution-Tabellen, AA Context und — falls der gespeicherte `market_context_snapshot` des Trades einen `analyst_recommendation`-Block enthält — eine strukturierte Langfassung (Decision, Signal, Quality, Setup-Typ, Aggressiveness, Invalidation-Level, First Target, Conflict Flags, plus Fließtext-Abschnitte zu Summary, Entry-Reason, Trend-/Momentum-/Volatility-/S-R-/M5-Price-Action-Einschätzung und Entry-Quality-Begründung) statt des rohen Analysetexts.
+
+**Print verwenden, wenn** Sie etwas außerhalb des Systems weitergeben wollen (PDF für eine Broker-Klärung, physisches Trading-Journal). **→ KB verwenden, wenn** die Zusammenfassung dauerhaft in der OpenForexAI-Knowledgebase für spätere Recherche oder für andere Assistenten/Agenten durchsuchbar sein soll.
+
+---
+
+## 10. Typische Arbeitsabläufe
+
+### 10.1 Tägliche P&L-Überprüfung
+
+1. Filter auf **geschlossen** setzen.
+2. **Max Orders** über den Standardwert 7 hinaus erhöhen, um den Tag abzudecken (z. B. 20–50).
+3. **Refresh** klicken (löst auch einen Broker-Sync aus — Spinner abwarten).
+4. Ergebnis-Spalte durchsehen: Wo Gewinn, wo Verlust?
+5. Bei jedem geschlossenen Trade die Zeile anklicken für den eingebetteten Chart, und „Show the Analyses" aktivieren für den Analyse-Kontext.
+6. Bei einem Verlust-Trade: **Open** klicken, AA-Analyse lesen — war sie fundiert, oder war der Markt trotz korrekter Einschätzung ungünstig?
+7. Close-Spalte prüfen: Waren alle Schließungen `SL_HIT` oder `TP_HIT` (geplant)? `SYNC_DETECTED`- oder `BROKER_CLOSED`-Einträge verdienen einen genaueren Blick über **Trace** oder **AI**.
+
+### 10.2 Verlust-Trade Schritt für Schritt untersuchen
+
+**Ziel:** verstehen, ob ein Verlust-Trade ein Systemfehler war oder ein regulärer Verlust innerhalb einer gültigen Strategie.
+
+1. Verlust-Trade in der Tabelle finden (Filter **geschlossen**, rote Ergebnisse).
+2. Zeile anklicken für einen ersten Blick im eingebetteten Chart, dann **Chart** klicken, um denselben Trade in der vollständigen Chart-Analyse zu öffnen — für diesen Workflow brauchen Sie Indikatoren und Swing Levels, die der eingebettete Chart nicht mehr bietet.
+3. In der Chart-Analyse zunächst H1: War die Richtung für den übergeordneten Kontext korrekt? EMA hinzufügen zur Prüfung.
+4. Wechsel zu M15: War der Entry an einer sinnvollen Stelle relativ zur Struktur?
+5. SL-Linie prüfen: Lag der Stop unter dem nächsten Swing Low (bei Long), oder zu eng, innerhalb des normalen Kursrauschens? Swing Levels aktivieren, um dies objektiv statt nach Augenmaß zu beurteilen.
+6. Zurück im Orderbook: **Open** klicken, AA-Analyse lesen — hat der Agent das Setup korrekt erkannt?
+7. „Show the Analyses" am eingebetteten Chart aktivieren und nahegelegene `U`/`D`/`N`-Marker anklicken — war die Bias konsistent, oder hat sie sich gedreht, während der Trade noch offen war?
+8. Falls aus dem Datensatz allein nicht klar: **AI** klicken und direkt fragen — z. B. „warum hat sich die AA-Bias 20 Minuten nach diesem Entry gedreht?".
+9. War die Analyse fundiert und der Stop strukturell sinnvoll platziert, hat der Preis ihn aber trotzdem erreicht: ein regulärer Verlust-Trade, keine Aktion nötig. War die Analyse fehlerhaft oder der Stop schlecht platziert: ein Strategie-/Konfigurationsproblem.
+
+### 10.3 SYNC_DETECTED oder BROKER_CLOSED untersuchen
+
+1. Trade-Zeile anklicken, Chart laden. Bis-Zeitstempel beachten — bei `SYNC_DETECTED` ist dies der Zeitpunkt der *Erkennung*, nicht notwendigerweise der tatsächliche Schließzeitpunkt.
+2. **Trace** klicken — zeigt die umgebende Event-Kette; ging der Schließung ein Sync-Zyklus-Event unmittelbar voraus?
+3. **AI** klicken und fragen, z. B. „was sagt der Order-Datensatz über die Ursache dieser Schließung?" — der Assistent kann Trace und Agent-Konfiguration in einem Schritt abrufen, statt dass Sie es manuell zusammensetzen.
+4. Broker-Plattform über die Id des Trades direkt gegenprüfen — was zeigt der Broker selbst als Schließgrund?
+5. Häufiges Ergebnis: Der Broker hat den Trade geschlossen (Margin Call, eigenes Risikomanagement oder eine geplante Wochenend-/Rollover-Schließung), und OpenForexAI hat dies erst beim nächsten Sync erkannt — der Eintrag ist eine korrekte Aufzeichnung, kein Fehler.
+
+### 10.4 Abgelehnte Trades analysieren
+
+**Ziel:** Muster bei abgelehnten Orders erkennen, um die BA-Agent-Konfiguration zu verbessern.
+
+1. Filter auf **abgelehnt**, **Refresh** klicken.
+2. Pair-Spalte prüfen — häufen sich Ablehnungen bei einem bestimmten Pair?
+3. Von-Zeitstempel prüfen — Häufung zu bestimmten Zeiten (z. B. Markteröffnung, liquiditätsarme Phasen)?
+4. Units und Ergebnis sind beide leer — bestätigt, dass nie eine Position existierte.
+5. Einen abgelehnten Trade anklicken, dann **Chart**, um Spread-/Preisbedingungen zum Ablehnungszeitpunkt mit vollen Chart-Werkzeugen zu prüfen.
+6. Bei zeitlicher Häufung: Spread-Filter oder Session-Zeitbeschränkungen für den BA-Agenten erwägen.
+
+---
+
+## 11. Szenarien und Beispiele
+
+### Szenario A: Gewinner-Trade — Setup validieren
+
+**Trade:** GBPUSD SELL, 4h15m Dauer, positives Ergebnis, Close: TP_HIT.
+
+1. **Chart** klicken, in der Chart-Analyse auf H1 — klarer Abwärtstrend bestätigt.
+2. Wechsel zu M15 — der Start-Marker zeigt einen Short-Entry nach einem Pullback zu einem Resistance-Level. Strukturell sauber.
+3. Die SL-Preislinie liegt über dem Swing High, das die Resistance definiert hat; die TP-Linie liegt am nächsten Support-Level.
+4. Zurück im Orderbook: „Show the Analyses" aktivieren — die `D`-Marker vor dem Entry waren konsistent mit steigenden Konfidenzwerten.
+5. Nächstgelegenen `D`-Marker anklicken — hohe Konfidenz, günstige Entry Quality.
+6. Fazit: saubere Struktur, korrekte Ausführung, verdienter Gewinn. Keine Aktion nötig.
+
+### Szenario B: Verlust-Trade — vorzeitiger Stop Loss
+
+**Trade:** EURUSD BUY, 0h22m Dauer, negatives Ergebnis, Close: SL_HIT.
+
+1. Chart-Button → H1: Preis insgesamt bullisch, aktuell aber in einer Retracement-Phase.
+2. M5: der Start-Marker liegt während der Retracement; der Preis fiel weiter, bevor der SL erreicht wurde.
+3. Die SL-Linie liegt nahe am Entry — einen ATR-Indikator in der Chart-Analyse hinzufügen, um zu prüfen, ob der Stop innerhalb des normalen Rauschens lag.
+4. Zurück im Orderbook: **Open** klicken — die AA-Analyse beschrieb den Markt als bullisch mit einer Retracement-Kaufgelegenheit. Richtung korrekt.
+5. Fazit: die Richtungseinschätzung war richtig, der Stop wahrscheinlich zu eng relativ zur Volatilität. Ein breiterer ATR-basierter SL-Multiplikator in der BA-Konfiguration wäre zu erwägen.
+
+### Szenario C: SYNC_DETECTED-Trade-Audit
+
+**Trade:** USDCAD BUY, 1h55m Dauer, negatives Ergebnis, Close: SYNC_DETECTED.
+
+1. Der Bis-Zeitstempel zeigt, dass die Schließung um 17:33 UTC an einem Freitag *erkannt* wurde — nicht notwendigerweise, wann sie tatsächlich passierte.
+2. **Trace** klicken — die umgebenden Events zeigen einen Sync-Zyklus um 17:33, der die Position beim Broker bereits geschlossen vorfand.
+3. Die Broker-Plattform bestätigt die tatsächliche Schließung um 17:00 UTC, eine Wochenend-Margin-Anpassung des Brokers.
+4. Der `SYNC_DETECTED`-Eintrag ist korrekt — OpenForexAI hat aufgezeichnet, was der Broker getan hat, nur 33 Minuten später bemerkt.
+5. Maßnahme: erwägen, den BA-Agenten so zu konfigurieren, dass ab 16:30 UTC freitags keine neuen Positionen mehr eröffnet werden, um Wochenend-Schließungen des Brokers zu vermeiden.
+
+### Szenario D: Häufung von Ablehnungen bei Markteröffnung
+
+**Einträge:** fünf aufeinanderfolgende `REJECTED`-Einträge für EURUSD BUY zwischen 08:00–08:05 UTC an mehreren Tagen.
+
+1. Filter auf **abgelehnt** — die Häufung liegt genau bei der Frankfurt-Session-Eröffnung.
+2. **Chart** bei einem der Einträge klicken, um das Spread-Verhalten zu diesem Zeitpunkt auf einem niedrigen Timeframe zu prüfen — Spreads weiten sich oft direkt bei Eröffnung stark.
+3. Es ist aktuell kein Spread-Filter im BA-Agenten konfiguriert, daher werden Orders direkt in den weiten Spread hinein übermittelt und abgelehnt.
+4. Maßnahme: einen Max-Spread-Filter in der BA-Agent-Konfiguration hinzufügen (z. B. Entry ablehnen, wenn Spread > 2,0 Pips). Nach Konfigurationsänderung und Neustart sollten die Ablehnungen bei Eröffnung aufhören.
+
+---
+
+## 12. Schnellreferenz
+
+### Filter-Buttons
+
+| Filter | Zeigt |
+|---|---|
+| alle | Alle Trades unabhängig vom Status (einziger Weg zu `CANCELLED`-Einträgen) |
+| offen | PENDING, OPEN und PARTIALLY_FILLED zusammen |
+| geschlossen | Abgeschlossene Trades — jeder Schließgrund |
+| abgelehnt | Nie eröffnete Orders (Broker-/Validierungs-Ablehnung) |
+
+### Aktions-Buttons pro Zeile
+
+| Button | Symbol | Öffnet | Am besten für |
+|---|---|---|---|
+| Open | Dokument | AA-Analyse-Textpopup | Den gespeicherten Analysetext wörtlich lesen |
+| Trace | Verzweigung | Event-Trace-Ansicht | Die kausale Event-Kette verstehen |
+| AI | Roboter | Ask-AI-Untersuchungs-Chat | Eine Frage in natürlicher Sprache zu genau diesem Trade |
+| Chart | Liniendiagramm | Chart-Analyse, auf den Trade fokussiert | Volle Chart-Werkzeuge (Indikatoren, Swing Levels, Zeichnen) für diesen Trade |
+
+### Schließgründe
+
+| Schließgrund | Bedeutung | Ergebnis-Vorzeichen |
+|---|---|---|
+| SL_HIT | Stop Loss erreicht — geplanter Verlust | Negativ |
+| TP_HIT | Take Profit erreicht — geplanter Gewinn | Positiv |
+| TRAILING_STOP | Trailing Stop ausgelöst | Positiv (meist kleiner als TP) |
+| AGENT_CLOSED | Ein Agent hat direkt geschlossen | Beides möglich |
+| BROKER_CLOSED | Broker hat zwangsweise geschlossen | Beides möglich |
+| SYNC_DETECTED | Broker-seitige Schließung bei Sync erkannt | Beides möglich |
+| REJECTED | Nie eröffnet — Broker-/Validierungs-Ablehnung | Kein Ergebnis |
+| *(Fallback)* CANCELLED | Nie übermittelt — Storno vor Ausführung | Kein Ergebnis |
+| *(Fallback)* closed | Status CLOSED, aber kein Grund gespeichert | Beides möglich |
+| *(Fallback)* running | Noch offen | — |
+
+### Chart-Marker und -Linien
+
+| Marker/Linie | Farbe | Bedeutung |
+|---|---|---|
+| Start-Marker | Cyan, hervorgehobener Pfeil | Eröffnungskerze |
+| End-Marker | Amber, hervorgehobener Kreis | Schließungskerze |
+| Entry-Linie | Cyan horizontal | Fill- (oder angeforderter) Preis |
+| Exit-Linie | Amber horizontal | Exit-Preis |
+| SL-Linie | Rot horizontal | Stop-Loss-Niveau |
+| TP-Linie | Grün horizontal | Take-Profit-Niveau |
+| Support-Linie | Türkis horizontal | S/R-Level aus dem gespeicherten Analyse-Overlay |
+| Resistance-Linie | Violett horizontal | S/R-Level aus dem gespeicherten Analyse-Overlay |
+| U-/D-/N-Marker | Orange, Quadrat | AA-Bias: long- / short-orientiert / neutral, mit Konfidenz in % |
+
+### Spalten-Referenz
+
+| Spalte | Inhalt | Gelb = |
+|---|---|---|
+| Pair | Instrument, Richtung, Status | — |
+| Von | Entry-Zeitstempel | Nur lokal, Broker nicht bestätigt |
+| Bis | Exit-Zeitstempel | Nur lokal, Broker nicht bestätigt |
+| HH:MM | Trade-Dauer | — |
+| Id | Broker-Order-ID | — |
+| Units | Positionsgröße in Einheiten der Basiswährung | — |
+| Stake | Nominaler Dollar-Positionswert (Preis × Units) — **keine** % vom Eigenkapital | — |
+| Ergebnis | P&L in Kontowährung | — |
+| Close | Schließgrund (oder Status-Fallback) | — |
+| Analysis | Open-/Trace-/AI-/Chart-Buttons | — |
+
+---
+
+## 13. Häufige Fragen
+
+**F: Warum zeigt die Ergebnis-Spalte bei einer offenen Position nichts an?**
+
+A: Für offene Positionen wird in der Tabelle kein Live-P&L berechnet — die Spalte bleibt leer, bis der Trade schließt. Für den aktuellen unrealisierten Gewinn/Verlust die Broker-Plattform oder den GA-Monitor-Agenten prüfen.
 
 **F: Was bedeutet das Ausrufezeichen neben dem Pair?**
 
-A: Das Ausrufezeichen zeigt an, dass der Eintrag noch keine Broker-Bestätigung erhalten hat. Die Zeitstempel (Von/Bis) können daher noch lokal und vorläufig sein (gelb angezeigt). Dies löst sich nach dem nächsten Broker-Sync (typischerweise innerhalb von Sekunden bis wenigen Minuten) auf.
+A: Es zeigt, dass der Eintrag noch keine Broker-Bestätigung erhalten hat. Die Zeitstempel (Von/Bis) können daher noch lokal und vorläufig sein (gelb angezeigt). Löst sich nach dem nächsten Broker-Sync auf, üblicherweise innerhalb von Sekunden bis wenigen Minuten.
 
-**F: Die Schließgrund-Spalte zeigt SYNC_DETECTED. Ist das ein Fehler?**
+**F: Die Close-Spalte zeigt SYNC_DETECTED. Ist das ein Fehler?**
 
-A: Nein. SYNC_DETECTED ist kein Fehler — es ist ein informativer Status. Es bedeutet, dass OpenForexAI die Position nicht aktiv geschlossen hat, sondern beim nächsten Sync festgestellt hat, dass sie beim Broker nicht mehr existiert. Prüfen Sie die Broker-Plattform, um den tatsächlichen Schließgrund (z. B. SL/TP-Hit oder manuelles Schließen) zu erfahren.
+A: Nein. Es ist ein informativer Status: OpenForexAI hat die Position nicht aktiv geschlossen, sondern beim nächsten Sync-Check festgestellt, dass sie beim Broker nicht mehr existiert. Broker-Plattform prüfen, um den tatsächlichen Grund (SL/TP-Treffer, manuelles Schließen, Margin Call) zu erfahren.
 
 **F: Kann ich im Orderbook manuell Trades schließen?**
 
-A: Das Orderbook ist eine Inspektions- und Analyse-Seite, keine Trading-Seite. Zum manuellen Schließen von Positionen nutzen Sie direkt Ihre Broker-Plattform. OpenForexAI erkennt das manuelle Schließen beim nächsten Sync-Check automatisch.
+A: Nein. Das Orderbook ist eine reine Inspektions- und Analyse-Seite, keine Trading-Seite. Zum manuellen Schließen die Broker-Plattform direkt nutzen — OpenForexAI erkennt die Schließung beim nächsten Sync-Check automatisch und trägt sie als `BROKER_CLOSED` oder `SYNC_DETECTED` nach.
 
 **F: Warum sind manche Einträge gelb dargestellt?**
 
-A: Gelbe Zeitstempel-Felder (Von/Bis) zeigen an, dass der Zeitstempel noch lokal ist und noch nicht vom Broker bestätigt wurde. Dies ist ein vorübergehender Zustand, der sich nach dem Broker-Sync auflöst.
+A: Gelbe Von-/Bis-Felder zeigen an, dass der Zeitstempel noch lokal ist und noch nicht vom Broker bestätigt wurde. Ein vorübergehender Zustand, der sich nach dem Broker-Sync auflöst.
 
-**F: Ich sehe viele ABGELEHNT-Einträge. Was läuft falsch?**
+**F: Ich sehe viele REJECTED-Einträge. Was läuft falsch?**
 
-A: Mehrere mögliche Ursachen: (1) Risikoprüfung schlägt an — z. B. wenn das konfigurierte Risiko-Maximum überschritten würde. (2) Der Broker lehnt Aufträge ab — z. B. bei unzureichendem Margin oder während gesperrter Handelszeiten. (3) Duplikat-Signal-Erkennung — wenn mehrere AA-Zyklen kurz hintereinander dasselbe Signal senden. Im Analysis-Popup des abgelehnten Eintrags finden Sie den spezifischen Ablehnungsgrund.
+A: Mögliche Ursachen: unzureichendes Margin, geschlossener Markt, ungültige Positionsgröße unter dem Broker-Minimum, zu weiter Spread bei Übermittlung, oder ein ausgesetztes Instrument. Häufen sich Ablehnungen bei einem bestimmten Pair oder zu bestimmten Zeiten, im BA-Agenten einen Spread-Filter oder Session-Zeitbeschränkungen erwägen. Details zum konkreten Fall über den **AI**-Button auf der jeweiligen Zeile erfragen.
+
+**F: Wo finde ich EMA/RSI/ATR für einen Trade im Orderbook?**
+
+A: Nirgends mehr direkt im Orderbook — diese Steuerelemente wurden aus dem eingebetteten Chart entfernt. Für Indikatoren, Swing Levels und Zeichenwerkzeuge auf einem bestimmten Trade den **Chart**-Button in der Analysis-Spalte dieser Zeile verwenden, um den Trade in der vollständigen Chart-Analyse zu öffnen.
+
+**F: Was ist der Unterschied zwischen dem AI-Button und dem Chart-Button?**
+
+A: **AI** öffnet einen Chat, der Fragen in natürlicher Sprache zu genau diesem Trade beantwortet und dafür bei Bedarf selbst weitere Daten abruft (Trace, Agent-/EC-Konfiguration, Kerzen). **Chart** öffnet denselben Trade in der vollständigen Chart-Analyse mit echten Chart-Werkzeugen (Indikatoren, Swing Levels, Zeichnen). Beide ergänzen sich — nutzen Sie AI für eine schnelle Text-Antwort, Chart, wenn Sie selbst am Chart arbeiten wollen.

@@ -2,7 +2,14 @@
 
 # Chart Analysis
 
-Chart Analysis is the **full-featured technical analysis tool** within OpenForexAI. Unlike the Orderbook (which is anchored to specific historical trades) and the Agent Chat chart (which is secondary to agent interaction), the Chart Analysis page is a standalone, unrestricted charting workspace. You control the pair, broker, timeframe, candle count, all indicators, drawing tools, and swing level detection. It auto-refreshes every 30 seconds, and all your indicators are preserved across refreshes. Use it for free-form technical analysis, session planning, strategy development, and visual confirmation of what the agents are "seeing."
+Chart Analysis is the **full-featured technical analysis tool** within OpenForexAI. Unlike the Agent Chat chart (which is secondary to agent interaction), the Chart Analysis page is a standalone charting workspace that can run in two modes:
+
+- **Free mode** (🔓, default): you control the pair, broker, timeframe, candle count, all indicators, drawing tools, and swing level detection with no order attached. It auto-refreshes every 30 seconds, and all your indicators/drawings are preserved across refreshes.
+- **Order Focus mode** (🔒): opened from the Orderbook's **Chart** button on a specific trade. The chart loads that order's pair/broker and a candle window anchored around its close time, draws its Entry/Exit/SL/TP levels, and freezes (no more 30-second auto-refresh) so the historical setup doesn't shift under you while you review it. See [Section 19](#19-order-focus-mode).
+
+Both modes share a built-in **AI Chart Assistant** — a chat window you open explicitly (it never opens itself) that can explain what's on screen and even draw its own markers/zones on the chart. See [Section 20](#20-chart-assistant).
+
+Use Chart Analysis for free-form technical analysis, session planning, strategy development, visual confirmation of what the agents are "seeing," and post-mortem review of specific trades.
 
 ---
 
@@ -26,8 +33,10 @@ Chart Analysis is the **full-featured technical analysis tool** within OpenForex
 16. [Bottom Panel — Right Column: Candle Data and Analyst View](#16-bottom-panel--right-column-candle-data-and-analyst-view)
 17. [Sessions and Analyst Overlays](#17-sessions-and-analyst-overlays)
 18. [Print Function](#18-print-function)
-19. [Practical Workflows and Examples](#19-practical-workflows-and-examples)
-20. [Quick Reference](#20-quick-reference)
+19. [Order Focus Mode](#19-order-focus-mode)
+20. [Chart Assistant](#20-chart-assistant)
+21. [Practical Workflows and Examples](#21-practical-workflows-and-examples)
+22. [Quick Reference](#22-quick-reference)
 
 ---
 
@@ -35,13 +44,20 @@ Chart Analysis is the **full-featured technical analysis tool** within OpenForex
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  HEADER BAR: Pair | Broker | Timeframe | Candles | Reload    │
-│              Zoom | Sessions | Analyst | Print                │
+│ HEADER: Pair|Broker|🔒/🔓 Mode|Timeframe|Candles|Anchor|Reload│
+│         [range diagnostic] [active tool]     Fit|Zoom|Sessions│
+│                                          Analyst|Print|→KB|Assistant│
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
 │                    MAIN CHART AREA                            │
 │         (candlesticks, indicators, drawings, markers)         │
-│                                                               │
+│                                       ┌─────────────────────┐ │
+│                                       │  Chart Assistant     │ │
+│                                       │  (floating, drag/    │ │
+│                                       │   resize, opened via │ │
+│                                       │   the Assistant      │ │
+│                                       │   toggle button)     │ │
+│                                       └─────────────────────┘ │
 ├═══════════════════════════════════════════════════════════════╡
 │  BOTTOM PANEL (resizable, 120–600px)                         │
 │  ┌─────────────────┬────────────────┬────────────────────┐   │
@@ -49,14 +65,16 @@ Chart Analysis is the **full-featured technical analysis tool** within OpenForex
 │  │ Indicators      │ Drawing Tools  │ Candle Data        │   │
 │  │ (EMA/SMA/RSI    │ (lines, fibs,  │ Analyst View       │   │
 │  │  ATR/BB/VWAP    │  shapes,       │                    │   │
-│  │  SlopeE/SlopeS) │  Elliott)      │                    │   │
-│  │ ─────────────── │                │                    │   │
+│  │  SlopeE/SlopeS) │  Elliott,      │                    │   │
+│  │ ─────────────── │  Measure)      │                    │   │
 │  │ Swing Levels    │                │                    │   │
 │  └─────────────────┴────────────────┴────────────────────┘   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 The bottom panel can be resized vertically by dragging the handle at the bottom of the chart area. Minimum height: 120px. Maximum height: 600px.
+
+The Chart Assistant window (top-right corner by default) is drawn **outside** this layout — it floats above the chart, can be dragged by its header and resized from its bottom-right corner, and only appears once you click the **Assistant** toggle button. It never opens itself, including when Order Focus mode loads a trade.
 
 ---
 
@@ -73,6 +91,15 @@ Changing the pair immediately reloads the chart with the new instrument's data. 
 Selects which broker's data feed to use for the chart. This dropdown is only visible when more than one broker is connected in the system configuration.
 
 Different brokers may show slightly different prices due to different liquidity providers, spreads, and data normalization. If your agents are configured to use a specific broker, using the same broker in Chart Analysis ensures you are seeing the exact same data the agents see.
+
+### Mode Indicator (🔒 Order / 🔓 Frei)
+
+A small badge sits right after the Broker dropdown and always shows which mode the page is in:
+
+- **🔓 Frei** (gray) — free mode. You control everything manually; nothing is pinned to a trade.
+- **🔒 Order** (indigo, clickable) — Order Focus mode. The pair, broker, and anchor were set automatically from a specific order (opened via the Orderbook's **Chart** button). Hovering it shows the pair/direction in a tooltip.
+
+Clicking the **🔒 Order** badge while focused immediately leaves Order Focus mode and returns to free mode (candle count resets to 200, the anchor is cleared, and auto-refresh resumes). This is the fastest way to "unpin" the chart after reviewing a trade without losing your place — pair/broker/timeframe stay as they were, only the order-specific parts are dropped. See [Section 19](#19-order-focus-mode) for the full behavior.
 
 ### Timeframe Buttons
 
@@ -101,11 +128,27 @@ A number field that sets how many candles to load. Range: 20 to 2000.
 
 Loading more candles increases chart load time. On H1 with 2000 candles, you are viewing approximately 83 days of history (2000 candles × 1 hour ÷ 24 hours = 83 days).
 
+### Anchor Field
+
+A `datetime-local` input, always visible right after Candle Count, labeled **Anchor**. Left empty (the default), the chart loads the most recent candles — live/latest data, refreshed on the 30-second cycle. Set it to a specific date/time and the chart instead loads exactly `Candle Count` candles **ending at that point in time**, and stays there (no more "latest" fetches sneaking newer candles into view). A small `×` button next to the field appears once it has a value, to clear it back to live data in one click.
+
+This is the same mechanism Order Focus mode uses automatically — Order Focus just pre-fills this exact field with the order's own close time (see [Section 19](#19-order-focus-mode)) instead of leaving it for you to set by hand. Indicators, the DXY overlay, and Swing Levels all now read this same anchor too, so everything on screen is computed against the same historical point instead of silently mixing an anchored candle window with live-computed indicator values (a bug that has since been fixed — previously, indicators/DXY/swing levels always computed against "now" even when the chart itself was anchored to the past, which could show today's EMA value next to last month's candles).
+
+**Example — reviewing why a trade lost:** set Anchor to the order's own close timestamp (e.g. `2026-08-14T09:35`) and Candle Count to something that comfortably spans the trade (e.g. 200), then Reload — you now see exactly the price action leading into and out of the close, with indicators/swing levels computed as of that moment, not today. Better yet: don't set it by hand at all — open the trade from the Orderbook's **Chart** button, which sets this same field for you (close time + 1 hour) and also draws the trade's own Entry/Exit/SL/TP lines on top, see [Section 19](#19-order-focus-mode).
+
+**Warning:** the anchor (like all order/candle timestamps in this system) is a naive broker-local wall-clock value — it is never converted through the browser's own timezone. Typing a time here means "load candles ending at this clock time in the broker's own timezone," not "in my local timezone," which matters if your machine's timezone differs from the broker's.
+
 ### Reload Button
 
 Manually fetches fresh candle data from the broker. Shows a spinner while loading and is disabled during the load to prevent duplicate requests.
 
-Use Reload when you want to see the very latest candle immediately rather than waiting for the next 30-second auto-refresh cycle. Also use it after changing the candle count or if you suspect the chart is showing stale data.
+Use Reload when you want to see the very latest candle immediately rather than waiting for the next 30-second auto-refresh cycle. Also use it after changing the candle count or the anchor, or if you suspect the chart is showing stale data.
+
+### Loaded-Range Diagnostic Badge
+
+Directly after the Reload button (and any error message), a small badge shows exactly what was loaded, e.g. `200× 2026-08-14 06:00 → 2026-08-14 22:35`. Hovering it shows the full first/last timestamp and candle count. This exists because a screenshot of the chart alone can't tell you *why* something looks off — it answers "is my requested window wrong, or is something else (a marker, an indicator) the problem" at a glance.
+
+In Order Focus mode, the badge additionally turns amber and appends a warning if the focused order's own start and/or end time falls **outside** the loaded candle window (`⚠ Order-Start außerhalb!`, `⚠ Order-Ende außerhalb!`, or both) — a direct sign that the loaded window needs to be widened (increase Candle Count) or the anchor adjusted, because the trade's markers/price lines have nothing to attach to on screen.
 
 ### Active Tool Display
 
@@ -119,6 +162,12 @@ This prevents confusion about which tool is active, especially for multi-point d
 ### Elliott "Done" Button
 
 This button appears only when an Elliott Wave drawing is in progress. Clicking it finalizes the wave drawing even if fewer than the configured maximum points have been placed. This is useful when you can clearly identify 3 or 5 wave points and do not need to place all configured points.
+
+### Fit Button
+
+Located immediately to the left of the Zoom/Pan toggle. Fits **all currently loaded candles** into the visible chart width in one click — the entire loaded window, edge to edge, regardless of how many candles that is.
+
+This is deliberately different from what happens when the chart resets to its default zoom (e.g. after a Reload): that reset shows `min(configured range, loaded candles)`, which can still **crop** a larger loaded window down to a smaller configured range (so if you loaded 1000 candles but the configured range is 200, a plain reset only shows the most recent 200). Fit ignores the configured range entirely and stretches every loaded candle across the pane — use it right after loading a large historical window (e.g. via the Anchor field) when you want to see the whole thing at once instead of just the tail end of it.
 
 ### Zoom Toggle (Pan/Zoom)
 
@@ -140,10 +189,10 @@ Use Pan mode when you want to scroll through long chart history without accident
 
 When enabled, overlays colored session bands on the chart to mark the opening and closing times of the major trading sessions:
 
-- **Sydney session** (light blue)
-- **Tokyo session** (yellow/orange)
+- **Sydney session** (blue)
+- **Tokyo session** (amber/orange)
 - **London session** (green)
-- **New York session** (red/pink)
+- **New York session** (orange)
 
 Overlapping sessions (London/New York overlap, for example) appear as blended colors or with a distinct overlap band.
 
@@ -153,12 +202,15 @@ The session times are shown in the chart's display timezone. If your system is c
 
 ### Analyst Checkbox
 
-When enabled, fetches and overlays the AA agent analysis markers on the chart. Each analysis cycle that ran during the visible chart window gets a small labeled marker at the corresponding candle:
+When enabled, fetches and overlays the AA agent analysis markers on the chart. Each analysis cycle that ran during the visible chart window gets one marker, bucketed to its own candle (if two analyses land in the same candle, the later one wins):
 
-- **D** (green): Decision marker — the AA agent output `BIAS_LONG` or `BIAS_SHORT` with `order_start_signal=YES`. Conditions were favorable for trade entry.
-- **N** (gray): Neutral marker — the AA agent output `NEUTRAL` or `order_start_signal=NO`. No trade signal.
+- **U** (green, ▲ arrow, below the bar): the analysis's `primary_bias` was `BIAS_LONG` (or `BIAS_REVERSAL_LONG`) — bullish bias.
+- **D** (red, ▼ arrow, below the bar): `primary_bias` was `BIAS_SHORT` (or `BIAS_REVERSAL_SHORT`) — bearish bias.
+- **N** (gray, circle, below the bar): anything else (including `BIAS_NEUTRAL`) — no directional bias.
 
-Clicking a D or N marker opens the Analysis Detail popup for that cycle (see Section 16).
+If the analysis also has a stored confidence value, it's appended on a second line, e.g. `U` + `85%`. Note this marker only reflects the *bias direction* — it does **not** filter on whether the agent actually signalled a trade entry (`order_start_signal`); that field is only shown once you open the AA Recommendation popup (see Section 16), not encoded in the marker's letter or color.
+
+Clicking a marker opens the AA Recommendation popup for that cycle (see Section 16).
 
 Analyst markers are loaded from the database and reflect real historical analysis cycles that ran on the selected pair. They are not reconstructed or recalculated — they are the actual decisions stored at the time they were made.
 
@@ -166,17 +218,27 @@ Analyst markers are loaded from the database and reflect real historical analysi
 
 Opens the print dialog. See [Section 18](#18-print-function).
 
+### → KB Button
+
+Saves a Markdown snapshot of the current chart to the Knowledgebase's `ChartAnalysis` import bucket: a screenshot of the chart, the selected candle's OHLCV (if any), the current indicator values, the swing level list (if enabled), and the selected analysis text (if any). Useful for building a written record of a setup you want to reference later without re-configuring the whole chart from scratch. Shows a brief "✓ In Knowledgebase gespeichert" confirmation in place of the button for two seconds.
+
+### Assistant Button
+
+Toggles the floating **Chart Assistant** chat window open/closed. It is off by default and stays off even when Order Focus mode loads a trade — you always open it explicitly. See [Section 20](#20-chart-assistant) for what it can do.
+
 ---
 
 ## 3. Auto-Refresh Behavior
 
-The Chart Analysis page **automatically reloads candle data every 30 seconds**. This means the chart stays live while you work on it — the latest candle is always at most 30 seconds old.
+In **free mode** with no Anchor set, the Chart Analysis page **automatically reloads candle data every 30 seconds**. This means the chart stays live while you work on it — the latest candle is always at most 30 seconds old.
+
+**Auto-refresh does not run in Order Focus mode.** A closed historical trade doesn't need "the latest candles," and re-fetching on a timer would reset your pan/zoom out from under you every 30 seconds for no benefit — so the chart stays frozen on the order's own candle window until you leave Order Focus mode (click the 🔒 badge). See [Section 19](#19-order-focus-mode). Setting an Anchor manually in free mode does **not** by itself stop the 30-second timer — it re-fetches the same anchored (past) window every cycle, which is a no-op in practice but is worth knowing if you're wondering why the loading spinner still blinks periodically on an anchored chart.
 
 ### What Reloads on Auto-Refresh
 
 - Candle data (all OHLCV bars for the current pair, timeframe, and candle count)
-- Backend-computed indicators (BB, VWAP) are recomputed with fresh data
-- Client-computed indicator values (EMA, SMA, RSI, ATR, SlopeE, SlopeS) are recalculated with fresh candle data
+- All indicator values (EMA, SMA, RSI, ATR, BB, VWAP, SlopeE, SlopeS) — every indicator instance is recomputed via the same backend calculation call, so there is no separate "client-side" calculation path; see [Section 6](#6-indicator-reference-ema-and-sma) onward for what's computed, not where.
+- The DXY overlay data shown in the Candle Data panel
 
 ### What is PRESERVED Across Auto-Refresh
 
@@ -190,8 +252,9 @@ This is a critical design property. Previously, auto-refresh would reset the ind
 
 ### When Auto-Refresh Does Not Apply
 
-- If you are actively placing a drawing (a tool is active), the refresh may be deferred until the drawing is complete to avoid interfering with placement.
+- **Order Focus mode:** never — the chart is frozen until you leave focus mode (see above).
 - If the browser tab is in the background (hidden), some browsers throttle JavaScript timers, potentially increasing the actual refresh interval beyond 30 seconds.
+- Placing a drawing is not itself deferred or blocked by auto-refresh — a refresh landing mid-placement does not cancel or interrupt an in-progress drawing, since drawings, once placed, are stored independently of the candle data.
 
 ---
 
@@ -217,7 +280,7 @@ The main chart area is the central interactive canvas. It displays:
 
 - **Click a candle:** Selects that candle. Populates the Candle Data panel in the bottom-right column with that candle's OHLCV data and computed indicator values.
 - **Click a drawing control point:** Selects the drawing for editing.
-- **Click an analysis marker:** Opens the Analysis Detail popup for that cycle.
+- **Click an analysis marker:** Opens the AA Recommendation popup for that cycle.
 - **Mouse wheel:** Zoom in/out (Zoom mode).
 - **Click and drag on empty space:** Pan the chart left/right.
 - **Click a drawing button:** Activates the tool. First click on the chart places the first point; subsequent clicks place additional points until the drawing is complete.
@@ -350,7 +413,7 @@ Standard settings: Period 20, K = 2 (2 standard deviations).
 - **Walking the bands:** In strong trends, price "walks" along the upper (for uptrends) or lower (for downtrends) band for multiple candles. This indicates sustained directional momentum.
 - **Mean reversion:** In ranging markets, prices tend to return to the middle band after touching the outer bands.
 
-**BB is backend-computed:** The calculation is performed on the server using the full candle dataset, which allows the standard deviation to be computed correctly over the full period. This produces more accurate bands than a purely client-side approximation.
+**BB is backend-computed:** like every indicator in this panel, the calculation is performed on the server (via the same `calculate_indicator` call used for EMA/SMA/RSI/ATR/SlopeE/SlopeS too) using the full candle dataset, which allows the standard deviation to be computed correctly over the full period.
 
 ---
 
@@ -362,7 +425,7 @@ Standard settings: Period 20, K = 2 (2 standard deviations).
 
 **Calculation:** `VWAP = Σ(Typical Price × Volume) / Σ(Volume)` where Typical Price = (High + Low + Close) / 3. Cumulative from the start of the period (typically the start of the trading day or session).
 
-**VWAP is backend-computed** for the same reason as BB — the server has access to the full session's cumulative volume data.
+**VWAP is backend-computed** — same as every other indicator in this panel — and benefits from it the same way BB does: the server has access to the full session's cumulative volume data.
 
 **How to read VWAP:**
 - **Price above VWAP:** Buyers have been dominant since the session start. Bullish intraday bias.
@@ -639,6 +702,8 @@ Common use: identify where price may retrace to during a pullback in a trend. Th
 
 **Down Arrow:** Single-click to place a downward arrow marker. Typically used to mark short entries or bearish signals.
 
+**↔ Measure:** Two-click drawing between any two points. Draws a semi-transparent box between them with tick marks at both ends, labeled with the **candle count** and **pip distance** spanning the box (e.g. `12c +34.5p`). This is the fastest way to answer "how many pips/candles between these two points" without doing the arithmetic yourself — e.g. measuring a swing's exact size before sizing a Fibonacci retracement, or checking how many candles a consolidation lasted.
+
 ### Shapes and Labels
 
 **Rectangle:** Two-click drawing (diagonal corners). Creates a filled or outlined rectangle. Useful for marking consolidation zones, trading ranges, or key price area boxes.
@@ -706,12 +771,14 @@ DXY correlation is particularly useful for USD pairs — if DXY is strongly tren
 
 **Enable/disable analysis markers:** The Analyst View checkbox in the right column mirrors the Analyst checkbox in the header bar. Checking either one enables the same marker overlay.
 
-**Analysis button:** When a candle is selected and analyst markers are enabled, an **Analysis** button appears. Clicking it opens the Analysis Detail popup for the nearest analysis cycle to the selected candle's timestamp.
+**Analysis button:** When a candle is selected and analyst markers are enabled, an **Analysis** button appears. Clicking it opens the AA Recommendation popup for the nearest analysis cycle to the selected candle's timestamp.
 
 The popup shows:
-- 4-column grid: Decision, Confidence, Order Start Signal, Entry Quality
+- 4-column grid: Decision, Confidence, Order Start, Entry Quality
 - Full decision text/JSON with Copy button
 - Market snapshot at time of analysis with Copy button
+
+Note: "Decision" here is a direct passthrough of whatever the AA's own prompt/schema wrote to that field — it is not a fixed enum in the codebase. Depending on which prompt profile is active for the agent, you may see values like `BIAS_LONG`/`BIAS_SHORT`/`NEUTRAL`, `OPEN_BUY`/`OPEN_SELL`/`SKIP_*`, or a nested state object — read it as free text, not against a single fixed list.
 
 ---
 
@@ -731,13 +798,17 @@ Session times are approximate and may shift by ±1 hour during daylight saving t
 
 The London/New York overlap (13:00–17:00 UTC) is typically the most liquid and volatile period. Many trading strategies specifically target this window for entries.
 
-### Interpreting Analysis Markers (D/N)
+### Interpreting Analysis Markers (U/D/N)
 
-**D marker (green):** `order_start_signal=YES` — the AA agent found conditions favorable for trade entry. The bias (BIAS_LONG or BIAS_SHORT) indicates direction.
+**U marker (green ▲):** the analysis's `primary_bias` was bullish (`BIAS_LONG`/`BIAS_REVERSAL_LONG`).
 
-**N marker (gray):** `order_start_signal=NO` — the AA agent ran but did not signal trade readiness. May be NEUTRAL (no directional bias) or a directional bias without entry signal (e.g., the trend is up but the specific entry setup is not ready yet).
+**D marker (red ▼):** the analysis's `primary_bias` was bearish (`BIAS_SHORT`/`BIAS_REVERSAL_SHORT`).
 
-A high density of D markers in one direction on a stretch of chart is a visual indicator of consistent AI directional bias during that period.
+**N marker (gray ○):** `BIAS_NEUTRAL` or an unrecognized bias value — no directional bias.
+
+None of the three markers say anything about whether the agent actually signalled a trade entry — open the AA Recommendation popup and check the **Order Start** field for that (backed by the `order_start_signal` value); a trending market can show a run of U markers with `order_start_signal=NO` throughout because the entry setup itself never qualified.
+
+A high density of U or D markers in one direction on a stretch of chart is a visual indicator of consistent AI directional bias during that period.
 
 **Marker absence** means no analysis cycle ran at that time. This is expected during overnight gaps, weekends, or suspended periods.
 
@@ -761,7 +832,89 @@ After selecting options, click **Print** to open the browser's native print dial
 
 ---
 
-## 19. Practical Workflows and Examples
+## 19. Order Focus Mode
+
+Order Focus mode pins Chart Analysis to one specific historical trade. It's reached from the **Orderbook**: click the **Chart** button (LineChart icon) on any order row — this switches the Action tab to Chart Analysis and loads that order. It's a separate, dedicated entry point from the Orderbook's own **AI** button (which opens a lighter-weight "Ask AI" investigate popup without leaving the Orderbook) — use **Chart** when you want the full charting toolkit (indicators, drawing tools, swing levels) against the trade, and **AI** when you just want a quick answer without switching views.
+
+### What Happens Automatically on Entry
+
+1. The order's pair and broker are loaded, replacing whatever was previously selected.
+2. The **Anchor** field ([Section 2](#2-header-bar--controls)) is set to the order's close time + 1 hour (or, if the order never closed, whatever "end" time is available) — a fixed offset, not a dynamically sized window.
+3. **Candle Count** is left exactly as it was (default 200 on first use) — that many candles are loaded ending at the anchor above.
+4. Once the candles land, the chart automatically re-fits its viewport once so the trade's markers are actually on screen (it does not repeat this on every subsequent reload, so you're free to pan/zoom afterward without being fought).
+5. Entry, Exit, Stop Loss, and Take Profit price lines are drawn, along with emphasized **Start**/**End** trade markers at the order's open/close candles.
+6. The header's mode badge switches to **🔒 Order**.
+
+The **Chart Assistant does not auto-open** in this process — you still open it explicitly with the Assistant toggle if you want to ask it about the trade (see [Section 20](#20-chart-assistant)).
+
+### What's Different While Focused
+
+- **Auto-refresh stops** — see [Section 3](#3-auto-refresh-behavior). The window is frozen until you leave focus mode, which is the point: a closed trade's context shouldn't shift while you're studying it.
+- The **Anchor** field stays populated and editable — you can nudge it manually (e.g. to look further before the entry) without leaving Order Focus; only the mode badge and the Assistant's extra order context are tied to the focused order itself, not to the exact anchor value.
+- The **Loaded-Range Diagnostic Badge** ([Section 2](#2-header-bar--controls)) turns amber and warns if the order's own start and/or end timestamp falls outside the loaded window — increase Candle Count or adjust the Anchor until the warning clears if you need the full trade visible.
+- If you open the Assistant while focused, it receives the order's full context automatically — direction, signal confidence, requested/fill/close prices and times, stop-loss/take-profit, close reason and result, the short entry reasoning, the **full original analysis text**, the structured decision context, the analysis overlays, and the raw market context snapshot — plus a set of read-only investigation tools it otherwise doesn't have (`get_order_trace`, `get_agent_decisions`, `get_agent_config`, `get_ec_config`, `get_ec_runs`, `get_order`/`get_order_book`, `get_candles`/`calculate_indicator`/`get_swing_levels`). See [Section 20](#20-chart-assistant).
+
+### Leaving Order Focus Mode
+
+Click the **🔒 Order** badge in the header. This clears the focused order, resets Candle Count to 200 and the Anchor to empty (live data), and resumes the 30-second auto-refresh — pair, broker, and timeframe are left as they are rather than reset, since you may want to keep looking at the same instrument in free mode.
+
+### Example: Reviewing Why a Trade Lost
+
+**Goal:** understand exactly what the AA agent saw before a losing EURUSD trade closed, and whether the close made sense.
+
+1. Open **Orderbook**, find the losing trade, click its **Chart** button.
+2. Chart Analysis opens in Order Focus mode: EURUSD loads, anchored to the trade's close time, with Entry/SL/TP/Exit lines and Start/End markers already drawn.
+3. Click the **Assistant** toggle to open the Chart Assistant — it already has the order's full analysis text, decision context, and market snapshot, so you can ask directly: *"Why did this trade get stopped out — was the SL placement reasonable given the volatility at entry?"*
+4. If the answer references a specific candle or level, ask the assistant to mark it (e.g. *"draw a zone around the consolidation right before entry"*) rather than trying to eyeball coordinates from a text description.
+5. When done, click the **🔒 Order** badge to return to free mode without losing your EURUSD/H1 selection.
+
+You could reach the same anchored view manually (set Anchor to the order's close time yourself in free mode), but the Orderbook's **Chart** button does it in one click and additionally draws the trade's own price lines/markers — prefer it over the manual route whenever you have a specific order in hand.
+
+## 20. Chart Assistant
+
+The Chart Assistant is an AI chat window built into Chart Analysis. It can explain whatever is currently loaded on the chart, and — in Order Focus mode — the specific order too. Unlike the assistants elsewhere in the system, it isn't purely read-only: it can draw directly on the chart itself using the same tool-calling mechanism the Simulation/Prompt Workbench "sandbox" tools use.
+
+It **never opens on its own** — click the **Assistant** toggle button (top-right of the header bar) to open it, and again to close it. Opening it does not change anything about the chart itself.
+
+### The Window
+
+The Assistant renders as a **floating window**, not a docked panel — this is deliberate: a docked side panel would share width with the chart via flexbox, but the chart's own canvas doesn't reliably shrink to match in every case, so a panel could end up visually overlapping the chart. A floating window never participates in that layout at all.
+
+- **Drag** it by its header (the title bar reading "Chart Assistant").
+- **Resize** it from the small handle in the bottom-right corner (minimum 320×280px).
+- It defaults to the top-right area of the screen, sized to fit the viewport.
+- If a trade is focused, the header shows a compact summary (`EURUSD BUY · Fill 1.0842 · Close 1.0798`) so you don't lose track of which order you're discussing while the window is dragged around.
+- Close it with the **✕** in its header, or the Assistant toggle button again — either way, your chat history is discarded (there's also an explicit **Delete** button inside the panel to clear history without closing the window).
+
+### What It Can Do
+
+- **Explain price action, trends, support/resistance, and what indicators are showing** for the currently loaded pair/timeframe/candles.
+- **Draw on the chart itself** rather than describing coordinates in prose — it prefers to when explaining *why* something happened, because a marker is unambiguous and a text description of "where" on a chart is not:
+  - `candle_marker` — a single arrow+label on one candle.
+  - `zone_marker` — a labelled zone spanning a candle range (e.g. a support/resistance zone, a consolidation range).
+  - `trade_marker` — mark a hypothetical or historical entry/exit pair to illustrate a setup.
+  - `get_annotation` — look up something marked earlier in the same conversation.
+
+  These are drawn with the **same rendering used by the Simulation tab** — a marker the assistant places here looks and behaves identically to one placed there.
+- **Remember a note about a trading agent's behavior** across conversations with `assessment_memory` (get/set), keyed by that agent's id — useful so it doesn't have to re-derive a recurring pattern every time you ask about that agent.
+- **In Order Focus mode only**, additional read-only investigation tools become available (see [Section 19](#19-order-focus-mode) for the full list) — the same read-only reach the former per-order "Investigate" popup had, so moving to the unified Assistant didn't lose any of that capability. Ask things like *"what closed this trade — was it the AA itself, a trailing stop, or a risk guard?"* and it can trace both the open and close decision chains, look up the agent's or EventComposer's actual live configuration, and pull other orders for comparison.
+
+### Reading a Response
+
+Each answer bubble can show a **Tools:** line underneath it listing exactly which tool calls happened for that answer (e.g. `trade_marker(open) OK`, `assessment_memory FAILED`) — this is derived from the actual tool-call events the backend returned, not guessed from the answer text, so you can always tell whether a claimed action ("I've marked the zone") actually happened.
+
+Long answers default to a capped, scrollable box (about 15 lines) with **Show more/Show less** and a **Copy** button — the full text is always present, the cap only affects how much is visible without scrolling.
+
+### Things to Know / Troubleshooting
+
+- If the persona/instructions file (`config/llm_contexts/chart_analysis_assistant.md`) fails to load, an amber banner appears at the top of the panel warning that answers may be lower quality — the chat still works, just without its full instructions.
+- A `404` error when sending a message means the backend process hasn't picked up the assistant's chat route yet — this needs a **backend restart** (Python has no hot-reload for newly added routes), not just a page refresh.
+- The input box and Send button are disabled until a pair is loaded — there's nothing to discuss yet on an empty chart.
+- Nothing you type here changes what's saved for the order (if focused) — it's a conversation about the chart/order, not an edit to its stored record.
+
+---
+
+## 21. Practical Workflows and Examples
 
 ### Workflow 1: Identifying Trend Reversals Using SlopeE
 
@@ -872,9 +1025,23 @@ Entry on H0's close or H1's open captures the beginning of the EMA rise.
 - EMAs misaligned or crossing: transition period. Avoid directional trades until alignment clarifies.
 - SlopeE crossing zero: monitor for trend change. Do not add new trades in the old direction until SlopeE confirms new direction.
 
+### Workflow 6: Post-Mortem on a Losing Trade (Order Focus + Anchor + Assistant)
+
+**Goal:** Understand exactly what an agent saw before a losing trade and whether the exit made sense — without manually reconstructing the historical chart state.
+
+**Steps:**
+1. Open **Orderbook**, locate the trade, click its **Chart** button — this is faster and more complete than setting the Anchor field by hand, because it also draws the trade's own Entry/Exit/SL/TP lines and Start/End markers for you.
+2. Note the **Loaded-Range Diagnostic Badge** — if it's amber with a warning, widen Candle Count or nudge the Anchor until the order's own start/end both fall inside the loaded window.
+3. Open the **Assistant** and ask it to explain the setup — it already has the order's full analysis text, decision context, and market snapshot, so you don't need to paste anything.
+4. Ask it to trace the close (*"what actually closed this — the AA, a trailing stop, or a risk guard?"*) — in Order Focus mode it has the extra investigation tools to answer with the real causal chain instead of guessing from the stored `close_reason` alone.
+5. Ask it to mark anything it references on the chart (a zone, a candle) rather than describing coordinates — the marker is unambiguous, the assistant's own placement never is.
+6. Click the **🔒 Order** badge when done to return to free mode on the same pair.
+
+See [Section 19](#19-order-focus-mode) and [Section 20](#20-chart-assistant) for the full mechanics behind each step.
+
 ---
 
-## 20. Quick Reference
+## 22. Quick Reference
 
 ### Header Bar Controls
 
@@ -882,26 +1049,34 @@ Entry on H0's close or H1's open captures the beginning of the EMA rise.
 |---|---|---|
 | Pair | Select instrument | Updates chart immediately |
 | Broker | Select data source | Visible only with multiple brokers |
+| Mode badge | 🔓 Frei / 🔒 Order | Click 🔒 to leave Order Focus mode |
 | Timeframe | M5/M15/M30/H1/H4/D1 | Reloads candles |
 | Candles | 20–2000 | More = longer history, slower load |
+| Anchor | Load candles ending at a past point instead of live | Same field Order Focus pre-fills automatically |
 | Reload | Manual data refresh | — |
+| Range diagnostic | Shows loaded count/first/last timestamp | Turns amber + warns in Order Focus if the order falls outside the window |
+| Fit | Fit ALL loaded candles into view | Different from the default zoom reset, which can crop to a smaller configured range |
 | Zoom | Toggle draw/navigate mode | — |
 | Sessions | Show session bands | Sydney/Tokyo/London/New York |
-| Analyst | Show AA analysis markers | D=signal, N=neutral |
+| Analyst | Show AA analysis markers | U=bullish bias, D=bearish bias, N=neutral |
 | Print | Print dialog | Chart/data/analysis options |
+| → KB | Save chart + data snapshot to Knowledgebase | — |
+| Assistant | Toggle the floating Chart Assistant window | Never opens itself |
 
 ### Indicator Type Reference
 
+All indicators are computed server-side via the same `calculate_indicator` call — the "Backend?" column below reflects that there is no separate client-side calculation path for any of them.
+
 | Indicator | Type | Panel | Backend? | Smooth Period? |
 |---|---|---|---|---|
-| EMA | Price overlay | On chart | No | No |
-| SMA | Price overlay | On chart | No | No |
-| RSI | Oscillator | Below chart | No | No |
-| ATR | Oscillator | Below chart | No | No |
+| EMA | Price overlay | On chart | Yes | No |
+| SMA | Price overlay | On chart | Yes | No |
+| RSI | Oscillator | Below chart | Yes | No |
+| ATR | Oscillator | Below chart | Yes | No |
 | BB | Price overlay | On chart | Yes | No |
 | VWAP | Price overlay | On chart | Yes | No |
-| SlopeE | Oscillator | Below chart | No | Yes (amber) |
-| SlopeS | Oscillator | Below chart | No | Yes (amber) |
+| SlopeE | Oscillator | Below chart | Yes | Yes (amber) |
+| SlopeS | Oscillator | Below chart | Yes | Yes (amber) |
 
 ### Swing Level Sort Modes
 
@@ -936,6 +1111,16 @@ Entry on H0's close or H1's open captures the beginning of the EMA rise.
 |---|---|
 | Lines | H Line, V Line, Ray, Ext. Line, Trend Line, Channel |
 | Fibonacci | Fib Ret., Fib Ext., Fib Fan, Fib TZ |
-| Markers | Up Arrow, Down Arrow |
-| Shapes | Rectangle, Label |
+| Markers | Up Arrow, Down Arrow, Rectangle, Label, ↔ Measure |
 | Advanced | Pitchfork, Elliott Wave |
+
+### Order Focus / Assistant Quick Reference
+
+| Item | Where | Notes |
+|---|---|---|
+| Enter Order Focus | Orderbook → **Chart** button on an order row | Sets pair/broker/anchor automatically |
+| Leave Order Focus | Click the **🔒 Order** badge | Resets Candles to 200, clears Anchor, resumes auto-refresh |
+| Open the Assistant | **Assistant** toggle (header, right side) | Never opens itself, in either mode |
+| Assistant base tools | `zone_marker`, `trade_marker`, `candle_marker`, `get_annotation`, `assessment_memory` | Available in both modes |
+| Assistant order-focus tools | `get_order_trace`, `get_agent_decisions`, `get_agent_config`, `get_ec_config`, `get_ec_runs`, `get_order`/`get_order_book`, `get_candles`/`calculate_indicator`/`get_swing_levels` | Only when a specific order is focused |
+| Assistant persona/instructions | `config/llm_contexts/chart_analysis_assistant.md` | Edit this to change what the assistant is told it can do |
