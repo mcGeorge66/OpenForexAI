@@ -165,7 +165,7 @@ async def main() -> None:
 
     monitoring_bus = MonitoringBus(detail_level=log_level)
 
-    agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services = await bootstrap(
+    agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services, memory_service = await bootstrap(
         cfg, monitoring_bus=monitoring_bus
     )
     _log_runtime_ready(agents, connected_brokers)
@@ -192,6 +192,8 @@ async def main() -> None:
         tg.create_task(repo_service.run(), name="repo-service")
         tg.create_task(data_container.run(), name="data-container")
         tg.create_task(config_service.run(), name="config-service")
+        if memory_service is not None:
+            tg.create_task(memory_service.run(), name="semantic-memory-service")
         tg.create_task(mgmt_server.serve(), name="mgmt-api")
         for svc in llm_services:
             tg.create_task(svc.run(), name=f"llm-service:{svc.module_name}")

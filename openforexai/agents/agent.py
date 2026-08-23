@@ -957,6 +957,12 @@ class Agent:
                     user_msg = f"{user_msg}\n\n{snapshot_context}"
                 else:
                     user_msg = snapshot_context
+
+                if trigger in (EventType.M5_CANDLE_TRIGGER.value, EventType.ANALYSIS_RESULT.value):
+                    experience_block = await self._build_experience_context_block(cycle_pair)
+                    if experience_block:
+                        user_msg = f"{user_msg}\n\n{experience_block}"
+
                 _base_prompt = (
                     _QUERY_BASE_SYSTEM_PROMPT
                     if trigger == EventType.AGENT_QUERY.value
@@ -1081,6 +1087,11 @@ class Agent:
             await self._execute_broker_decision_fallback(
                 final_text=final_text,
                 executed_tool_names=executed_tool_names,
+            )
+            await self._execute_examiner_report_fallback(
+                final_text=final_text,
+                executed_tool_names=executed_tool_names,
+                trigger_payload=payload,
             )
 
             if self._is_analysis_agent():
@@ -1576,6 +1587,87 @@ class Agent:
         parsed = AgentId.try_parse(self.agent_id)
         return parsed is not None and parsed.type == "BA"
 
+    def _is_examiner_agent(self) -> bool:
+        parsed = AgentId.try_parse(self.agent_id)
+        return parsed is not None and parsed.type == "EA"
+
+    async def _semantic_memory_read_tables(self) -> list[str]:
+        """Resolve this agent's semantic_memory read grant from its own live config —
+        the same resolution SemanticMemoryTool itself does — so experience context can be
+        injected deterministically even for agents (like the snapshot decision engine) that
+        never get to call a tool themselves."""
+        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
+        if not isinstance(tool_config, dict):
+            return []
+        forced_arguments = tool_config.get("forced_arguments")
+        if not isinstance(forced_arguments, dict):
+            return []
+        grant = forced_arguments.get("semantic_memory")
+        if not isinstance(grant, dict):
+            return []
+
+        from openforexai.tools.argument_templates import (
+            build_agent_placeholder_values,
+            resolve_argument_templates,
+        )
+        placeholders = build_agent_placeholder_values(
+            agent_id=self.agent_id,
+            agent_config=self._config,
+            broker_name=self._config.get("broker"),
+            pair=self._config.get("pair"),
+        )
+        resolved = resolve_argument_templates(grant, placeholders)
+        read_tables = resolved.get("read_tables")
+        return list(read_tables) if isinstance(read_tables, list) else []
+
+    async def _build_experience_context_block(self, pair: str | None) -> str:
+        """Deterministically recall relevant semantic-memory notes and format them as a
+        plain-language 'experience' block appended to the user message — never framed as a
+        rule. Needed because the snapshot decision-only engine (used by AA on
+        m5_candle_trigger) never calls tools itself, so relying on a prompt instruction to
+        "call recall" would silently never fire for it. Fails open: any error here (memory
+        service unavailable, timeout, ...) must never block a trading cycle — it just means
+        this cycle runs without experience context, same as before this feature existed."""
+        read_tables = await self._semantic_memory_read_tables()
+        if not read_tables:
+            return ""
+        try:
+            from openforexai.tools.base import ToolContext, memory_request
+            mem_context = ToolContext(agent_id=self.agent_id, event_bus=self._bus)
+            tables = read_tables
+            if "*" in tables:
+                listing = await memory_request(mem_context, "list_tables", {})
+                tables = list(listing.get("tables", [])) if isinstance(listing, dict) else []
+                if not tables:
+                    return ""
+            query = f"{pair or ''} Intraday-Setup, Entry-Timing, Risiko".strip()
+            result = await memory_request(
+                mem_context, "recall", {"tables": tables, "query": query, "top_k": 5, "candidate_pool": 30},
+            )
+            entries = result.get("results", []) if isinstance(result, dict) else []
+            if not entries:
+                return ""
+            lines = [
+                "ERFAHRUNGSWERTE AUS FRÜHEREN TRADES (Beobachtungen eines Prüf-Agenten — keine "
+                "Regeln, keine Vorgaben. Du entscheidest selbst, ob und wie stark das hier "
+                "einfließt, genau wie ein Mensch Erfahrung gegen die aktuelle Situation abwägt):",
+            ]
+            for entry in entries:
+                text = str(entry.get("text", "")).strip()
+                if not text:
+                    continue
+                tags = entry.get("tags") or []
+                tag_suffix = f" [{', '.join(str(t) for t in tags)}]" if tags else ""
+                lines.append(f"- {text}{tag_suffix}")
+            return "\n".join(lines) if len(lines) > 1 else ""
+        except Exception as exc:
+            self._logger.warning(
+                "Experience-context recall failed, continuing without it",
+                agent_id=self.agent_id,
+                error=str(exc),
+            )
+            return ""
+
     def _resolve_cycle_pair(self, trigger: str, payload: dict[str, Any], triggering_msg=None) -> str | None:
         """Resolve the effective pair for the current cycle."""
         configured_pair = self._config.get("pair")
@@ -1708,6 +1800,75 @@ class Agent:
                     id=f"fallback-auto-place-{datetime.now(UTC).timestamp()}",
                     name="auto_place_order",
                     arguments=arguments,
+                )
+            ],
+            used_tokens=0,
+            max_tokens=self._tool_context_budget_tokens,
+        )
+
+    async def _execute_examiner_report_fallback(
+        self,
+        *,
+        final_text: str,
+        executed_tool_names: list[str],
+        trigger_payload: dict[str, Any],
+    ) -> None:
+        """Guarantee a Knowledgebase report exists for every trade the Examiner (EA)
+        looks at — mirrors _execute_broker_decision_fallback's "force the critical action
+        if the model's own tool-calling didn't do it" pattern. The user requires this to be
+        gapless for evidentiary/audit reasons, so it cannot depend on the LLM remembering to
+        call create_examination_report; if it didn't, this creates a minimal report anyway,
+        explicitly marked as an automatic fallback so a human reviewer can tell the
+        difference and knows to check semantic-memory completeness manually for this trade.
+        """
+        if not self._is_examiner_agent() or self._tool_dispatcher is None:
+            return
+        if "create_examination_report" in executed_tool_names:
+            return
+
+        order_id = trigger_payload.get("id") if isinstance(trigger_payload, dict) else None
+        if not order_id:
+            return
+
+        opening_agent_id = trigger_payload.get("agent_id", "unknown") if isinstance(trigger_payload, dict) else "unknown"
+
+        self._logger.warning(
+            "Examiner report fallback: model did not call create_examination_report — "
+            "creating a minimal fallback report",
+            agent_id=self.agent_id,
+            order_id=str(order_id),
+        )
+
+        report_markdown = (
+            "Dieser Bericht wurde automatisch erzeugt, weil der Examiner-Agent für diesen "
+            "Trade keinen eigenen Bericht erstellt hat. Die Rohantwort des Agenten:\n\n"
+            f"{final_text.strip() or '(keine Antwort)'}\n\n"
+            "Hinweis: Ob und was für diesen Trade ins semantische Gedächtnis geschrieben "
+            "wurde, konnte hierdurch nicht automatisch geprüft werden — bitte manuell "
+            "kontrollieren."
+        )
+
+        from openforexai.ports.llm import ToolCall
+
+        await self._tool_dispatcher.execute_all(
+            tool_calls=[
+                ToolCall(
+                    id=f"fallback-examination-report-{datetime.now(UTC).timestamp()}",
+                    name="create_examination_report",
+                    arguments={
+                        "order_id": str(order_id),
+                        "verdict": "inconclusive",
+                        "opening_agent_id": str(opening_agent_id),
+                        "report_markdown": report_markdown,
+                        "memory_writes": [
+                            {
+                                "table": "none",
+                                "id": "none",
+                                "action": "created",
+                                "text": "Fallback-Bericht — kein bestätigter Gedächtnis-Eintrag durch den Agenten.",
+                            }
+                        ],
+                    },
                 )
             ],
             used_tokens=0,

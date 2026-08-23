@@ -131,7 +131,7 @@ const STATIC_EVENT_FLOW: Record<string, StaticFlow> = {
  * Classifies an agent_id (e.g. "OXS_T-EURUSD-AD-ADPT") into a coarse module
  * category. The third dash-segment indicates the agent kind:
  *   AD → broker (broker adapter)
- *   AA, BA, GA → agent (analysis / broker action / general agent)
+ *   AA, BA, EA, GA → agent (analysis / broker action / examiner / general agent)
  * Anything else (management API, runtime, unknown) → core.
  */
 function classifyAgentId(agentId: string | null | undefined): ModuleTab | 'unknown' {
@@ -141,6 +141,7 @@ function classifyAgentId(agentId: string | null | undefined): ModuleTab | 'unkno
   if (agentId === 'SYSTM-ALL___-GA-DATA')  return 'data'
   if (agentId === 'SYSTM-ALL___-GA-REPO')  return 'core'
   if (agentId === 'SYSTM-ALL___-GA-CFGSV') return 'core'
+  if (agentId === 'SYSTM-ALL___-GA-MEM')   return 'core'
   if (agentId === 'MGMT_-ALL___-GA-MGMT')  return 'core'
   if (agentId === 'eventbus' || agentId === 'management_api' || agentId === 'runtime') return 'core'
 
@@ -149,7 +150,7 @@ function classifyAgentId(agentId: string | null | undefined): ModuleTab | 'unkno
   if (parts.length >= 3) {
     const kind = parts[2].toUpperCase()
     if (kind === 'AD') return 'broker'
-    if (kind === 'AA' || kind === 'BA' || kind === 'GA') return 'agent'
+    if (kind === 'AA' || kind === 'BA' || kind === 'EA' || kind === 'GA') return 'agent'
     if (kind === 'EC') return 'entity'
   }
   return 'unknown'

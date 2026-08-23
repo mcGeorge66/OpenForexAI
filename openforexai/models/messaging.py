@@ -25,6 +25,10 @@ class EventType(StrEnum):
     SIGNAL_REJECTED = "signal_rejected"
     ORDER_PLACED = "order_placed"
     POSITION_OPENED = "position_opened"
+    # Published once by RepositoryService when update_order_book_entry sets
+    # status=closed (regardless of which caller triggered the close) — payload
+    # is the full, serialized OrderBookEntry. Wakes any agent with this in its
+    # event_triggers (e.g. an EA "Examiner" post-mortem agent, pass_trigger=true).
     POSITION_CLOSED = "position_closed"
     RISK_BREACH = "risk_breach"
 
@@ -62,6 +66,10 @@ class EventType(StrEnum):
     # ── Repository service (DB access via bus) ────────────────────────────────
     REPO_REQUEST  = "repo_request"    # any member → SYSTM-ALL___-GA-REPO
     REPO_RESPONSE = "repo_response"   # SYSTM-ALL___-GA-REPO → requester
+
+    # ── Semantic memory (LanceDB via bus) ─────────────────────────────────────
+    MEMORY_REQUEST  = "memory_request"    # any member → SYSTM-ALL___-GA-MEM
+    MEMORY_RESPONSE = "memory_response"   # SYSTM-ALL___-GA-MEM → requester
 
     # ── Market data (DataContainer queries) ──────────────────────────────────
     CANDLES_REQUEST  = "candles_request"

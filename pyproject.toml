@@ -28,6 +28,9 @@ dependencies = [
     "questionary>=2.0",
     "matplotlib>=3.8",
     "mplfinance>=0.12.10b0",
+    "lancedb>=0.15",
+    "FlagEmbedding>=1.2.10",
+    "huggingface_hub>=0.24",
 ]
 
 [project.optional-dependencies]

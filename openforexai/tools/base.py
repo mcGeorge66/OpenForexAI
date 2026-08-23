@@ -200,6 +200,43 @@ async def repo_request(
     return response.get("result")
 
 
+async def memory_request(
+    context: ToolContext,
+    operation: str,
+    args: dict[str, Any] | None = None,
+    timeout: float = 30.0,
+) -> Any:
+    """Send a MEMORY_REQUEST to the SemanticMemoryService and return the result.
+
+    Args:
+        context:   Tool context.
+        operation: "remember" or "recall".
+        args:      Operation-specific arguments (see SemanticMemoryService).
+        timeout:   Seconds to wait (default 30 — embedding + LanceDB I/O is
+                   slower than a plain repository read).
+
+    Returns:
+        The operation's result.
+
+    Raises:
+        RuntimeError: If the memory service returns an error.
+        asyncio.TimeoutError: If no response arrives in time.
+    """
+    from openforexai.models.messaging import EventType
+    from openforexai.services.semantic_memory_service import SEMANTIC_MEMORY_SERVICE_ID
+
+    response = await bus_request(
+        context=context,
+        event_type=EventType.MEMORY_REQUEST,
+        target_id=SEMANTIC_MEMORY_SERVICE_ID,
+        payload={"operation": operation, "args": args or {}},
+        timeout=timeout,
+    )
+    if response.get("error"):
+        raise RuntimeError(f"Memory operation '{operation}' failed: {response['error']}")
+    return response.get("result")
+
+
 class BaseTool(ABC):
     """Base class for all tool plugins.
 

@@ -25,6 +25,9 @@ from openforexai.tools.sandbox.trade_marker import TradeMarkerTool
 from openforexai.tools.sandbox.zone_marker import ZoneMarkerTool
 from openforexai.tools.system.alarm import RaiseAlarmTool
 from openforexai.tools.system.assessment_memory import AssessmentMemoryTool
+from openforexai.tools.system.semantic_memory import SemanticMemoryTool
+from openforexai.tools.system.examination_report import CreateExaminationReportTool
+from openforexai.tools.system.seed_demo_order import SeedDemoOrderTool
 from openforexai.tools.system.get_agent_config import GetAgentConfigTool
 from openforexai.tools.system.get_agent_decisions import GetAgentDecisionsTool
 from openforexai.tools.system.get_ec_config import GetEcConfigTool
@@ -53,6 +56,9 @@ DEFAULT_REGISTRY.register(ClosePositionTool())
 DEFAULT_REGISTRY.register(RaiseAlarmTool())
 DEFAULT_REGISTRY.register(TriggerSyncTool())
 DEFAULT_REGISTRY.register(AssessmentMemoryTool())
+DEFAULT_REGISTRY.register(SemanticMemoryTool())
+DEFAULT_REGISTRY.register(CreateExaminationReportTool())
+DEFAULT_REGISTRY.register(SeedDemoOrderTool())
 DEFAULT_REGISTRY.register(GetLastDecisionTool())
 DEFAULT_REGISTRY.register(ForexSessionStatusTool())
 DEFAULT_REGISTRY.register(GetSwingLevelsTool())

@@ -28,6 +28,7 @@ from typing import Any
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+from openforexai.models.trade import OrderStatus
 from openforexai.ports.database import AbstractRepository
 from openforexai.utils.logging import get_logger
 
@@ -107,6 +108,37 @@ class RepositoryService:
                     pass
         return args
 
+    async def _publish_position_closed(self, entry_id: str | None) -> None:
+        """Broadcast POSITION_CLOSED with the full closed order as payload.
+
+        Fires once, from this single choke point, regardless of which of the
+        several call sites (broker-sync-detected close, manual close via the
+        management API, close_position tool, trailing-stop/risk-guard EC)
+        actually triggered the update_order_book_entry call that closed it —
+        an EA "Examiner" agent (or anything else with position_closed in its
+        event_triggers) picks this up the same way BA picks up ANALYSIS_RESULT.
+        Deliberately a small, one-off special case in an otherwise generic
+        operation-name-to-repository-method passthrough — not worth a new
+        dispatch mechanism for a single hook point.
+        """
+        if not entry_id:
+            return
+        try:
+            entry = await self._repository.get_order_book_entry(entry_id)
+        except Exception as exc:
+            _log.error("RepositoryService: failed to load closed entry %s: %s", entry_id, exc, exc_info=True)
+            return
+        if entry is None:
+            return
+        await self._bus.publish(
+            AgentMessage(
+                event_type=EventType.POSITION_CLOSED,
+                source_agent_id=REPO_SERVICE_ID,
+                instrument=getattr(entry, "pair", None),
+                payload=_serialize_result(entry, "position_closed"),
+            ),
+        )
+
     async def _handle(self, msg: AgentMessage) -> None:
         operation = msg.payload.get("operation", "")
         args: dict[str, Any] = self._deserialize_args(
@@ -122,6 +154,10 @@ class RepositoryService:
             if method is None:
                 raise AttributeError(f"Repository has no method '{operation}'")
             result = await method(**args)
+            if operation == "update_order_book_entry":
+                updated_status = str(args.get("updates", {}).get("status", "")).upper()
+                if updated_status == OrderStatus.CLOSED.value:
+                    await self._publish_position_closed(args.get("entry_id"))
         except Exception as exc:
             error = str(exc)
             _log.error(

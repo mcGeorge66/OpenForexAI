@@ -31,6 +31,7 @@ from openforexai.messaging.routing import RoutingTable
 from openforexai.registry.plugin_registry import PluginRegistry
 from openforexai.registry.runtime_registry import RuntimeRegistry
 from openforexai.services.llm_service import LLMService
+from openforexai.services.semantic_memory_service import SEMANTIC_MEMORY_SERVICE_ID, SemanticMemoryService
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.config_loader import AgentToolConfig
 from openforexai.tools.system.agent_bridge import register_bridge_tools_from_config
@@ -292,6 +293,20 @@ async def bootstrap(
     # ── ConfigService ─────────────────────────────────────────────────────────
     config_service = ConfigService(system_config, bus, repository)
 
+    # ── SemanticMemoryService ─────────────────────────────────────────────────
+    # Restart-required (model provisioning happens here, not hot-reloadable) —
+    # per-agent read/write table access is separate and IS hot-reloadable, see
+    # each agent's tool_config.forced_arguments.semantic_memory.
+    memory_cfg = system_config.get("semantic_memory", {})
+    memory_service: SemanticMemoryService | None = None
+    if memory_cfg.get("enable", False):
+        memory_service = await SemanticMemoryService.from_config(
+            memory_cfg, bus, monitoring_bus, project_root=_ROOT,
+        )
+        _log.info("SemanticMemoryService ready", member_id=SEMANTIC_MEMORY_SERVICE_ID)
+    else:
+        _log.info("SemanticMemoryService disabled via config; skipping startup")
+
     # ── Agents ────────────────────────────────────────────────────────────────
     broker_utc_offset = int(
         system_config.get("system", {}).get("broker_candle_utc_offset_hours", 3)
@@ -340,4 +355,4 @@ async def bootstrap(
 
     # llm_services are returned to the caller (main.py) which starts them
     # inside the TaskGroup alongside all other long-running services.
-    return agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services
+    return agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services, memory_service

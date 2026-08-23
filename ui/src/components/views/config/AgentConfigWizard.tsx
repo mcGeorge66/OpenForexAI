@@ -115,7 +115,7 @@ const TIPS = {
   enable: 'If true, the agent is started and receives events. If false, the config stays stored but agent is inactive.',
   comment: 'Human-readable note for maintainers. No runtime effect.',
   pair: 'Trading pair (6 chars recommended), e.g. EURUSD or ALL___. Required for AA agents.',
-  type: 'Agent role code: AA (Analysis), BA (Broker), GA (Global), AD (Adapter/system use). Influences behavior and routing.',
+  type: 'Agent role code: AA (Analysis), BA (Broker), EA (Examiner — post-trade review), GA (Global). Influences behavior and routing.',
   llm: 'LLM module name from modules.llm in system config. Determines model/provider used by this agent.',
   broker: 'Broker module name from modules.broker in system config. Determines broker adapter context.',
   timer_enabled: 'Derived from the Kickoff Triggers control. If `timer` is selected there, periodic execution is enabled.',
@@ -935,7 +935,7 @@ export function AgentConfigWizard() {
                   </label>
                   <label title={TIPS.type} className="text-xs text-gray-300 col-span-2">
                     Type
-                    <select title={TIPS.type} value={form.type} onChange={e => setField('type', e.target.value)} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"><option value="AA">AA</option><option value="BA">BA</option><option value="GA">GA</option><option value="AD">AD</option></select>
+                    <select title={TIPS.type} value={form.type} onChange={e => setField('type', e.target.value)} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"><option value="AA">AA</option><option value="BA">BA</option><option value="EA">EA</option><option value="GA">GA</option></select>
                   </label>
                   <label title={TIPS.llm} className="text-xs text-gray-300 col-span-4">
                     LLM

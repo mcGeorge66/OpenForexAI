@@ -178,6 +178,14 @@
       "priority": 30
     },
     {
+      "id": "position_closed_to_ea",
+      "description": "Position closed (published by RepositoryService on update_order_book_entry -> status=CLOSED, sender is the fixed SYSTM-ALL___-GA-REPO id, not broker-specific) -> any broker's Examiner agent",
+      "event": "position_closed",
+      "from": "*",
+      "to": "*-ALL___-EA-*",
+      "priority": 30
+    },
+    {
       "id": "order_placed_to_ba",
       "description": "Order placed confirmation → BA",
       "event": "order_placed",

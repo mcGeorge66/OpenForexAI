@@ -10,7 +10,7 @@ Segment rules
 -------------
 BROKER  5 chars, padded right with '_' (e.g. 'OANDA', 'MT5__', 'GLOBL')
 PAIR    6 chars, padded right with '_' (e.g. 'EURUSD', 'ALL___')
-TYPE    2 chars exactly: 'AA' | 'BA' | 'GA' | 'AD'
+TYPE    2 chars exactly: 'AA' | 'BA' | 'EA' | 'GA' | 'AD' | 'EC'
 NAME    1-5 chars (no padding at rest; stored as-is up to 5 chars)
 EXT     optional, any length, only present when NAME == 5 chars exactly
 
@@ -41,7 +41,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-_VALID_TYPES = {"AA", "BA", "GA", "AD", "EC"}
+_VALID_TYPES = {"AA", "BA", "EA", "GA", "AD", "EC"}
 
 # Pre-compiled pattern for full ID validation (no wildcards)
 _ID_RE = re.compile(
@@ -55,7 +55,7 @@ class AgentId:
 
     broker: str      # 5 chars (may contain '_')
     pair: str        # 6 chars (may contain '_')
-    type: str        # 2 chars: AA | BA | GA | AD
+    type: str        # 2 chars: AA | BA | EA | GA | AD | EC
     name: str        # 1–5 chars
     extension: str | None = field(default=None)
 
