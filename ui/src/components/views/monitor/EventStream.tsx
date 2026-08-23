@@ -9,9 +9,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api, type MonitoringEvent, type PinnedMonitoringEvent } from '@/api/client'
-import { ArrowUp, Pin, PinOff, Trash2, X, Copy } from 'lucide-react'
+import { ArrowUp, Pin, PinOff, Trash2, X, Copy, PictureInPicture2 } from 'lucide-react'
 import { formatTs as formatTsCentral } from '@/utils/time'
+import { useDocumentPictureInPicture } from '@/hooks/useDocumentPictureInPicture'
 import {
   FILTER_FIELDS,
   FILTER_OPERATORS,
@@ -327,6 +329,12 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
   const dragging = useRef(false)
   const dragOrigin = useRef({ mx: 0, my: 0, x: 0, y: 0 })
 
+  const { pipWindow, open: popOut, close: redock, supported: pipSupported } =
+    useDocumentPictureInPicture({
+      width: Math.min(640, window.innerWidth - 40),
+      height: Math.min(480, window.innerHeight - 40),
+    })
+
   // Set initial size once via DOM — React's style prop only controls left/top,
   // so re-renders from drag updates never reset the browser-managed size.
   useEffect(() => {
@@ -470,61 +478,72 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
     }
   }
 
-  return (
+  const header = (
     <div
-      ref={containerRef}
-      style={{
-        position: 'fixed',
-        left: pos.x,
-        top: pos.y,
-        minWidth: 360,
-        minHeight: 200,
-        resize: 'both',
-        overflow: 'hidden',
-        zIndex: 9999,
-      }}
-      className="flex flex-col bg-gray-900 border border-gray-600 rounded-lg shadow-2xl"
+      onMouseDown={pipWindow ? undefined : startDrag}
+      className={`flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-600 rounded-t-lg select-none flex-shrink-0 ${pipWindow ? '' : 'cursor-move'}`}
     >
-      {/* Title bar — drag handle */}
-      <div
-        onMouseDown={startDrag}
-        className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-600 rounded-t-lg cursor-move select-none flex-shrink-0"
-      >
-        <div className="flex items-center gap-2 text-xs min-w-0">
-          <span className={`flex-shrink-0 font-semibold ${eventColour(event.event_type)}`}>
-            {event.event_type}
-          </span>
-          <span className="text-gray-500 flex-shrink-0">·</span>
-          <span className="text-gray-400 flex-shrink-0">{formatTs(event.timestamp)}</span>
-          {event.broker && (
-            <>
-              <span className="text-gray-500 flex-shrink-0">·</span>
-              <span className="text-gray-500 truncate">
-                {event.broker}{event.pair ? `·${event.pair}` : ''}
-              </span>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-1 ml-2">
-          <button
-            onMouseDown={e => e.stopPropagation()}
-            onClick={() => void copyPayload()}
-            className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
-            title="Copy payload"
-          >
-            <Copy className="w-4 h-4" />
-          </button>
-          <button
-            onMouseDown={e => e.stopPropagation()}
-            onClick={onClose}
-            className="flex-shrink-0 text-gray-500 hover:text-white transition-colors"
-            title="Close (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+      <div className="flex items-center gap-2 text-xs min-w-0">
+        <span className={`flex-shrink-0 font-semibold ${eventColour(event.event_type)}`}>
+          {event.event_type}
+        </span>
+        <span className="text-gray-500 flex-shrink-0">·</span>
+        <span className="text-gray-400 flex-shrink-0">{formatTs(event.timestamp)}</span>
+        {event.broker && (
+          <>
+            <span className="text-gray-500 flex-shrink-0">·</span>
+            <span className="text-gray-500 truncate">
+              {event.broker}{event.pair ? `·${event.pair}` : ''}
+            </span>
+          </>
+        )}
       </div>
+      <div className="flex items-center gap-1 ml-2">
+        <button
+          onMouseDown={e => e.stopPropagation()}
+          onClick={() => void copyPayload()}
+          className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
+          title="Copy payload"
+        >
+          <Copy className="w-4 h-4" />
+        </button>
+        {pipWindow ? (
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={redock}
+            className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
+            title="Zurück ins Browserfenster andocken"
+          >
+            <PictureInPicture2 className="w-4 h-4" />
+          </button>
+        ) : (
+          <>
+            {pipSupported && (
+              <button
+                onMouseDown={e => e.stopPropagation()}
+                onClick={() => void popOut()}
+                className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
+                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              onClick={onClose}
+              className="flex-shrink-0 text-gray-500 hover:text-white transition-colors"
+              title="Close (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
 
+  const body = (
+    <>
       {/* Context strip */}
       <div className="flex-shrink-0 px-3 py-2 bg-gray-900/60 border-b border-gray-700 space-y-1 text-xs">
         {/* What / Why */}
@@ -589,7 +608,36 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
           {jsonText}
         </pre>
       </div>
+    </>
+  )
 
+  if (pipWindow) {
+    return createPortal(
+      <div className="flex flex-col h-screen bg-gray-900">
+        {header}
+        {body}
+      </div>,
+      pipWindow.document.body,
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        position: 'fixed',
+        left: pos.x,
+        top: pos.y,
+        minWidth: 360,
+        minHeight: 200,
+        resize: 'both',
+        overflow: 'hidden',
+        zIndex: 9999,
+      }}
+      className="flex flex-col bg-gray-900 border border-gray-600 rounded-lg shadow-2xl"
+    >
+      {header}
+      {body}
       {/* Resize hint */}
       <div className="flex-shrink-0 flex justify-end px-2 py-0.5 bg-gray-900 border-t border-gray-800 rounded-b-lg">
         <span className="text-white text-xs select-none">⇲</span>

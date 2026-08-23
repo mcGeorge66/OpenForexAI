@@ -12,11 +12,13 @@
  * one simple to reason about on its own.
  */
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquare, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { MessageSquare, PictureInPicture2, X } from 'lucide-react'
 import type { OrderbookEntryDetail } from '@/api/client'
 import type { AnnotationOverlay } from './useAnnotationOverlay'
 import { ChartAssistantPanel } from './ChartAssistantPanel'
-import type { ChartAssistantContext } from './useChartAssistantChat'
+import type { ChartAssistantContext, ChartAssistantMessage } from './useChartAssistantChat'
+import { useDocumentPictureInPicture } from '@/hooks/useDocumentPictureInPicture'
 
 const DEFAULT_WIDTH = 420
 const DEFAULT_HEIGHT = 560
@@ -28,9 +30,16 @@ export interface ChartAssistantWindowProps {
   context: ChartAssistantContext
   focusedOrder: OrderbookEntryDetail | null
   onClose: () => void
+  /** Owned by the caller (ChartAnalysis.tsx), not here — that's what makes the chat
+   * history survive closing and reopening the whole assistant, not just undock/redock.
+   * See useChartAssistantChat.ts's UseChartAssistantChatOptions for the full picture. */
+  initialMessages: ChartAssistantMessage[]
+  onMessagesChange: (messages: ChartAssistantMessage[]) => void
 }
 
-export function ChartAssistantWindow({ overlay, context, focusedOrder, onClose }: ChartAssistantWindowProps) {
+export function ChartAssistantWindow({
+  overlay, context, focusedOrder, onClose, initialMessages, onMessagesChange,
+}: ChartAssistantWindowProps) {
   const [size, setSize] = useState(() => ({
     width: Math.max(MIN_WIDTH, Math.min(DEFAULT_WIDTH, window.innerWidth - 32)),
     height: Math.max(MIN_HEIGHT, Math.min(DEFAULT_HEIGHT, window.innerHeight - 32)),
@@ -41,6 +50,9 @@ export function ChartAssistantWindow({ overlay, context, focusedOrder, onClose }
   }))
   const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const resizeState = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
+
+  const { pipWindow, open: popOut, close: redock, supported: pipSupported } =
+    useDocumentPictureInPicture({ width: size.width, height: size.height })
 
   // Same global-listener drag/resize pattern as OrderInvestigateModal.
   useEffect(() => {
@@ -77,41 +89,85 @@ export function ChartAssistantWindow({ overlay, context, focusedOrder, onClose }
     resizeState.current = { startX: e.clientX, startY: e.clientY, origW: size.width, origH: size.height }
   }
 
+  const header = (
+    <div
+      className={`flex items-center justify-between px-3 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 select-none ${pipWindow ? '' : 'cursor-move'}`}
+      onMouseDown={pipWindow ? undefined : startDrag}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <MessageSquare className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+        <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider flex-shrink-0">
+          Chart Assistant
+        </span>
+        {focusedOrder && (
+          <span className="text-xs text-gray-400 truncate">
+            {focusedOrder.pair} {focusedOrder.direction} · Fill {focusedOrder.fill_price ?? focusedOrder.requested_price} · Close {focusedOrder.close_price ?? '-'}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {pipWindow ? (
+          <button
+            onClick={redock}
+            onMouseDown={e => e.stopPropagation()}
+            title="Zurück ins Browserfenster andocken"
+            className="text-gray-500 hover:text-gray-300"
+          >
+            <PictureInPicture2 className="w-4 h-4" />
+          </button>
+        ) : (
+          <>
+            {pipSupported && (
+              <button
+                onClick={() => void popOut()}
+                onMouseDown={e => e.stopPropagation()}
+                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+                className="text-gray-500 hover:text-gray-300"
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              onMouseDown={e => e.stopPropagation()}
+              className="text-gray-500 hover:text-gray-300"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  const body = (
+    <div className="flex-1 min-h-0">
+      <ChartAssistantPanel
+        overlay={overlay}
+        context={context}
+        initialMessages={initialMessages}
+        onMessagesChange={onMessagesChange}
+      />
+    </div>
+  )
+
+  if (pipWindow) {
+    return createPortal(
+      <div className="flex flex-col h-screen bg-gray-950">
+        {header}
+        {body}
+      </div>,
+      pipWindow.document.body,
+    )
+  }
+
   return (
     <div
       className="fixed z-50 flex flex-col bg-gray-950 rounded-lg overflow-hidden shadow-2xl border border-gray-700"
       style={{ left: pos.x, top: pos.y, width: size.width, height: size.height }}
     >
-      <div
-        className="flex items-center justify-between px-3 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 cursor-move select-none"
-        onMouseDown={startDrag}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <MessageSquare className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-          <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider flex-shrink-0">
-            Chart Assistant
-          </span>
-          {focusedOrder && (
-            <span className="text-xs text-gray-400 truncate">
-              {focusedOrder.pair} {focusedOrder.direction} · Fill {focusedOrder.fill_price ?? focusedOrder.requested_price} · Close {focusedOrder.close_price ?? '-'}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <button
-            onClick={onClose}
-            onMouseDown={e => e.stopPropagation()}
-            className="text-gray-500 hover:text-gray-300"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0">
-        <ChartAssistantPanel overlay={overlay} context={context} />
-      </div>
-
+      {header}
+      {body}
       <div
         onMouseDown={startResize}
         title="Resize"

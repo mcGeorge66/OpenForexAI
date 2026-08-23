@@ -13,8 +13,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Check, ChevronDown, ChevronUp, Copy, CornerDownLeft, Loader2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Bot, Check, ChevronDown, ChevronUp, Copy, CornerDownLeft, Loader2, PictureInPicture2, X } from 'lucide-react'
 import { api, type LLMAssistantMessage, type OrderbookEntryDetail, type PromptWorkbenchToolEvent } from '@/api/client'
+import { useDocumentPictureInPicture } from '@/hooks/useDocumentPictureInPicture'
 
 interface ChatMessage extends LLMAssistantMessage {
   id: string
@@ -146,6 +148,9 @@ export function OrderInvestigateModal({ orderId, onClose }: { orderId: string; o
   const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const resizeState = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
 
+  const { pipWindow, open: popOut, close: redock, supported: pipSupported } =
+    useDocumentPictureInPicture({ width: size.width, height: size.height })
+
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const historyRef = useRef(history)
@@ -234,35 +239,59 @@ export function OrderInvestigateModal({ orderId, onClose }: { orderId: string; o
     }
   }
 
-  return (
+  const header = (
     <div
-      className="fixed z-50 flex flex-col bg-gray-950 rounded-lg overflow-hidden shadow-2xl border border-gray-700"
-      style={{ left: pos.x, top: pos.y, width: size.width, height: size.height }}
+      className={`flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 select-none ${pipWindow ? '' : 'cursor-move'}`}
+      onMouseDown={pipWindow ? undefined : startDrag}
     >
-      <div
-        className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0 cursor-move select-none"
-        onMouseDown={startDrag}
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <Bot className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex-shrink-0">
-            Ask AI — Order
+      <div className="flex items-center gap-2 min-w-0">
+        <Bot className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex-shrink-0">
+          Ask AI — Order
+        </span>
+        {entry && (
+          <span className="text-xs text-gray-400 truncate">
+            {entry.pair} {entry.direction} · {entry.status} · {formatMoney(entry.pnl_account_currency)}
           </span>
-          {entry && (
-            <span className="text-xs text-gray-400 truncate">
-              {entry.pair} {entry.direction} · {entry.status} · {formatMoney(entry.pnl_account_currency)}
-            </span>
-          )}
-        </div>
-        <button
-          onClick={onClose}
-          onMouseDown={e => e.stopPropagation()}
-          className="text-gray-500 hover:text-gray-300 flex-shrink-0"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        )}
       </div>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {pipWindow ? (
+          <button
+            onClick={redock}
+            onMouseDown={e => e.stopPropagation()}
+            title="Zurück ins Browserfenster andocken"
+            className="text-gray-500 hover:text-gray-300"
+          >
+            <PictureInPicture2 className="w-4 h-4" />
+          </button>
+        ) : (
+          <>
+            {pipSupported && (
+              <button
+                onClick={() => void popOut()}
+                onMouseDown={e => e.stopPropagation()}
+                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+                className="text-gray-500 hover:text-gray-300"
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              onMouseDown={e => e.stopPropagation()}
+              className="text-gray-500 hover:text-gray-300"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
 
+  const body = (
+    <>
       {entryError && (
         <div className="px-4 py-2 text-xs text-red-400 bg-red-900/20 flex-shrink-0">{entryError}</div>
       )}
@@ -325,7 +354,26 @@ export function OrderInvestigateModal({ orderId, onClose }: { orderId: string; o
           <CornerDownLeft className="w-3.5 h-3.5" />
         </button>
       </div>
+    </>
+  )
 
+  if (pipWindow) {
+    return createPortal(
+      <div className="flex flex-col h-screen bg-gray-950">
+        {header}
+        {body}
+      </div>,
+      pipWindow.document.body,
+    )
+  }
+
+  return (
+    <div
+      className="fixed z-50 flex flex-col bg-gray-950 rounded-lg overflow-hidden shadow-2xl border border-gray-700"
+      style={{ left: pos.x, top: pos.y, width: size.width, height: size.height }}
+    >
+      {header}
+      {body}
       <div
         onMouseDown={startResize}
         title="Resize"

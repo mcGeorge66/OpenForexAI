@@ -2536,6 +2536,15 @@ class PromptWorkbenchChatRequest(BaseModel):
                     "already anchored to the visible window by the frontend. Only used in the plain "
                     "candle-text path (no tool_blocks): folded into a '## Swing Levels' section.",
     )
+    drawings: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Chart Analysis tab: the user's own manual drawings (trend lines, channels, fib "
+                    "levels, rectangles, labels, ...) currently on the chart — each "
+                    "{tool, points: [{price, time}], label, sublabel}. Folded into a "
+                    "'## User Drawings' section so the agent sees exactly what the user drew, not "
+                    "just the agent's own zone/trade/candle markers (those stay in "
+                    "existing_annotations).",
+    )
     fifo_enabled: bool = Field(
         default=False,
         description="Simulation tab: when set, trade_marker rejects closing a trade out of order "
@@ -2783,10 +2792,20 @@ async def _build_prompt_workbench_context(req: PromptWorkbenchChatRequest) -> di
         indicators_section = f"\n\n## Indicators\n{chr(10).join(indicator_lines)}" if indicator_lines else ""
         swing_lines_fmt = [f"- {sw.get('title')}: {sw.get('price')}" for sw in req.swing_levels]
         swing_section = f"\n\n## Swing Levels\n{chr(10).join(swing_lines_fmt)}" if swing_lines_fmt else ""
+        drawing_lines = []
+        for d in req.drawings:
+            if d.get("visible") is False:
+                continue
+            points_fmt = ", ".join(
+                f"(price={p.get('price')}, time={p.get('time')})" for p in (d.get("points") or [])
+            )
+            label_fmt = f" \"{d['label']}\"" if d.get("label") else ""
+            drawing_lines.append(f"- {d.get('tool')}{label_fmt}: {points_fmt}")
+        drawings_section = f"\n\n## User Drawings\n{chr(10).join(drawing_lines)}" if drawing_lines else ""
         user_message = (
             f"=== Loaded candles ({req.pair.upper()} {tf}, {len(visible)} of {total} candles visible, "
             f"numbered #1=newest .. #{total}=oldest) ===\n{candle_block}\n=== End candles ==="
-            f"{indicators_section}{swing_section}\n\n{req.question}"
+            f"{indicators_section}{swing_section}{drawings_section}\n\n{req.question}"
         )
 
     return {
@@ -2914,6 +2933,18 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
                 "existing_annotations": req.existing_annotations,
                 "fifo_enabled": req.fifo_enabled,
                 "allow_trade_delete": req.allow_trade_delete,
+                # semantic_memory reads its table grants exclusively from here (never from
+                # the LLM's tool-call arguments) — this ad-hoc chat session isn't a persistent
+                # system.json5 agent with its own scoped forced_arguments, so it gets full,
+                # unrestricted access instead: whoever calls this endpoint already decided
+                # (via req.allowed_tools) whether semantic_memory is offered at all.
+                "agent_config": {
+                    "tool_config": {
+                        "forced_arguments": {
+                            "semantic_memory": {"write_tables": ["*"], "read_tables": ["*"]},
+                        },
+                    },
+                },
             },
         )
         # Force (not just default) `start` on candle-consuming tools the agent can call

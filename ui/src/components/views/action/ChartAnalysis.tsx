@@ -15,7 +15,7 @@ import {
 } from '@/components/charts/ForexChart'
 import { useAnnotationOverlay } from '@/components/charts/useAnnotationOverlay'
 import { ChartAssistantWindow } from '@/components/charts/ChartAssistantWindow'
-import type { ChartAssistantContext } from '@/components/charts/useChartAssistantChat'
+import type { ChartAssistantContext, ChartAssistantMessage } from '@/components/charts/useChartAssistantChat'
 import {
   buildOrderMarkers,
   buildOrderPriceLines,
@@ -237,6 +237,11 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
 
   // Assistant / order-focus mode
   const [showAssistant, setShowAssistant] = useState(false)
+  // Lives here, not in ChartAssistantWindow, specifically so the chat history also
+  // survives closing and reopening the assistant (ChartAssistantWindow itself is
+  // conditionally rendered and fully unmounts on close) — same technique as the
+  // undock/redock fix, just one component level higher up, where nothing unmounts.
+  const assistantHistoryRef = useRef<ChartAssistantMessage[]>([])
   const [focusedOrder, setFocusedOrder] = useState<OrderbookEntryDetail | null>(null)
 
   // Broker
@@ -346,8 +351,34 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
   // Naive wall-clock string, no "Z"/offset — see shiftWallClock's comment for why.
   const anchorIso = useMemo(() => anchorDateTime ? `${anchorDateTime}:00` : null, [anchorDateTime])
 
+  // Same serialization PromptWorkbench.tsx uses for its own chat/context-preview calls —
+  // keep both in sync if either shape changes, since the backend formats them identically.
+  const assistantIndicators = useMemo(
+    () => indicators.filter(ind => ind.visible).map(ind => ({
+      name: ind.name,
+      period: ind.period,
+      timeframe: ind.timeframe,
+      last_value: ind.data.length > 0 ? ind.data[ind.data.length - 1].value : null,
+    })),
+    [indicators],
+  )
+  const assistantSwingLevels = useMemo(
+    () => (swingEnabled ? swingLines.map(l => ({ title: l.title, price: l.price })) : []),
+    [swingEnabled, swingLines],
+  )
+  const assistantDrawings = useMemo(
+    () => drawings.filter(d => d.visible).map(d => ({
+      tool: d.tool, points: d.points, label: d.label, sublabel: d.sublabel,
+    })),
+    [drawings],
+  )
+
   const assistantContext: ChartAssistantContext = useMemo(() => {
-    if (!focusedOrder) return { pair, brokerName, timeframe, candleCount, candleAnchor: anchorIso }
+    const base = {
+      pair, brokerName, timeframe, candleCount, candleAnchor: anchorIso,
+      indicators: assistantIndicators, swingLevels: assistantSwingLevels, drawings: assistantDrawings,
+    }
+    if (!focusedOrder) return base
     const lines = [
       '=== Focused Order ===',
       `Order id: ${focusedOrder.id}`,
@@ -381,11 +412,11 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
       '=== End Focused Order ===',
     ].filter((line): line is string => line !== null)
     return {
-      pair, brokerName, timeframe, candleCount, candleAnchor: anchorIso,
+      ...base,
       extraSystemPrompt: lines.join('\n'),
       extraAllowedTools: ORDER_FOCUS_ALLOWED_TOOLS,
     }
-  }, [pair, brokerName, timeframe, candleCount, focusedOrder, anchorIso])
+  }, [pair, brokerName, timeframe, candleCount, focusedOrder, anchorIso, assistantIndicators, assistantSwingLevels, assistantDrawings])
 
   // ── Resizable bottom panel ─────────────────────────────────────────────────
   const [bottomHeight, setBottomHeight] = useState(300)
@@ -1266,6 +1297,8 @@ ${analysisSection}`
           context={assistantContext}
           focusedOrder={focusedOrder}
           onClose={() => setShowAssistant(false)}
+          initialMessages={assistantHistoryRef.current}
+          onMessagesChange={m => { assistantHistoryRef.current = m }}
         />
       )}
 

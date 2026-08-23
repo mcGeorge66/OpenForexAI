@@ -6,6 +6,15 @@
  * the Simulation tab already uses — no second tool-calling implementation. Pair
  * with useAnnotationOverlay for the same chart so tool-drawn markers render
  * identically to the Simulation tab.
+ *
+ * Also gets full (unrestricted) access to the semantic memory (semantic_memory —
+ * remember/recall/update/forget) — unlike the trading agents (AA/BA/EA), which are
+ * each scoped to specific tables via their own system.json5 forced_arguments, this
+ * is a human-supervised, ad-hoc chat session, so the backend (management/api.py's
+ * /prompt-workbench/chat) grants it "*" for both read and write. That means the user
+ * can freely discuss, query, add to, correct, or delete anything in memory through
+ * this assistant — see config/llm_contexts/chart_analysis_assistant.md for how it's
+ * instructed to use that responsibly (e.g. confirm before deleting).
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api, type PromptWorkbenchToolEvent } from '@/api/client'
@@ -22,7 +31,7 @@ export interface ChartAssistantMessage {
   isError?: boolean
 }
 
-const BASE_ALLOWED_TOOLS = ['zone_marker', 'trade_marker', 'candle_marker', 'get_annotation', 'assessment_memory']
+const BASE_ALLOWED_TOOLS = ['zone_marker', 'trade_marker', 'candle_marker', 'get_annotation', 'assessment_memory', 'semantic_memory']
 
 function now(): string {
   return new Date().toISOString().replace('T', ' ').substring(11, 19) + ' UTC'
@@ -64,7 +73,10 @@ export function summarizeToolEvents(events: PromptWorkbenchToolEvent[] | undefin
       continue
     }
     const name = evt.payload.tool_name ?? pendingName ?? '?'
-    const detail = pendingArgs?.action ? `(${pendingArgs.action})` : ''
+    const modeQualifier = pendingArgs?.section ?? pendingArgs?.table
+    const detail = pendingArgs?.action ? `(${pendingArgs.action})`
+      : pendingArgs?.mode ? `(${pendingArgs.mode}${modeQualifier ? `:${modeQualifier}` : ''})`
+      : ''
     let status = 'OK'
     if (evt.event_type === 'tool_call_failed') {
       status = 'FAILED'
@@ -81,6 +93,74 @@ export function summarizeToolEvents(events: PromptWorkbenchToolEvent[] | undefin
   return lines
 }
 
+export interface ToolCallDetail {
+  id: string
+  name: string
+  status: 'OK' | 'FAILED' | 'REJECTED'
+  argsLine: string
+  error?: string
+  timestamp: string
+}
+
+const MAX_ARG_VALUE_LENGTH = 60
+
+function formatArgsLine(args: Record<string, unknown> | undefined): string {
+  if (!args) return ''
+  return Object.entries(args)
+    .filter(([key, value]) => !['mode', 'action'].includes(key) && value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => {
+      const raw = typeof value === 'string' ? value : JSON.stringify(value)
+      const truncated = raw.length > MAX_ARG_VALUE_LENGTH ? `${raw.slice(0, MAX_ARG_VALUE_LENGTH)}…` : raw
+      return `${key}=${truncated}`
+    })
+    .join('  ')
+}
+
+// Richer, per-call breakdown for an expandable tool-call log — one entry per call,
+// chronological (event order), each carrying its own arguments/error instead of being
+// collapsed into one indistinguishable summary line (that's what summarizeToolEvents
+// above is for — kept as-is since PromptWorkbench/OrderInvestigateModal still use it).
+export function buildToolCallDetails(events: PromptWorkbenchToolEvent[] | undefined): ToolCallDetail[] {
+  if (!events?.length) return []
+  const details: ToolCallDetail[] = []
+  let pending: { name: string; args?: Record<string, unknown>; timestamp: string } | null = null
+  for (const evt of events) {
+    if (evt.event_type === 'tool_call_started') {
+      pending = { name: evt.payload.tool_name ?? '?', args: evt.payload.arguments, timestamp: evt.timestamp }
+      continue
+    }
+    const name = evt.payload.tool_name ?? pending?.name ?? '?'
+    const args = pending?.args ?? evt.payload.arguments
+    const modeOrAction = (args?.mode ?? args?.action) as string | undefined
+
+    let status: ToolCallDetail['status'] = 'OK'
+    let error: string | undefined
+    if (evt.event_type === 'tool_call_failed') {
+      status = 'FAILED'
+      error = evt.payload.result
+    } else if (evt.event_type === 'tool_call_completed') {
+      try {
+        const parsed = JSON.parse(evt.payload.result ?? '{}')
+        if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+          status = 'REJECTED'
+          error = String(parsed.error)
+        }
+      } catch { /* non-JSON result — treat as OK */ }
+    }
+
+    details.push({
+      id: evt.id,
+      name: modeOrAction ? `${name}(${modeOrAction})` : name,
+      status,
+      argsLine: formatArgsLine(args),
+      error,
+      timestamp: pending?.timestamp ?? evt.timestamp,
+    })
+    pending = null
+  }
+  return details
+}
+
 export interface ChartAssistantContext {
   pair: string
   brokerName: string | null
@@ -95,10 +175,32 @@ export interface ChartAssistantContext {
   extraAllowedTools?: string[]
   llmName?: string | null
   reasoningEffort?: string | null
+  /** What's actually drawn on the chart right now — must travel with every message so the
+   * assistant sees the same picture the user does, not just raw candles. */
+  indicators?: Record<string, unknown>[]
+  swingLevels?: Record<string, unknown>[]
+  drawings?: Record<string, unknown>[]
 }
 
-export function useChartAssistantChat(overlay: AnnotationOverlay) {
-  const [messages, setMessages] = useState<ChartAssistantMessage[]>([])
+export interface UseChartAssistantChatOptions {
+  /** Restores a previously exported history — e.g. one captured right before this panel
+   * unmounted (undock/redock via Document Picture-in-Picture tears the panel down and
+   * remounts it, see ChartAssistantWindow.tsx) so the conversation picks up where it left
+   * off instead of starting empty. */
+  initialMessages?: ChartAssistantMessage[]
+  /** Fired on every message-list change — the "export" half of the above: the caller
+   * (ChartAssistantWindow) keeps the latest value in a ref that survives the panel's own
+   * unmount/remount, then feeds it back in via initialMessages next time. */
+  onMessagesChange?: (messages: ChartAssistantMessage[]) => void
+}
+
+export function useChartAssistantChat(overlay: AnnotationOverlay, options: UseChartAssistantChatOptions = {}) {
+  const { initialMessages, onMessagesChange } = options
+  const [messages, setMessages] = useState<ChartAssistantMessage[]>(() => initialMessages ?? [])
+
+  useEffect(() => {
+    onMessagesChange?.(messages)
+  }, [messages, onMessagesChange])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [systemPromptBase, setSystemPromptBase] = useState<string | null>(null)
@@ -143,6 +245,9 @@ export function useChartAssistantChat(overlay: AnnotationOverlay) {
         reasoning_effort: ctx.reasoningEffort ?? undefined,
         allowed_tools: [...BASE_ALLOWED_TOOLS, ...(ctx.extraAllowedTools ?? [])],
         existing_annotations: overlay.annotations,
+        indicators: ctx.indicators ?? [],
+        swing_levels: ctx.swingLevels ?? [],
+        drawings: ctx.drawings ?? [],
       })
       pushMessage('assistant', resp.error ? `Fehler: ${resp.error}` : (resp.answer || '(leere Antwort)'), resp.tool_events, !!resp.error)
       overlay.applyAnnotationUpdates(resp)

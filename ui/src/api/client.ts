@@ -818,6 +818,7 @@ export interface PromptWorkbenchChatRequest {
   assembly_transform_script?: string
   indicators?: Record<string, unknown>[]
   swing_levels?: Record<string, unknown>[]
+  drawings?: Record<string, unknown>[]
   fifo_enabled?: boolean
   allow_trade_delete?: boolean
   // /prompt-workbench/simulate-step only — ignored by /prompt-workbench/chat.

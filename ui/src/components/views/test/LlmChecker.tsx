@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Check, Copy, Database, Download, Send, User, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Bot, Check, Copy, Database, Download, PictureInPicture2, Send, User, X } from 'lucide-react'
 import { api, type LlmCheckerMessage } from '@/api/client'
 import { useTools } from '@/hooks/useTools'
 import { useAgents } from '@/hooks/useAgents'
+import { useDocumentPictureInPicture } from '@/hooks/useDocumentPictureInPicture'
 
 type ChatRole = 'user' | 'assistant'
 
@@ -60,6 +62,12 @@ function PromptEditorWindow({ value, onChange, onTakeOver, onClose }: PromptEdit
   const dragging = useRef(false)
   const dragOrigin = useRef({ mx: 0, my: 0, x: 0, y: 0 })
 
+  const { pipWindow, open: popOut, close: redock, supported: pipSupported } =
+    useDocumentPictureInPicture({
+      width: Math.min(860, window.innerWidth - 40),
+      height: Math.min(560, window.innerHeight - 40),
+    })
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -101,6 +109,76 @@ function PromptEditorWindow({ value, onChange, onTakeOver, onClose }: PromptEdit
     e.preventDefault()
   }
 
+  const header = (
+    <div
+      onMouseDown={pipWindow ? undefined : startDrag}
+      className={`flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-600 rounded-t-lg select-none flex-shrink-0 ${pipWindow ? '' : 'cursor-move'}`}
+    >
+      <div className="text-xs text-gray-300">System Prompt Editor</div>
+      <div className="flex items-center gap-2">
+        <button
+          onMouseDown={e => e.stopPropagation()}
+          onClick={onTakeOver}
+          className="px-2 py-1 text-xs rounded bg-emerald-700 text-white hover:bg-emerald-600"
+          title="Take over"
+        >
+          Take over
+        </button>
+        {pipWindow ? (
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={redock}
+            className="text-gray-500 hover:text-white transition-colors"
+            title="Zurück ins Browserfenster andocken"
+          >
+            <PictureInPicture2 className="w-4 h-4" />
+          </button>
+        ) : (
+          <>
+            {pipSupported && (
+              <button
+                onMouseDown={e => e.stopPropagation()}
+                onClick={() => void popOut()}
+                className="text-gray-500 hover:text-white transition-colors"
+                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              onClick={onClose}
+              className="text-gray-500 hover:text-white transition-colors"
+              title="Close (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  const body = (
+    <div className="flex-1 p-3 bg-gray-950">
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full h-full resize-none bg-gray-900 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-emerald-500"
+      />
+    </div>
+  )
+
+  if (pipWindow) {
+    return createPortal(
+      <div className="flex flex-col h-screen bg-gray-900">
+        {header}
+        {body}
+      </div>,
+      pipWindow.document.body,
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/25">
       <div
@@ -117,38 +195,8 @@ function PromptEditorWindow({ value, onChange, onTakeOver, onClose }: PromptEdit
         }}
         className="flex flex-col bg-gray-900 border border-gray-600 rounded-lg shadow-2xl"
       >
-        <div
-          onMouseDown={startDrag}
-          className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-600 rounded-t-lg cursor-move select-none flex-shrink-0"
-        >
-          <div className="text-xs text-gray-300">System Prompt Editor</div>
-          <div className="flex items-center gap-2">
-            <button
-              onMouseDown={e => e.stopPropagation()}
-              onClick={onTakeOver}
-              className="px-2 py-1 text-xs rounded bg-emerald-700 text-white hover:bg-emerald-600"
-              title="Take over"
-            >
-              Take over
-            </button>
-            <button
-              onMouseDown={e => e.stopPropagation()}
-              onClick={onClose}
-              className="text-gray-500 hover:text-white transition-colors"
-              title="Close (Esc)"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 p-3 bg-gray-950">
-          <textarea
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            className="w-full h-full resize-none bg-gray-900 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-emerald-500"
-          />
-        </div>
+        {header}
+        {body}
       </div>
     </div>
   )

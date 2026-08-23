@@ -8,11 +8,54 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronUp, Copy, Trash2 } from 'lucide-react'
 import type { AnnotationOverlay } from './useAnnotationOverlay'
-import { useChartAssistantChat, summarizeToolEvents, type ChartAssistantContext, type ChartAssistantMessage } from './useChartAssistantChat'
+import { useChartAssistantChat, buildToolCallDetails, type ChartAssistantContext, type ChartAssistantMessage, type ToolCallDetail } from './useChartAssistantChat'
 
 export interface ChartAssistantPanelProps {
   overlay: AnnotationOverlay
   context: ChartAssistantContext
+  /** History export/import bridge — see useChartAssistantChat's UseChartAssistantChatOptions
+   * for why this exists (undock/redock via Document Picture-in-Picture unmounts and
+   * remounts this panel; without this the conversation would reset every time). */
+  initialMessages?: ChartAssistantMessage[]
+  onMessagesChange?: (messages: ChartAssistantMessage[]) => void
+}
+
+const STATUS_STYLES: Record<ToolCallDetail['status'], string> = {
+  OK: 'text-emerald-400',
+  FAILED: 'text-red-400',
+  REJECTED: 'text-amber-400',
+}
+
+// Collapsed by default (a chat turn can easily have a dozen calls) — expands into one
+// row per call, oldest first, each with its own status/arguments/error instead of one
+// indistinguishable joined-comma line.
+function ToolCallLog({ details }: { details: ToolCallDetail[] }) {
+  const [open, setOpen] = useState(false)
+  if (details.length === 0) return null
+  return (
+    <div className="mt-1.5 pt-1.5 border-t border-gray-700">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 font-mono"
+      >
+        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        Tools ({details.length})
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1">
+          {details.map(d => (
+            <div key={d.id} className="text-[10px] font-mono leading-tight">
+              <span className={STATUS_STYLES[d.status]}>{d.status}</span>{' '}
+              <span className="text-white">{d.name}</span>
+              {d.argsLine && <span className="text-gray-400"> {d.argsLine}</span>}
+              {d.error && <div className="text-red-300 pl-3">↳ {d.error}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // "Capped Scroll Box" pattern (docs/ui-patterns.md) — same treatment as Orderbook's
@@ -23,8 +66,9 @@ export interface ChartAssistantPanelProps {
 const COLLAPSED_MAX_LINES = 15
 const CAPPED_BOX_MAX_HEIGHT = '16rem'
 
-function ChartAssistantMessageBubble({ msg, toolLines }: { msg: ChartAssistantMessage; toolLines: string[] }) {
+function ChartAssistantMessageBubble({ msg }: { msg: ChartAssistantMessage }) {
   const [expanded, setExpanded] = useState(false)
+  const toolDetails = buildToolCallDetails(msg.toolEvents)
   const [copied, setCopied] = useState(false)
   const isError = msg.role === 'assistant' && msg.isError
 
@@ -51,14 +95,7 @@ function ChartAssistantMessageBubble({ msg, toolLines }: { msg: ChartAssistantMe
         >
           {msg.content}
         </div>
-        {toolLines.length > 0 && (
-          <div
-            className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono"
-            title="Tatsächlich ausgeführte Tool-Aufrufe dieser Antwort — nicht vom Antworttext abgeleitet"
-          >
-            Tools: {toolLines.join(', ')}
-          </div>
-        )}
+        <ToolCallLog details={toolDetails} />
       </div>
       <div className="flex items-center gap-3 px-1">
         <button
@@ -86,8 +123,9 @@ function ChartAssistantMessageBubble({ msg, toolLines }: { msg: ChartAssistantMe
   )
 }
 
-export function ChartAssistantPanel({ overlay, context }: ChartAssistantPanelProps) {
-  const { messages, input, setInput, sending, send, clearMessages, systemPromptReady, systemPromptError } = useChartAssistantChat(overlay)
+export function ChartAssistantPanel({ overlay, context, initialMessages, onMessagesChange }: ChartAssistantPanelProps) {
+  const { messages, input, setInput, sending, send, clearMessages, systemPromptReady, systemPromptError } =
+    useChartAssistantChat(overlay, { initialMessages, onMessagesChange })
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -137,10 +175,9 @@ export function ChartAssistantPanel({ overlay, context }: ChartAssistantPanelPro
               </div>
             )
           }
-          const toolLines = summarizeToolEvents(msg.toolEvents)
           return (
             <div key={msg.id} className="flex justify-start">
-              <ChartAssistantMessageBubble msg={msg} toolLines={toolLines} />
+              <ChartAssistantMessageBubble msg={msg} />
             </div>
           )
         })}
