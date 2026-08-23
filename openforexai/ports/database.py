@@ -220,6 +220,13 @@ class AbstractRepository(ABC):
         """Delete any stored assessment-memory message for *agent*."""
         ...
 
+    @abstractmethod
+    async def append_assessment_memory(self, agent: str, message: str) -> str:
+        """Append *message* to the existing assessment-memory note for *agent* (on its own
+        line), or create it if none exists yet. Returns the resulting full note — avoids the
+        caller having to fetch-then-rewrite the whole note just to add one line."""
+        ...
+
     # ── EventComposer runs ────────────────────────────────────────────────────
 
     @abstractmethod

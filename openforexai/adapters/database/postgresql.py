@@ -519,6 +519,21 @@ class PostgreSQLRepository(AbstractRepository):
             agent,
         )
 
+    async def append_assessment_memory(self, agent: str, message: str) -> str:
+        row = await self._fetchrow(
+            """
+            INSERT INTO assessment_memory (agent, message)
+            VALUES ($1, $2)
+            ON CONFLICT (agent) DO UPDATE SET
+                message = CASE WHEN assessment_memory.message = '' THEN EXCLUDED.message
+                               ELSE assessment_memory.message || E'\n' || EXCLUDED.message END
+            RETURNING message
+            """,
+            agent,
+            message,
+        )
+        return str(row["message"]) if row is not None else message
+
     # --- Dynamic candle series helpers ---
 
     @staticmethod

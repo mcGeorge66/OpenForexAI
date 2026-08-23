@@ -492,6 +492,20 @@ class SQLiteRepository(AbstractRepository):
         )
         await self._db().commit()
 
+    async def append_assessment_memory(self, agent: str, message: str) -> str:
+        await self._db().execute(
+            """
+            INSERT INTO assessment_memory (agent, message)
+            VALUES (?, ?)
+            ON CONFLICT(agent) DO UPDATE SET
+                message = CASE WHEN message = '' THEN excluded.message
+                               ELSE message || char(10) || excluded.message END
+            """,
+            (agent, message),
+        )
+        await self._db().commit()
+        return await self.get_assessment_memory(agent) or ""
+
     # --- Dynamic candle series helpers ---
 
     @staticmethod

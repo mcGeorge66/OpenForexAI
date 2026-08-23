@@ -444,6 +444,11 @@ class MockRepository(AbstractRepository):
     async def delete_assessment_memory(self, agent: str) -> None:
         self.assessment_memory.pop(agent, None)
 
+    async def append_assessment_memory(self, agent: str, message: str) -> str:
+        existing = self.assessment_memory.get(agent, "")
+        self.assessment_memory[agent] = f"{existing}\n{message}" if existing else message
+        return self.assessment_memory[agent]
+
     # ── EventComposer runs ───────────────────────────────────────────────────
 
     async def save_ec_run(self, run) -> str:
