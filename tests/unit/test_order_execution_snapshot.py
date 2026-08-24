@@ -8,6 +8,7 @@ def test_build_market_context_snapshot_preserves_full_analysis_and_extracts_over
     analysis_text = """
 {
   "symbol": "EURUSD",
+  "fomak": "4U3431S",
   "decision": "BIAS_SHORT",
   "confidence": 0.68,
   "order_start_signal": "YES",
@@ -45,6 +46,7 @@ def test_build_market_context_snapshot_preserves_full_analysis_and_extracts_over
     assert snapshot["analysis_source_agent_id"] == "OXS_T-EURUSD-AA-ANLYS"
     assert snapshot["analyst_recommendation"]["symbol"] == "EURUSD"
     assert snapshot["decision_context"]["decision"] == "BIAS_SHORT"
+    assert snapshot["decision_context"]["fomak"] == "4U3431S"
     assert snapshot["analysis_overlays"]["levels"]["support"] == [1.16665]
     assert snapshot["analysis_overlays"]["levels"]["resistance"] == [1.16795]
     assert snapshot["analysis_overlays"]["levels"]["invalidation"] == [1.169084]
@@ -57,3 +59,18 @@ def test_build_market_context_snapshot_preserves_full_analysis_and_extracts_over
     assert indicator_map["EMA50"] == 1.17014
     assert indicator_map["RSI7"] == 36.4
     assert indicator_map["ATR7"] == 0.001447
+
+
+def test_build_market_context_snapshot_without_fomak_field_does_not_error() -> None:
+    """Older AA answers (before compute_fomak existed) never had a 'fomak' field —
+    decision_context.fomak must degrade to None, not raise."""
+    context = ToolContext(
+        agent_id="OXS_T-ALL___-BA-ANLYS",
+        broker_name="OXS_T",
+        pair="EURUSD",
+        extra={"analysis_response_text": '{"symbol": "EURUSD", "decision": "BIAS_LONG"}'},
+    )
+    snapshot = _build_market_context_snapshot(
+        arguments={}, context=context, direction_value="BUY", order_type_value="MARKET",
+    )
+    assert snapshot["decision_context"]["fomak"] is None

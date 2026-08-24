@@ -141,6 +141,7 @@ def _build_market_context_snapshot(
     if isinstance(analysis_obj, dict):
         snapshot["decision_context"] = {
             "symbol": analysis_obj.get("symbol"),
+            "fomak": analysis_obj.get("fomak"),
             "decision": analysis_obj.get("decision"),
             "confidence": analysis_obj.get("confidence"),
             "order_start_signal": analysis_obj.get("order_start_signal"),

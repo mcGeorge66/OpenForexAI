@@ -66,6 +66,11 @@ from openforexai.utils.logging import get_logger
 
 _CONFIG_TIMEOUT = 30.0   # seconds to wait for config response
 _DEFAULT_MAX_TOOL_TURNS = 10
+_MAX_REQUIRED_TOOL_CALL_REMINDERS = 2
+_DEFAULT_JSON_FORMAT_NUDGE = (
+    "Deine letzte Antwort war kein gültiges JSON. Antworte erneut ausschließlich mit "
+    "einem einzigen gültigen JSON-Objekt im geforderten Format — kein Text davor oder danach."
+)
 _DEFAULT_ANY_CANDLE_DIVIDER = 1
 _LONG_CYCLE_WARN_SECONDS = 30.0
 _QUERY_BASE_SYSTEM_PROMPT = (
@@ -959,7 +964,7 @@ class Agent:
                     user_msg = snapshot_context
 
                 if trigger in (EventType.M5_CANDLE_TRIGGER.value, EventType.ANALYSIS_RESULT.value):
-                    experience_block = await self._build_experience_context_block(cycle_pair)
+                    experience_block = await self._build_experience_context_block(cycle_pair, decision_snapshot, payload)
                     if experience_block:
                         user_msg = f"{user_msg}\n\n{experience_block}"
 
@@ -1088,11 +1093,6 @@ class Agent:
                 final_text=final_text,
                 executed_tool_names=executed_tool_names,
             )
-            await self._execute_examiner_report_fallback(
-                final_text=final_text,
-                executed_tool_names=executed_tool_names,
-                trigger_payload=payload,
-            )
 
             if self._is_analysis_agent():
                 if not final_text.strip():
@@ -1163,8 +1163,17 @@ class Agent:
         budget_tokens = 0
         final_text = ""
         executed_tool_names: list[str] = []
+        executed_tool_calls: list[Any] = []
+        required_tool_calls = self._required_tool_calls()
+        require_json_response = self._requires_json_response()
+        reminders_sent = 0
 
         effective_system_prompt = system_prompt_override or self._system_prompt
+        configured_json_format = self._configured_json_response_format()
+        if require_json_response and configured_json_format:
+            effective_system_prompt = (
+                f"{effective_system_prompt}\n\n# Required response format\n\n{configured_json_format}"
+            )
 
         for turn in range(self._max_tool_turns + 1):
             tool_specs = (
@@ -1242,6 +1251,22 @@ class Agent:
             self._emit_llm_monitoring(response, turn)
 
             if not response.wants_tools:
+                unmet = (
+                    self._unmet_required_tool_calls(required_tool_calls, executed_tool_calls)
+                    if required_tool_calls
+                    else []
+                )
+                json_invalid = require_json_response and self._parse_json_object(final_text) is None
+                if (unmet or json_invalid) and reminders_sent < _MAX_REQUIRED_TOOL_CALL_REMINDERS:
+                    reminders_sent += 1
+                    nudge_parts = []
+                    if unmet:
+                        nudge_parts.append(self._build_required_tool_call_nudge(unmet))
+                    if json_invalid:
+                        nudge_parts.append(self._build_json_format_nudge())
+                    messages.append(self._build_assistant_turn(response))
+                    messages.append({"role": "user", "content": "\n\n".join(nudge_parts)})
+                    continue
                 break
 
             if turn >= self._max_tool_turns:
@@ -1257,6 +1282,7 @@ class Agent:
                 max_tokens=self._tool_context_budget_tokens,
             )
             executed_tool_names.extend(result.name for result in tool_results)
+            executed_tool_calls.extend(response.tool_calls)
 
             # Build next-turn messages in canonical format.
             # The LLM Service handles provider-specific conversion internally.
@@ -1265,6 +1291,23 @@ class Agent:
 
             # Estimate next-turn context size from the current prompt plus the assistant turn.
             budget_tokens = max(response.input_tokens + response.output_tokens, 0)
+
+        unmet_final = (
+            self._unmet_required_tool_calls(required_tool_calls, executed_tool_calls)
+            if required_tool_calls
+            else []
+        )
+        json_still_invalid = require_json_response and self._parse_json_object(final_text) is None
+        if unmet_final or json_still_invalid:
+            problems = []
+            if unmet_final:
+                tool_names = ", ".join(sorted({str(entry.get("tool", "?")) for entry in unmet_final}))
+                problems.append(f"Pflicht-Tool-Aufruf(e) fehlen: {tool_names}")
+            if json_still_invalid:
+                problems.append("Antwort ist kein gültiges JSON")
+            self._emit_system_error(
+                f"Zyklus nach {reminders_sent} Erinnerung(en) nicht vollständig: {'; '.join(problems)}"
+            )
 
         return final_text, total_tokens, executed_tool_names
 
@@ -1587,9 +1630,88 @@ class Agent:
         parsed = AgentId.try_parse(self.agent_id)
         return parsed is not None and parsed.type == "BA"
 
-    def _is_examiner_agent(self) -> bool:
-        parsed = AgentId.try_parse(self.agent_id)
-        return parsed is not None and parsed.type == "EA"
+    def _required_tool_calls(self) -> list[dict[str, Any]]:
+        """Read this agent's `tool_config.required_tool_calls` from its live config.
+
+        Each entry: {"tool": <name>, "match_arguments": {<key>: [<allowed values>]} (optional),
+        "nudge_message": <string>}. Empty/missing config → no requirements, so agents that
+        never set this field behave exactly as before this mechanism existed.
+        """
+        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
+        if not isinstance(tool_config, dict):
+            return []
+        required = tool_config.get("required_tool_calls")
+        if not isinstance(required, list):
+            return []
+        return [entry for entry in required if isinstance(entry, dict) and entry.get("tool")]
+
+    @staticmethod
+    def _tool_call_matches_requirement(call: Any, requirement: dict[str, Any]) -> bool:
+        if getattr(call, "name", None) != requirement.get("tool"):
+            return False
+        match_arguments = requirement.get("match_arguments")
+        if not isinstance(match_arguments, dict) or not match_arguments:
+            return True
+        arguments = getattr(call, "arguments", None)
+        if not isinstance(arguments, dict):
+            arguments = {}
+        for key, allowed_values in match_arguments.items():
+            if not isinstance(allowed_values, list):
+                continue
+            if arguments.get(key) not in allowed_values:
+                return False
+        return True
+
+    def _unmet_required_tool_calls(
+        self, required: list[dict[str, Any]], executed_calls: list[Any]
+    ) -> list[dict[str, Any]]:
+        return [
+            requirement
+            for requirement in required
+            if not any(
+                self._tool_call_matches_requirement(call, requirement) for call in executed_calls
+            )
+        ]
+
+    @staticmethod
+    def _build_required_tool_call_nudge(unmet: list[dict[str, Any]]) -> str:
+        lines = [
+            str(entry.get("nudge_message"))
+            if entry.get("nudge_message")
+            else f"Bitte rufe zuerst das Tool '{entry.get('tool')}' korrekt auf, bevor du abschließt."
+            for entry in unmet
+        ]
+        return "\n".join(lines)
+
+    def _requires_json_response(self) -> bool:
+        """Read `tool_config.require_json_response` — opt-in, so agents that legitimately
+        answer with prose (chat assistants, EA's report-driven cycle) are unaffected. This is
+        the code-level guarantee: a hand-written 'return only JSON' sentence in the prompt is
+        never enough on its own, since nothing enforces the model actually followed it."""
+        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
+        if not isinstance(tool_config, dict):
+            return False
+        return bool(tool_config.get("require_json_response"))
+
+    def _configured_json_response_format(self) -> str | None:
+        """Optional `tool_config.json_response_format` — when set, this is the single source
+        of truth for the expected JSON shape: it gets injected into the system prompt actually
+        sent to the model (so the format can live in config instead of being hand-copied into
+        prompt text) and reused verbatim in the retry nudge if the model gets it wrong."""
+        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
+        if not isinstance(tool_config, dict):
+            return None
+        value = tool_config.get("json_response_format")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def _build_json_format_nudge(self) -> str:
+        configured_format = self._configured_json_response_format()
+        if configured_format:
+            return (
+                "Deine letzte Antwort war kein gültiges JSON. Antworte erneut ausschließlich "
+                f"mit einem einzigen gültigen JSON-Objekt in diesem Format:\n\n{configured_format}"
+            )
+        return _DEFAULT_JSON_FORMAT_NUDGE
 
     async def _semantic_memory_read_tables(self) -> list[str]:
         """Resolve this agent's semantic_memory read grant from its own live config —
@@ -1620,14 +1742,30 @@ class Agent:
         read_tables = resolved.get("read_tables")
         return list(read_tables) if isinstance(read_tables, list) else []
 
-    async def _build_experience_context_block(self, pair: str | None) -> str:
-        """Deterministically recall relevant semantic-memory notes and format them as a
+    async def _build_experience_context_block(
+        self,
+        pair: str | None,
+        decision_snapshot: dict[str, Any] | None = None,
+        trigger_payload: dict[str, Any] | None = None,
+    ) -> str:
+        """Deterministically surface relevant semantic-memory notes and format them as a
         plain-language 'experience' block appended to the user message — never framed as a
         rule. Needed because the snapshot decision-only engine (used by AA on
         m5_candle_trigger) never calls tools itself, so relying on a prompt instruction to
         "call recall" would silently never fire for it. Fails open: any error here (memory
         service unavailable, timeout, ...) must never block a trading cycle — it just means
-        this cycle runs without experience context, same as before this feature existed."""
+        this cycle runs without experience context, same as before this feature existed.
+
+        Prefers an EXACT match: the same FOMAK code AA saw and echoed into its own JSON
+        output. For AA itself, that value already sits in decision_snapshot's own
+        'fomak_m5' tool_blocks output. For BA (analysis_result trigger), AA never runs its
+        own fomak_m5 block — but BA's trigger_payload IS AA's forwarded JSON answer, which
+        now carries the same "fomak" field AA echoed — so BA reads it from there instead of
+        computing anything itself. Builds the same pattern_key convention EA uses when
+        writing ("{pair}_{fomak}") and looks it up via find_pattern — a deterministic "have
+        we seen this exact market character before", not a similarity guess. Falls back to
+        fuzzy recall only if no FOMAK is available at all, or the exact key has no entry yet.
+        """
         read_tables = await self._semantic_memory_read_tables()
         if not read_tables:
             return ""
@@ -1640,18 +1778,35 @@ class Agent:
                 tables = list(listing.get("tables", [])) if isinstance(listing, dict) else []
                 if not tables:
                     return ""
-            query = f"{pair or ''} Intraday-Setup, Entry-Timing, Risiko".strip()
-            result = await memory_request(
-                mem_context, "recall", {"tables": tables, "query": query, "top_k": 5, "candidate_pool": 30},
-            )
-            entries = result.get("results", []) if isinstance(result, dict) else []
+
+            entries: list[dict[str, Any]] = []
+            exact_match = False
+            fomak_code = self._extract_fomak_code(decision_snapshot) or self._extract_fomak_code_from_payload(trigger_payload)
+            if fomak_code and pair:
+                pattern_key = f"{pair}_{fomak_code}"
+                found = await memory_request(mem_context, "find_pattern", {"tables": tables, "pattern_key": pattern_key})
+                if isinstance(found, dict) and found.get("found"):
+                    entries = [found]
+                    exact_match = True
+
+            if not entries:
+                query = f"{pair or ''} Intraday-Setup, Entry-Timing, Risiko".strip()
+                result = await memory_request(
+                    mem_context, "recall", {"tables": tables, "query": query, "top_k": 5, "candidate_pool": 30},
+                )
+                entries = result.get("results", []) if isinstance(result, dict) else []
+
             if not entries:
                 return ""
-            lines = [
+
+            header = (
                 "ERFAHRUNGSWERTE AUS FRÜHEREN TRADES (Beobachtungen eines Prüf-Agenten — keine "
                 "Regeln, keine Vorgaben. Du entscheidest selbst, ob und wie stark das hier "
-                "einfließt, genau wie ein Mensch Erfahrung gegen die aktuelle Situation abwägt):",
-            ]
+                "einfließt, genau wie ein Mensch Erfahrung gegen die aktuelle Situation abwägt"
+                + (" — exakt gleiches Marktmuster (FOMAK) wie in einer früheren Situation" if exact_match else "")
+                + "):"
+            )
+            lines = [header]
             for entry in entries:
                 text = str(entry.get("text", "")).strip()
                 if not text:
@@ -1667,6 +1822,40 @@ class Agent:
                 error=str(exc),
             )
             return ""
+
+    @staticmethod
+    def _extract_fomak_code(decision_snapshot: dict[str, Any] | None) -> str | None:
+        """Pull the 'fomak' code out of a snapshot's tool_outputs, if a compute_fomak
+        tool_blocks entry named 'fomak_m5' is configured for this profile — returns
+        None (not an error) for any profile that doesn't have one."""
+        if not isinstance(decision_snapshot, dict):
+            return None
+        tool_outputs = decision_snapshot.get("tool_outputs")
+        if not isinstance(tool_outputs, dict):
+            tool_outputs = decision_snapshot.get("assembled")
+        if not isinstance(tool_outputs, dict):
+            return None
+        fomak_output = tool_outputs.get("fomak_m5")
+        if not isinstance(fomak_output, dict):
+            return None
+        code = fomak_output.get("fomak")
+        return code if isinstance(code, str) and code else None
+
+    def _extract_fomak_code_from_payload(self, trigger_payload: dict[str, Any] | None) -> str | None:
+        """BA's case: it never computes its own FOMAK — AA already echoed the exact code it
+        saw into its own JSON answer, and that answer is BA's trigger_payload["response"]
+        (pass_trigger forwards AA's analysis_result verbatim). Read it from there instead of
+        recomputing anything."""
+        if not isinstance(trigger_payload, dict):
+            return None
+        response = trigger_payload.get("response")
+        if not isinstance(response, str) or not response.strip():
+            return None
+        parsed = self._parse_json_object(response)
+        if not isinstance(parsed, dict):
+            return None
+        code = parsed.get("fomak")
+        return code if isinstance(code, str) and code else None
 
     def _resolve_cycle_pair(self, trigger: str, payload: dict[str, Any], triggering_msg=None) -> str | None:
         """Resolve the effective pair for the current cycle."""
@@ -1713,7 +1902,25 @@ class Agent:
 
         return candle_timestamp
 
+    def _has_configured_tools(self) -> bool:
+        """True if this agent's own config grants it at least one tool. The single
+        source of truth for whether it can call tools — never silently overridden
+        elsewhere, see _should_use_snapshot_decision_engine."""
+        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
+        if not isinstance(tool_config, dict):
+            return False
+        allowed_tools = tool_config.get("allowed_tools")
+        return isinstance(allowed_tools, list) and len(allowed_tools) > 0
+
     def _should_use_snapshot_decision_engine(self, trigger: str) -> bool:
+        """Fast, single-shot decision path (no tool-calling) for AA's real m5_candle_trigger
+        cycle — used ONLY when this agent has no tools configured. If the user granted this
+        agent any tool via allowed_tools, that is a deliberate choice and must actually take
+        effect: the agent runs through the tool-calling path instead, regardless of trigger
+        or snapshot profile. Config is the single source of truth for tool access — this
+        method must never silently override that."""
+        if self._has_configured_tools():
+            return False
         return (
             self._is_analysis_agent()
             and trigger == EventType.M5_CANDLE_TRIGGER.value
@@ -1800,75 +2007,6 @@ class Agent:
                     id=f"fallback-auto-place-{datetime.now(UTC).timestamp()}",
                     name="auto_place_order",
                     arguments=arguments,
-                )
-            ],
-            used_tokens=0,
-            max_tokens=self._tool_context_budget_tokens,
-        )
-
-    async def _execute_examiner_report_fallback(
-        self,
-        *,
-        final_text: str,
-        executed_tool_names: list[str],
-        trigger_payload: dict[str, Any],
-    ) -> None:
-        """Guarantee a Knowledgebase report exists for every trade the Examiner (EA)
-        looks at — mirrors _execute_broker_decision_fallback's "force the critical action
-        if the model's own tool-calling didn't do it" pattern. The user requires this to be
-        gapless for evidentiary/audit reasons, so it cannot depend on the LLM remembering to
-        call create_examination_report; if it didn't, this creates a minimal report anyway,
-        explicitly marked as an automatic fallback so a human reviewer can tell the
-        difference and knows to check semantic-memory completeness manually for this trade.
-        """
-        if not self._is_examiner_agent() or self._tool_dispatcher is None:
-            return
-        if "create_examination_report" in executed_tool_names:
-            return
-
-        order_id = trigger_payload.get("id") if isinstance(trigger_payload, dict) else None
-        if not order_id:
-            return
-
-        opening_agent_id = trigger_payload.get("agent_id", "unknown") if isinstance(trigger_payload, dict) else "unknown"
-
-        self._logger.warning(
-            "Examiner report fallback: model did not call create_examination_report — "
-            "creating a minimal fallback report",
-            agent_id=self.agent_id,
-            order_id=str(order_id),
-        )
-
-        report_markdown = (
-            "Dieser Bericht wurde automatisch erzeugt, weil der Examiner-Agent für diesen "
-            "Trade keinen eigenen Bericht erstellt hat. Die Rohantwort des Agenten:\n\n"
-            f"{final_text.strip() or '(keine Antwort)'}\n\n"
-            "Hinweis: Ob und was für diesen Trade ins semantische Gedächtnis geschrieben "
-            "wurde, konnte hierdurch nicht automatisch geprüft werden — bitte manuell "
-            "kontrollieren."
-        )
-
-        from openforexai.ports.llm import ToolCall
-
-        await self._tool_dispatcher.execute_all(
-            tool_calls=[
-                ToolCall(
-                    id=f"fallback-examination-report-{datetime.now(UTC).timestamp()}",
-                    name="create_examination_report",
-                    arguments={
-                        "order_id": str(order_id),
-                        "verdict": "inconclusive",
-                        "opening_agent_id": str(opening_agent_id),
-                        "report_markdown": report_markdown,
-                        "memory_writes": [
-                            {
-                                "table": "none",
-                                "id": "none",
-                                "action": "created",
-                                "text": "Fallback-Bericht — kein bestätigter Gedächtnis-Eintrag durch den Agenten.",
-                            }
-                        ],
-                    },
                 )
             ],
             used_tokens=0,

@@ -31,7 +31,7 @@ export interface ChartAssistantMessage {
   isError?: boolean
 }
 
-const BASE_ALLOWED_TOOLS = ['zone_marker', 'trade_marker', 'candle_marker', 'get_annotation', 'assessment_memory', 'semantic_memory']
+const BASE_ALLOWED_TOOLS = ['zone_marker', 'trade_marker', 'candle_marker', 'get_annotation', 'assessment_memory', 'semantic_memory', 'compute_fomak']
 
 function now(): string {
   return new Date().toISOString().replace('T', ' ').substring(11, 19) + ' UTC'

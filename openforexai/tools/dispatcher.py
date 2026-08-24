@@ -53,7 +53,9 @@ class ToolDispatcher:
         self._context = context
         self._config = agent_tool_config or {}
 
-        # Allowed tool names for this agent (empty list = all registered)
+        # Allowed tool names for this agent. Fail-closed: empty or missing means NO
+        # tools, never "all registered" — a tool this agent's config doesn't list
+        # must be neither visible nor callable, no exceptions.
         self._allowed: set[str] = set(self._config.get("allowed_tools", []))
 
         # Per-tool approval mode overrides: {"place_order": "supervisor"}
@@ -125,8 +127,8 @@ class ToolDispatcher:
                 is_error=True,
             )
 
-        # Agent-level allow list (empty = all allowed)
-        if self._allowed and tc.name not in self._allowed:
+        # Agent-level allow list — fail-closed, see __init__.
+        if tc.name not in self._allowed:
             msg = f"Tool {tc.name!r} is not in the allowed list for this agent."
             return ToolResult(
                 tool_call_id=tc.id,
@@ -255,9 +257,7 @@ class ToolDispatcher:
             bus.cancel_response_future(future_key)
 
     def _allowed_names(self) -> list[str]:
-        if self._allowed:
-            return [name for name in self._registry.all_names() if name in self._allowed]
-        return self._registry.all_names()
+        return [name for name in self._registry.all_names() if name in self._allowed]
 
     def _merged_arguments(
         self,

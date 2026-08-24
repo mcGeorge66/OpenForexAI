@@ -14,6 +14,7 @@ from openforexai.tools.market.calculate_indicator import CalculateIndicatorTool
 
 # ── Register built-in tools ───────────────────────────────────────────────────
 from openforexai.tools.market.chartshot import ChartShotTool
+from openforexai.tools.market.compute_fomak import ComputeFomakTool
 from openforexai.tools.market.get_candles import GetCandlesTool
 from openforexai.tools.orderbook.get_order import GetOrderTool
 from openforexai.tools.orderbook.get_order_book import GetOrderBookTool
@@ -44,6 +45,7 @@ from openforexai.tools.trading.modify_order import ModifyOrderTool
 from openforexai.tools.trading.place_order import PlaceOrderTool
 
 DEFAULT_REGISTRY.register(GetCandlesTool())
+DEFAULT_REGISTRY.register(ComputeFomakTool())
 DEFAULT_REGISTRY.register(ChartShotTool())
 DEFAULT_REGISTRY.register(CalculateIndicatorTool())
 DEFAULT_REGISTRY.register(GetAccountStatusTool())
