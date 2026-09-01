@@ -1,8 +1,46 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from openforexai.tools.base import BaseTool, ToolContext, repo_request
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _format_duration(total_seconds: float) -> str:
+    total_minutes = max(int(total_seconds // 60), 0)
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours}h {minutes}min" if hours else f"{minutes}min"
+
+
+async def _resolve_title_label(context: ToolContext, order_id: str) -> str:
+    """'<start time> (<duration>)' for the report title, read from the authoritative
+    order-book record instead of trusted from the LLM's own arguments. Falls back to
+    the bare order_id if the entry can't be fetched or has no usable timestamps."""
+    try:
+        entry = await repo_request(context, "get_order_book_entry", {"entry_id": order_id})
+    except Exception:
+        entry = None
+    if not isinstance(entry, dict):
+        return order_id
+
+    start = _parse_iso(entry.get("opened_at")) or _parse_iso(entry.get("requested_at"))
+    if start is None:
+        return order_id
+
+    start_label = start.strftime("%Y-%m-%d %H:%M")
+    end = _parse_iso(entry.get("closed_at"))
+    if end is None:
+        return start_label
+    return f"{start_label} ({_format_duration((end - start).total_seconds())})"
 
 
 class CreateExaminationReportTool(BaseTool):
@@ -151,16 +189,19 @@ class CreateExaminationReportTool(BaseTool):
         if pattern_key:
             tags.append(str(pattern_key))
 
+        title_label = await _resolve_title_label(context, order_id)
+        title = f"Trade-Untersuchung {title_label} ({context.pair or '?'})"
+
         doc_id = await repo_request(
             context,
             "kb_create_document",
             {
                 "doc": {
-                    "title": f"Trade-Untersuchung {order_id} ({context.pair or '?'})",
+                    "title": title,
                     "content": content,
                     "tags": tags,
                     "is_folder": False,
                 },
             },
         )
-        return {"document_id": doc_id, "title": f"Trade-Untersuchung {order_id} ({context.pair or '?'})"}
+        return {"document_id": doc_id, "title": title}
