@@ -38,12 +38,13 @@ function useResizable(lsKey: string, defaultW: number) {
   return { width, onMouseDown }
 }
 import { api, type KbDoc, type KbDocMeta, type KbSearchResult } from '@/api/client'
-import { DocTree } from './components/DocTree'
+import { DocTree, MovePicker } from './components/DocTree'
 import { KbEditor } from './components/KbEditor'
 import { SearchPanel } from './components/SearchPanel'
 import { TableOfContents } from './components/TableOfContents'
 import {
   BookOpen, Search, Plus, FolderPlus, Download, Printer,
+  CheckSquare, FolderInput, Trash2, X,
 } from 'lucide-react'
 
 export function KnowledgebaseApp() {
@@ -57,6 +58,9 @@ export function KnowledgebaseApp() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<KbSearchResult[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false)
 
   const tree = useResizable(LS_TREE_W, 200)
   const toc  = useResizable(LS_TOC_W,  200)
@@ -127,6 +131,52 @@ export function KnowledgebaseApp() {
     await loadDocs()
   }
 
+  const toggleSelectMode = () => {
+    setSelectMode(m => !m)
+    setSelectedIds(new Set())
+  }
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+    setSelectMode(false)
+  }
+
+  const bulkMove = async (newParentId: string | null) => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    await Promise.all(ids.map(id => api.kbUpdateDocument(id, { parent_id: newParentId })))
+    setBulkMoveOpen(false)
+    clearSelection()
+    await loadDocs()
+  }
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+    const confirmText = ids.length === 1
+      ? 'Dokument wirklich löschen?'
+      : `${ids.length} Dokumente wirklich löschen?`
+    if (!confirm(confirmText)) return
+    if (activeId && ids.includes(activeId)) {
+      setActiveId(null)
+      setActiveDoc(null)
+      setInitialContent('')
+      setTitle('')
+    }
+    await Promise.all(ids.map(id => api.kbDeleteDocument(id)))
+    clearSelection()
+    await loadDocs()
+  }
+
   const handleSearch = async (q: string) => {
     setSearchQuery(q)
     if (!q.trim()) { setSearchResults([]); return }
@@ -177,6 +227,11 @@ export function KnowledgebaseApp() {
             title="Neuer Ordner">
             <FolderPlus className="w-3.5 h-3.5" /> Ordner
           </button>
+          <button onClick={toggleSelectMode}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${selectMode ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800'}`}
+            title="Mehrfachauswahl">
+            <CheckSquare className="w-3.5 h-3.5" /> Auswählen
+          </button>
         </div>
 
         <div className="flex-1" />
@@ -214,6 +269,41 @@ export function KnowledgebaseApp() {
         />
       )}
 
+      {selectMode && (
+        <div className="flex items-center gap-3 px-4 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0 text-xs print:hidden">
+          <span className="text-gray-400">
+            {selectedIds.size === 0 ? 'Elemente auswählen…' : `${selectedIds.size} ausgewählt`}
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setBulkMoveOpen(true)}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <FolderInput className="w-3.5 h-3.5" /> Verschieben
+          </button>
+          <button
+            onClick={() => void bulkDelete()}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded text-red-400 hover:text-red-300 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <Trash2 className="w-3.5 h-3.5" /> Löschen
+          </button>
+          <button onClick={clearSelection}
+            className="flex items-center gap-1 px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <X className="w-3.5 h-3.5" /> Abbrechen
+          </button>
+        </div>
+      )}
+
+      {bulkMoveOpen && (
+        <MovePicker
+          excludeIds={selectedIds}
+          title={`Verschieben nach… (${selectedIds.size} Elemente)`}
+          docs={docs}
+          onMove={newParentId => void bulkMove(newParentId)}
+          onClose={() => setBulkMoveOpen(false)}
+        />
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {/* Ordnerstruktur */}
         <div className="flex-shrink-0 bg-gray-900 border-r border-gray-700 overflow-y-auto print:hidden"
@@ -230,6 +320,9 @@ export function KnowledgebaseApp() {
               await loadDocs()
               if (activeId === id) setTitle(newTitle)
             }}
+            selectMode={selectMode}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelected}
           />
         </div>
 

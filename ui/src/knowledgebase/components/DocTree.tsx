@@ -10,21 +10,26 @@ interface Props {
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onMove: (id: string, newParentId: string | null) => void
+  selectMode: boolean
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
 }
 
-function MovePicker({ doc, docs, onMove, onClose }: {
-  doc: KbDocMeta
+export function MovePicker({ excludeIds, disabledId, title = 'Verschieben nach…', docs, onMove, onClose }: {
+  excludeIds: Set<string>
+  disabledId?: string | null
+  title?: string
   docs: KbDocMeta[]
   onMove: (newParentId: string | null) => void
   onClose: () => void
 }) {
-  const folders = docs.filter(d => d.is_folder && d.id !== doc.id)
+  const folders = docs.filter(d => d.is_folder && !excludeIds.has(d.id))
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-72 p-4"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-semibold text-gray-200">Verschieben nach…</span>
+          <span className="text-sm font-semibold text-gray-200">{title}</span>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X className="w-4 h-4" /></button>
         </div>
         <div className="space-y-1 max-h-60 overflow-y-auto">
@@ -38,7 +43,7 @@ function MovePicker({ doc, docs, onMove, onClose }: {
             <button
               key={f.id}
               onClick={() => onMove(f.id)}
-              disabled={doc.parent_id === f.id}
+              disabled={disabledId === f.id}
               className="w-full text-left flex items-center gap-2 px-3 py-2 rounded text-sm text-gray-300 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Folder className="w-3.5 h-3.5 text-amber-400" /> {f.title}
@@ -66,6 +71,7 @@ function buildTree(docs: KbDocMeta[]): Map<string | null, KbDocMeta[]> {
 function TreeNode({
   doc, tree, docs, activeId, depth,
   onSelect, onCreate, onDelete, onRename, onMove,
+  selectMode, selectedIds, onToggleSelect,
 }: {
   doc: KbDocMeta
   tree: Map<string | null, KbDocMeta[]>
@@ -77,6 +83,9 @@ function TreeNode({
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onMove: (id: string, newParentId: string | null) => void
+  selectMode: boolean
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
 }) {
   const [open, setOpen] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -104,6 +113,15 @@ function TreeNode({
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => isFolder ? setOpen(o => !o) : onSelect(doc.id)}
       >
+        {selectMode && (
+          <input
+            type="checkbox"
+            checked={selectedIds.has(doc.id)}
+            onChange={() => onToggleSelect(doc.id)}
+            onClick={e => e.stopPropagation()}
+            className="accent-emerald-500 w-3 h-3 flex-shrink-0"
+          />
+        )}
         {isFolder ? (
           <span className="flex-shrink-0 w-3.5 h-3.5 text-gray-500">
             {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
@@ -174,7 +192,8 @@ function TreeNode({
 
       {moveOpen && (
         <MovePicker
-          doc={doc}
+          excludeIds={new Set([doc.id])}
+          disabledId={doc.parent_id}
           docs={docs}
           onMove={newParentId => { onMove(doc.id, newParentId); setMoveOpen(false) }}
           onClose={() => setMoveOpen(false)}
@@ -194,13 +213,19 @@ function TreeNode({
           onDelete={onDelete}
           onRename={onRename}
           onMove={onMove}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
         />
       ))}
     </div>
   )
 }
 
-export function DocTree({ docs, activeId, onSelect, onCreate, onDelete, onRename, onMove }: Props) {
+export function DocTree({
+  docs, activeId, onSelect, onCreate, onDelete, onRename, onMove,
+  selectMode, selectedIds, onToggleSelect,
+}: Props) {
   const tree = buildTree(docs)
   const roots = tree.get(null) ?? []
 
@@ -222,6 +247,9 @@ export function DocTree({ docs, activeId, onSelect, onCreate, onDelete, onRename
           onDelete={onDelete}
           onRename={onRename}
           onMove={onMove}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
         />
       ))}
     </div>
