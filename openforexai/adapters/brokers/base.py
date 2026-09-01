@@ -780,22 +780,32 @@ class BrokerBase(AbstractBroker):
                 continue
 
             matched_entry_ids.add(str(local_entry.get("id", "")))
+            refresh_updates: dict[str, Any] = {
+                "broker_order_id": broker_position.broker_position_id,
+                "sync_key": broker_position.sync_key or local_entry.get("sync_key"),
+                "fill_price": str(broker_position.open_price),
+                "status": OrderStatus.OPEN.value,
+                "last_broker_sync": now.isoformat(),
+                "sync_confirmed": True,
+                "confirmed_by_broker": True,
+            }
+            # Only refresh stop_loss/take_profit forward when the broker actually reports a
+            # value for it. get_open_positions() has been observed to report these as falsy
+            # for positions that do have a real SL/TP, which previously nulled out an already
+            # correct local value on the very next periodic poll — silently erasing data the
+            # system itself had set. Omitting the key (rather than writing None) leaves the
+            # existing local value untouched, since update_order_book_entry only SETs columns
+            # present in the updates dict.
+            if broker_position.stop_loss:
+                refresh_updates["stop_loss"] = str(broker_position.stop_loss)
+            if broker_position.take_profit:
+                refresh_updates["take_profit"] = str(broker_position.take_profit)
             await self._repo_request(
                 event_bus, source_agent_id,
                 "update_order_book_entry",
                 {
                     "entry_id": local_entry.get("id"),
-                    "updates": {
-                        "broker_order_id": broker_position.broker_position_id,
-                        "sync_key": broker_position.sync_key or local_entry.get("sync_key"),
-                        "fill_price": str(broker_position.open_price),
-                        "stop_loss": str(broker_position.stop_loss) if broker_position.stop_loss else None,
-                        "take_profit": str(broker_position.take_profit) if broker_position.take_profit else None,
-                        "status": OrderStatus.OPEN.value,
-                        "last_broker_sync": now.isoformat(),
-                        "sync_confirmed": True,
-                        "confirmed_by_broker": True,
-                    },
+                    "updates": refresh_updates,
                 },
             )
 

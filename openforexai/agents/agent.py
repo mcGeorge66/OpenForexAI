@@ -1902,25 +1902,14 @@ class Agent:
 
         return candle_timestamp
 
-    def _has_configured_tools(self) -> bool:
-        """True if this agent's own config grants it at least one tool. The single
-        source of truth for whether it can call tools — never silently overridden
-        elsewhere, see _should_use_snapshot_decision_engine."""
-        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
-        if not isinstance(tool_config, dict):
-            return False
-        allowed_tools = tool_config.get("allowed_tools")
-        return isinstance(allowed_tools, list) and len(allowed_tools) > 0
-
     def _should_use_snapshot_decision_engine(self, trigger: str) -> bool:
         """Fast, single-shot decision path (no tool-calling) for AA's real m5_candle_trigger
-        cycle — used ONLY when this agent has no tools configured. If the user granted this
-        agent any tool via allowed_tools, that is a deliberate choice and must actually take
-        effect: the agent runs through the tool-calling path instead, regardless of trigger
-        or snapshot profile. Config is the single source of truth for tool access — this
-        method must never silently override that."""
-        if self._has_configured_tools():
-            return False
+        cycle. Selection depends only on agent role, trigger, and snapshot profile — never
+        on tool_config/allowed_tools. Tool access is an orthogonal grant (which tools this
+        agent may call if it runs the general tool-calling loop instead) and must never
+        silently change which loop runs for a given cycle; config for one concern (tool
+        permissions) must not have invisible side effects on another (decision-engine
+        selection)."""
         return (
             self._is_analysis_agent()
             and trigger == EventType.M5_CANDLE_TRIGGER.value

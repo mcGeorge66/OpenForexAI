@@ -1054,14 +1054,20 @@ async def _reconcile_order_book_entries_with_broker(entries: list[Any]) -> None:
                             "direction": broker_position.direction,
                             "units": broker_position.units,
                             "fill_price": broker_position.open_price,
-                            "stop_loss": broker_position.stop_loss,
-                            "take_profit": broker_position.take_profit,
                             "status": OrderStatus.OPEN,
                             "opened_at": broker_position.opened_at,
                             "last_broker_sync": now,
                             "sync_confirmed": True,
                             "confirmed_by_broker": True,
                         }
+                        # Only refresh stop_loss/take_profit when the broker actually reports
+                        # a value — omitting the key (not writing None) leaves an already-set
+                        # local value untouched instead of silently erasing it; see the same
+                        # fix in adapters/brokers/base.py's periodic sync.
+                        if broker_position.stop_loss:
+                            updates["stop_loss"] = broker_position.stop_loss
+                        if broker_position.take_profit:
+                            updates["take_profit"] = broker_position.take_profit
                         await _repository.update_order_book_entry(entry_id, updates)
                         for key, value in updates.items():
                             setattr(entry, key, value)
