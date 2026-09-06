@@ -325,7 +325,7 @@ export function InitialPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.agents.items.map(agent => (
+                {data.agents.items.filter(agent => agent.enabled).map(agent => (
                   <tr key={agent.agent_id} className="border-b border-gray-800 align-top">
                     <td className="py-2 pr-2 font-mono text-gray-200">{agent.agent_id}</td>
                     <td className="py-2 pr-2">
@@ -402,7 +402,7 @@ export function InitialPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.event_composers.items.map((ec: InitialConsoleComposerItem) => (
+                {data.event_composers.items.filter((ec: InitialConsoleComposerItem) => ec.enabled).map((ec: InitialConsoleComposerItem) => (
                   <tr key={ec.ec_id} className="border-b border-gray-800 align-top">
                     <td className="py-2 pr-2 font-mono text-gray-200">{ec.ec_id}</td>
                     <td className="py-2 pr-2">
