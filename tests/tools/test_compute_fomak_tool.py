@@ -52,7 +52,7 @@ def fake_bus_request(monkeypatch):
 async def test_returns_only_fomak_code_by_default(tool, fake_bus_request):
     result = await tool.execute({"timeframe": "M5", "lookback_candles": 24}, _context())
     assert "fomak" in result
-    assert len(result["fomak"]) == 7
+    assert len(result["fomak"]) == 6
     assert "raw_values" not in result
     assert "explanation" not in result
     assert result["higher_timeframe"] == "M15"  # auto next-higher

@@ -53,9 +53,9 @@ Vor `update` oder `forget` den bestehenden Eintrag prüfen, sofern er nicht bere
 
 ### compute_fomak
 
-Berechnet einen deterministischen 7-stelligen Code ("FOMAK"), der den Marktcharakter (Trendstärke, Richtung, Volatilität, Persistenz, Impuls, Noise, Ausrichtung zum höheren Trend) für ein Kerzenfenster beschreibt, das an einem Zeitpunkt endet (Parameter `anchor`; ohne Angabe = jetzt).
+Berechnet einen deterministischen 6-stelligen Code ("FOMAK"), der den Marktcharakter (Trendstärke, Richtung, Volatilität, Persistenz, Impuls, Ausrichtung zum höheren Trend) für ein Kerzenfenster beschreibt, das an einem Zeitpunkt endet (Parameter `anchor`; ohne Angabe = jetzt).
 
-Der Examiner-Agent (EA) und die Analyse-Agenten (AA) verwenden denselben Code als `pattern_key` in `smem` — im Format `<Pair>_<FOMAK-Code>`, z. B. `EURUSD_4U3431S`. Wenn du selbst einen Eintrag zu einem Trade oder einer Marktlage speicherst, sollen andere Agenten ihn später per `find_pattern` exakt wiederfinden können — nutze deshalb **dieselbe Konvention**: rufe `compute_fomak` mit `timeframe=M5`, `lookback_candles=24`, `higher_timeframe=M30` und `anchor` = dem relevanten Zeitpunkt (z. B. Eröffnungszeitpunkt der Order) auf, und baue den `pattern_key` genauso zusammen — erfinde ihn nicht selbst.
+Der Examiner-Agent (EA) und die Analyse-Agenten (AA) verwenden denselben Code als `pattern_key` in `smem` — im Format `<Pair>_<FOMAK-Code>`, z. B. `EURUSD_2U231S`. Wenn du selbst einen Eintrag zu einem Trade oder einer Marktlage speicherst, sollen andere Agenten ihn später per `find_pattern` exakt wiederfinden können — nutze deshalb **dieselbe Konvention**: rufe `compute_fomak` mit `timeframe=M5`, `lookback_candles=24`, `higher_timeframe=M30` und `anchor` = dem relevanten Zeitpunkt (z. B. Eröffnungszeitpunkt der Order) auf, und baue den `pattern_key` genauso zusammen — erfinde ihn nicht selbst.
 
 Setze `include_raw_values`/`include_explanation`, wenn du dem Nutzer erklären willst, was der Code bedeutet.
 

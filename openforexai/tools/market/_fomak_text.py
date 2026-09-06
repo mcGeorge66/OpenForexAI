@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 _FOMAK_PATTERN = re.compile(
-    r"^(?P<S_bin>\d)(?P<D_char>[UDN])(?P<V_bin>\d)(?P<P_bin>\d)(?P<I_bin>\d)(?P<N_bin>\d)(?P<A_char>[SOUDN])$"
+    r"^(?P<S_bin>\d)(?P<D_char>[UDN])(?P<V_bin>\d)(?P<P_bin>\d)(?P<I_bin>\d)(?P<A_char>[SOUDN])$"
 )
 
 
@@ -70,14 +70,6 @@ _I_DESC = {
            2: "moderate impulse - clear movement phases without extremes.",
            3: "strong to very strong impulse - powerful to explosive moves."},
 }
-_N_DESC = {
-    "de": {1: "wenig Rauschen - überwiegend saubere Kerzen, klare Struktur.",
-           2: "mittleres Rauschen - Mischung aus sauberen und zappeligen Kerzen.",
-           3: "hohes bis sehr hohes Rauschen - viele Spikes, hohes Whipsaw-Risiko."},
-    "en": {1: "low noise - mostly clean candles, clear structure.",
-           2: "medium noise - mix of clean and choppy candles.",
-           3: "high to very high noise - many spikes, high whipsaw risk."},
-}
 _DIR_TEXT = {
     "de": {"U": "aufwärts (bullisch)", "D": "abwärts (bärisch)", "N": "neutral / flach"},
     "en": {"U": "upwards (bullish)", "D": "downwards (bearish)", "N": "neutral / flat"},
@@ -102,10 +94,10 @@ def _norm_lang(lang: str | None) -> str:
 
 
 def explain_fomak(fomak: str, lang: str | None = None) -> str:
-    """Component-by-component explanation (S/V/P/I/N/D/A each described)."""
+    """Component-by-component explanation (S/V/P/I/D/A each described)."""
     lang = _norm_lang(lang)
     p = parse_fomak(fomak)
-    s_bin, v_bin, p_bin, i_bin, n_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin", "N_bin"))
+    s_bin, v_bin, p_bin, i_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin"))
     d_char, a_char = p["D_char"], p["A_char"]
 
     if lang == "de":
@@ -115,7 +107,6 @@ def explain_fomak(fomak: str, lang: str | None = None) -> str:
             f"V (Volatilität): {v_bin} --> {_V_DESC['de'][v_bin]}\n"
             f"P (Persistenz):  {p_bin} --> {_P_DESC['de'][p_bin]}\n"
             f"I (Impuls):      {i_bin} --> {_I_DESC['de'][i_bin]}\n"
-            f"N (Noise):       {n_bin} --> {_N_DESC['de'][n_bin]}\n"
             f"A (Alignment):   {a_char} --> {_A_TEXT['de'][a_char]}"
         )
     return (
@@ -124,7 +115,6 @@ def explain_fomak(fomak: str, lang: str | None = None) -> str:
         f"V (Volatility):     {v_bin} --> {_V_DESC['en'][v_bin]}\n"
         f"P (Persistence):    {p_bin} --> {_P_DESC['en'][p_bin]}\n"
         f"I (Impulse):        {i_bin} --> {_I_DESC['en'][i_bin]}\n"
-        f"N (Noise):          {n_bin} --> {_N_DESC['en'][n_bin]}\n"
         f"A (Alignment):      {a_char} --> {_A_TEXT['en'][a_char]}"
     )
 
@@ -133,7 +123,7 @@ def interpret_fomak(fomak: str, lang: str | None = None) -> str:
     """Condensed, semantic interpretation — a short readable market description."""
     lang = _norm_lang(lang)
     p = parse_fomak(fomak)
-    s_bin, v_bin, p_bin, i_bin, n_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin", "N_bin"))
+    s_bin, v_bin, p_bin, i_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin"))
     d_char, a_char = p["D_char"], p["A_char"]
 
     d_sign = {"U": 1, "D": -1, "N": 0}[d_char]
@@ -159,13 +149,13 @@ def interpret_fomak(fomak: str, lang: str | None = None) -> str:
             "N": "der höhere Trend ist neutral oder unklar",
         }[a_char]
 
-        if s_bin >= 3 and p_bin >= 2 and n_bin <= 2:
+        if s_bin >= 3 and p_bin >= 2:
             regime = "einen starken und relativ sauberen Trendmarkt"
-        elif s_bin >= 3 and n_bin >= 2:
+        elif s_bin >= 3:
             regime = "einen starken, aber unruhigen Trend bzw. eine Beschleunigungsphase"
-        elif s_bin <= 1 and p_bin <= 1 and n_bin <= 2:
+        elif s_bin <= 1 and p_bin <= 1:
             regime = "einen seitwärts gerichteten Range-Markt"
-        elif v_bin >= 3 and n_bin >= 3:
+        elif v_bin >= 3 and p_bin <= 1:
             regime = "eine chaotische, hochvolatile Marktphase"
         else:
             regime = "einen moderat trendigen Markt ohne klaren Extremzustand"
@@ -193,13 +183,13 @@ def interpret_fomak(fomak: str, lang: str | None = None) -> str:
         "N": "the higher timeframe trend is neutral or unclear",
     }[a_char]
 
-    if s_bin >= 3 and p_bin >= 2 and n_bin <= 2:
+    if s_bin >= 3 and p_bin >= 2:
         regime = "a strong and relatively clean trending market"
-    elif s_bin >= 3 and n_bin >= 2:
+    elif s_bin >= 3:
         regime = "a strong but noisy trend or acceleration phase"
-    elif s_bin <= 1 and p_bin <= 1 and n_bin <= 2:
+    elif s_bin <= 1 and p_bin <= 1:
         regime = "a sideways, range-bound market"
-    elif v_bin >= 3 and n_bin >= 3:
+    elif v_bin >= 3 and p_bin <= 1:
         regime = "a chaotic, high-volatility market phase"
     else:
         regime = "a moderately trending market without a clear extreme condition"

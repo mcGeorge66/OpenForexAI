@@ -44,12 +44,13 @@ class ComputeFomakTool(BaseTool):
     name = "compute_fomak"
     description = (
         "Compute a FOMAK code — a compact, deterministic fingerprint of market character "
-        "(trend strength, direction, volatility, persistence, impulse, noise, and alignment "
+        "(trend strength, direction, volatility, persistence, impulse, and alignment "
         "with the higher timeframe trend) for a window of candles ending at an anchor "
         "timestamp (or now, if omitted). Same formula every time — use it to reliably "
         "recognize 'have we seen this market character before' (e.g. as a pattern_key for "
         "semantic_memory), not as a trading signal itself. Returns the code always; raw "
-        "values and a plain-language explanation are optional."
+        "values (including a noise_score not encoded in the code itself) and a "
+        "plain-language explanation are optional."
     )
     input_schema = {
         "type": "object",

@@ -5,11 +5,18 @@ windowing changed: instead of fixed day-grid state blocks, this computes ONE
 FOMAK for an arbitrary floating window ("the last N candles ending at an anchor
 timestamp"), which is what a specific trade/analysis moment actually needs.
 
-FOMAK format: {S_bin}{D_char}{V_bin}{P_bin}{I_bin}{N_bin}{A_char} — see
-FOMAK_101-2.pdf for the full derivation and worked examples. S/V/P/I/N are
+FOMAK format: {S_bin}{D_char}{V_bin}{P_bin}{I_bin}{A_char} — see
+FOMAK_101-2.pdf for the full derivation and worked examples. S/V/P/I are
 deliberately coarsened to a 1-3 scale (not the original's 1-5) — see the
 BINS_* constants below — so an exact pattern_key match in smem actually
 recurs often enough across trades to be useful.
+
+N_bin (Noise) is still computed and returned in raw_values for diagnostics,
+but deliberately left out of the `fomak` string itself: under a simple
+i.i.d. model noise ≈ 2·p·(1-p) is nearly a deterministic function of
+persistence (P_bin), so the two bins were highly redundant and merging them
+shrinks the combinatorial space, which matters a lot when trade volume per
+pair is only a few dozen and exact pattern_key recurrence is the whole point.
 """
 from __future__ import annotations
 
@@ -18,17 +25,21 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# Coarsened from fomak_engine5.py's original 5-bin defaults (4 thresholds each,
-# e.g. [0.5, 1.0, 1.5, 2.5] for Strength) to 3 bins, so the exact-match pattern_key
-# lookup in smem actually finds repeats often enough to be useful. Each new
-# threshold is the average of one adjacent pair of the original four
-# (first pair -> low/mid boundary, last pair -> mid/high boundary), e.g.
-# [0.5, 1.0, 1.5, 2.5] -> [(0.5+1.0)/2, (1.5+2.5)/2] = [0.75, 2.0].
-BINS_STRENGTH = [0.75, 2.0]
-BINS_VOLA = [0.9, 1.4]
-BINS_PERSIST = [0.6, 0.8]
-BINS_IMPULSE = [0.75, 1.75]
-BINS_NOISE = [0.375, 0.675]
+# Empirically calibrated (33rd/66th percentiles) from ~12,000 real EURUSD/USDJPY
+# M5 windows recomputed with this exact function — replacing the original
+# fomak_engine5.py-derived fixed values, which turned out to be badly miscalibrated
+# for these pairs/timeframes: persist_score never once reached the old bin-3
+# threshold (0.8) in real data (max observed ~0.83, median ~0.48), and
+# impulse_score exceeded its old bin-3 threshold (1.75) in ~88% of windows.
+# Percentile-based thresholds keep each bin populated roughly a third of the time,
+# so the resulting digit actually discriminates between situations instead of
+# nearly always landing on the same value. Re-derive from fresh data if the traded
+# pairs/timeframes change materially.
+BINS_STRENGTH = [1.30, 3.06]
+BINS_VOLA = [0.86, 1.09]
+BINS_PERSIST = [0.43, 0.52]
+BINS_IMPULSE = [2.23, 3.03]
+BINS_NOISE = [0.50, 0.59]
 
 ATR_SHORT_PERIOD = 14
 ATR_LONG_PERIOD = 50
@@ -182,7 +193,7 @@ def compute_fomak(
     higher_dir = _higher_timeframe_direction(higher_tf_candles, pip_factor)
     a_char = alignment_char(d_char, higher_dir)
 
-    fomak = f"{s_bin}{d_char}{v_bin}{p_bin}{i_bin}{n_bin}{a_char}"
+    fomak = f"{s_bin}{d_char}{v_bin}{p_bin}{i_bin}{a_char}"
 
     def _round_or_none(val: float) -> float | None:
         return None if (val is None or (isinstance(val, float) and np.isnan(val))) else round(val, 4)
