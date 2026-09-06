@@ -217,7 +217,10 @@ class MT5Broker(BrokerBase):
                 low=Decimal(str(r["low"])),
                 close=Decimal(str(r["close"])),
                 tick_volume=int(r["tick_volume"]),
-                spread=Decimal(str(spread_raw)),
+                # MT5's own "spread" field is in points, not pips (docs: "Spread value in
+                # points"); Candle.spread is documented as pips. All pairs this system
+                # trades use standard 5-/3-digit MT5 quoting, where 1 pip = 10 points.
+                spread=Decimal(str(spread_raw)) / Decimal("10"),
                 timeframe="M5",
             ))
         return result
