@@ -47,6 +47,7 @@ def _detect_confluence(
                 "timestamp": most_recent,
                 "distance":  round(abs(avg_price - current_price), 6),
                 "type":      "confluence",
+                "touch_count": int(h.get("touch_count", 1)) + int(lo.get("touch_count", 1)),
             })
 
     remaining_highs = [h for i, h in enumerate(highs) if i not in used_highs]
@@ -59,10 +60,15 @@ def _cluster_levels(levels: list[dict], min_gap: float, keep: str) -> list[dict]
 
     keep='max' retains the highest price in each cluster (for swing highs).
     keep='min' retains the lowest price in each cluster (for swing lows).
-    The most recent timestamp within a cluster is preserved.
+    The most recent timestamp within a cluster is preserved. `touch_count` on
+    the result is the number of raw swing points merged into that cluster —
+    how many separate times price has swung at/near this level — since a
+    level tested repeatedly without breaking is a materially different
+    situation from one seen only once, and callers (prompts) need that
+    distinction instead of just a bare price.
     """
     if not levels or min_gap <= 0:
-        return levels
+        return [{**lv, "touch_count": 1} for lv in levels]
     by_price = sorted(levels, key=lambda x: x["price"])
     clusters: list[list[dict]] = [[by_price[0]]]
     for level in by_price[1:]:
@@ -80,7 +86,7 @@ def _cluster_levels(levels: list[dict], min_gap: float, keep: str) -> list[dict]
             key=lambda x: x["timestamp"],
             default=representative,
         )
-        result.append({**representative, "timestamp": most_recent["timestamp"]})
+        result.append({**representative, "timestamp": most_recent["timestamp"], "touch_count": len(cluster)})
     return result
 
 
@@ -90,7 +96,10 @@ class GetSwingLevelsTool(BaseTool):
         "Detects swing high and swing low price levels for the current pair on any timeframe. "
         "Uses scipy peak detection with configurable prominence filtering. "
         "Nearby levels are automatically clustered using an ATR-based minimum gap so that "
-        "near-duplicate levels are merged into one. "
+        "near-duplicate levels are merged into one; each returned level carries a `touch_count` "
+        "= how many raw swing points were merged into it, i.e. how many separate times price "
+        "has swung at/near that level — a level tested 3+ times without breaking should be "
+        "treated as weaker/more likely to eventually break, not as a stronger wall. "
         "Returns the most recent N swing highs and lows with timestamps and distance from the "
         "current price, plus convenience fields for nearest resistance and nearest support. "
         "Useful for support/resistance context in snapshot tool blocks."
