@@ -946,6 +946,39 @@ class SQLiteRepository(AbstractRepository):
         row = await cursor.fetchone()
         return await self._row_to_order_book_entry(row) if row else None
 
+    async def find_order_book_entry_by_broker_ref(
+        self,
+        broker_name: str,
+        broker_order_id: str | None = None,
+        sync_key: str | None = None,
+    ):
+        await self._ensure_order_book_table()
+        if broker_order_id and broker_order_id != "0":
+            cursor = await self._db().execute(
+                """
+                SELECT * FROM order_book_entries
+                WHERE broker_name=? AND broker_order_id=?
+                ORDER BY requested_at DESC LIMIT 1
+                """,
+                (broker_name, broker_order_id),
+            )
+            row = await cursor.fetchone()
+            if row:
+                return await self._row_to_order_book_entry(row)
+        if sync_key:
+            cursor = await self._db().execute(
+                """
+                SELECT * FROM order_book_entries
+                WHERE broker_name=? AND sync_key=?
+                ORDER BY requested_at DESC LIMIT 1
+                """,
+                (broker_name, sync_key),
+            )
+            row = await cursor.fetchone()
+            if row:
+                return await self._row_to_order_book_entry(row)
+        return None
+
     async def get_open_order_book_entries(
         self, broker_name: str, pair: str | None = None
     ) -> list[OrderBookEntry]:

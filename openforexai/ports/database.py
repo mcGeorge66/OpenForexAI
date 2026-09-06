@@ -113,6 +113,26 @@ class AbstractRepository(ABC):
         ...
 
     @abstractmethod
+    async def find_order_book_entry_by_broker_ref(
+        self,
+        broker_name: str,
+        broker_order_id: str | None = None,
+        sync_key: str | None = None,
+    ) -> OrderBookEntry | None:
+        """Find an entry by broker_order_id or sync_key, in ANY status.
+
+        A given broker position can never legitimately correspond to more than
+        one order_book_entries row. The sync loop must call this before ever
+        creating an "imported from broker sync" row, so that a position whose
+        local entry was previously (even wrongly) marked CLOSED gets that exact
+        record re-synced instead of a second, duplicate row being created.
+        broker_order_id is checked first (skipped if it's the placeholder "0"
+        used for entries that never reached the broker); sync_key is the
+        fallback. Returns None if neither identifier is given or nothing matches.
+        """
+        ...
+
+    @abstractmethod
     async def get_open_order_book_entries(
         self, broker_name: str, pair: str | None = None
     ) -> list[OrderBookEntry]:

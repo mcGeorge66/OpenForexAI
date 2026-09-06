@@ -975,6 +975,37 @@ class PostgreSQLRepository(AbstractRepository):
         row = await self._fetchrow("SELECT * FROM order_book_entries WHERE id=$1", entry_id)
         return await self._row_to_order_book_entry(dict(row)) if row else None
 
+    async def find_order_book_entry_by_broker_ref(
+        self,
+        broker_name: str,
+        broker_order_id: str | None = None,
+        sync_key: str | None = None,
+    ) -> OrderBookEntry | None:
+        await self._ensure_order_book_table()
+        if broker_order_id and broker_order_id != "0":
+            row = await self._fetchrow(
+                """
+                SELECT * FROM order_book_entries
+                WHERE broker_name=$1 AND broker_order_id=$2
+                ORDER BY requested_at DESC LIMIT 1
+                """,
+                broker_name, broker_order_id,
+            )
+            if row:
+                return await self._row_to_order_book_entry(dict(row))
+        if sync_key:
+            row = await self._fetchrow(
+                """
+                SELECT * FROM order_book_entries
+                WHERE broker_name=$1 AND sync_key=$2
+                ORDER BY requested_at DESC LIMIT 1
+                """,
+                broker_name, sync_key,
+            )
+            if row:
+                return await self._row_to_order_book_entry(dict(row))
+        return None
+
     async def get_open_order_book_entries(
         self,
         broker_name: str,

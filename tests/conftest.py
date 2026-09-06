@@ -318,6 +318,22 @@ class MockRepository(AbstractRepository):
                 return entry
         return None
 
+    async def find_order_book_entry_by_broker_ref(
+        self,
+        broker_name: str,
+        broker_order_id: str | None = None,
+        sync_key: str | None = None,
+    ):
+        if broker_order_id and broker_order_id != "0":
+            for entry in self.order_book_entries:
+                if entry.broker_name == broker_name and entry.broker_order_id == broker_order_id:
+                    return entry
+        if sync_key:
+            for entry in self.order_book_entries:
+                if entry.broker_name == broker_name and entry.sync_key == sync_key:
+                    return entry
+        return None
+
     async def get_open_order_book_entries(self, broker_name: str, pair: str | None = None) -> list:
         entries = [
             e for e in self.order_book_entries

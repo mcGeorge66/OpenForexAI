@@ -667,7 +667,7 @@ class BrokerBase(AbstractBroker):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _log.warning("Account poll error", broker=self.short_name, error=str(exc))
+                _log.warning("Account poll error broker=%s: %s", self.short_name, exc)
                 self._emit(
                     source, MonitoringEventType.ACCOUNT_POLL_ERROR,
                     broker_name=self.short_name, error=str(exc),
@@ -746,6 +746,29 @@ class BrokerBase(AbstractBroker):
             if local_entry is None and broker_position.sync_key:
                 local_entry = local_by_sync_key.get(broker_position.sync_key)
 
+            reopening_closed_entry = False
+            if local_entry is None:
+                # Not among the currently-open local entries — before treating this as a
+                # brand-new position, check ALL statuses. The same broker position can
+                # never legitimately correspond to two order_book_entries rows: if a match
+                # already exists here, an earlier sync pass almost certainly misread a
+                # transient broker-API failure as "position gone" and wrongly closed it.
+                # Re-sync that exact record instead of importing a duplicate.
+                existing_any_status = await self._repo_request(
+                    event_bus, source_agent_id,
+                    "find_order_book_entry_by_broker_ref",
+                    {
+                        "broker_name": self.short_name,
+                        "broker_order_id": broker_position.broker_position_id,
+                        "sync_key": broker_position.sync_key,
+                    },
+                )
+                if existing_any_status is not None:
+                    local_entry = existing_any_status
+                    reopening_closed_entry = (
+                        str(existing_any_status.get("status", "")).upper() != OrderStatus.OPEN.value
+                    )
+
             if local_entry is None:
                 imported = OrderBookEntry(
                     broker_name=self.short_name,
@@ -789,6 +812,22 @@ class BrokerBase(AbstractBroker):
                 "sync_confirmed": True,
                 "confirmed_by_broker": True,
             }
+            if reopening_closed_entry:
+                _log.warning(
+                    "Re-opening order book entry previously marked CLOSED — broker still "
+                    "reports this position OPEN, so the earlier close was wrong (likely a "
+                    "transient broker-API read failure misread as 'position gone') "
+                    "broker=%s pair=%s entry_id=%s broker_order_id=%s",
+                    self.short_name, pair, local_entry.get("id", ""), broker_position.broker_position_id,
+                )
+                refresh_updates.update({
+                    "closed_at": None,
+                    "close_reason": None,
+                    "close_price": None,
+                    "close_reasoning": None,
+                    "pnl_pips": None,
+                    "pnl_account_currency": None,
+                })
             # Only refresh stop_loss/take_profit forward when the broker actually reports a
             # value for it. get_open_positions() has been observed to report these as falsy
             # for positions that do have a real SL/TP, which previously nulled out an already
