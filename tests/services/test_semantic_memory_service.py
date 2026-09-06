@@ -187,6 +187,101 @@ async def test_find_pattern_requires_pattern_key(service):
 
 
 @pytest.mark.asyncio
+async def test_remember_rejects_text_full_of_absolute_price_quotes(service):
+    # Real (anonymized) Examiner output that mixes legitimate relative language
+    # ("70 Pips", "11R", "rund 6 Pips") with leftover absolute USDJPY levels —
+    # exactly the pattern the guard must catch.
+    text = (
+        "Pattern: USDJPY_3D2131S\n"
+        "Trade-Date: 2026-09-02\n"
+        "Observation: Zum Entry lag ein bärischer H1-Kontext vor: Nach einem "
+        "Rückgang von etwa 159.90 in den Bereich 159.62/159.59 folgte ein "
+        "begrenzter Rebound unter dem im Snapshot genannten Widerstand um "
+        "159.765. Der M5-Trigger schloss bei etwa 159.701; der Short wurde als "
+        "Market-Order bei etwa 159.651 ausgeführt, rund 5 Pips günstiger für die "
+        "Short-Richtung. Die Analyse nannte einen Stop um 159.765 und ein Ziel um "
+        "159.494. Im gespeicherten Order-Datensatz steht später jedoch ein Stop "
+        "bei 158.946 und kein Take-Profit. Danach fiel USDJPY in wenigen "
+        "M5-Kerzen bis etwa 158.15 und bewegte sich anschließend wieder nach "
+        "oben; der Trade wurde laut Broker-Synchronisierung bei etwa 158.946 per "
+        "Stop geschlossen.\n"
+        "Outcome: Der Short endete mit einem realisierten Gewinn von rund 70 "
+        "Pips beziehungsweise etwa 11R gemessen am ursprünglichen Risiko von "
+        "rund 6 Pips.\n"
+        "Evidence status: single_observation"
+    )
+    with pytest.raises(ValueError):
+        await service.remember({
+            "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
+        })
+
+
+@pytest.mark.asyncio
+async def test_remember_accepts_prompt_richtig_example_with_relative_language(service):
+    # The EA system prompt's own "Richtig" (correct) worked example — must
+    # keep working verbatim, otherwise the guard would contradict the prompt
+    # it is meant to enforce.
+    text = (
+        "Der Trade wurde per Stop geschlossen, etwa 1,6 Pips gegen die Position "
+        "vom Einstieg entfernt und näher am gebrochenen Level als die im "
+        "Snapshot vorgesehene Stop-Distanz — ein kleiner Verlust nahe am "
+        "Einstieg."
+    )
+    result = await service.remember({
+        "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
+    })
+    assert result["table"] == "mem_agent_test"
+
+
+@pytest.mark.asyncio
+async def test_remember_accepts_indicator_values_that_resemble_prices(service):
+    # RSI/Slope_S values routinely fall in the same magnitude/decimal range as
+    # real USDJPY prices (e.g. "60.87") — these must not be mistaken for
+    # absolute price quotes just because of nearby-keyword exemptions.
+    text = (
+        "RSI lag bei etwa 60.87 und Slope_S bei 0.945, beide im positiven "
+        "Bereich. Dies war die 4. beobachtete Situation dieses Patterns; 3 von "
+        "4 Trades endeten profitabel, mit einem Ergebnis von rund 11R."
+    )
+    result = await service.remember({
+        "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
+    })
+    assert result["table"] == "mem_agent_test"
+
+
+@pytest.mark.asyncio
+async def test_remember_accepts_plain_text_with_no_numbers(service):
+    result = await service.remember({
+        "table": "mem_agent_test",
+        "text": "EURUSD tends to fade breakouts right before the London open",
+        "agent_id": "a",
+    })
+    assert result["table"] == "mem_agent_test"
+
+
+@pytest.mark.asyncio
+async def test_remember_checks_both_bands_when_pair_missing(service):
+    # No 'pair' given (broker-shared note not tied to one pair) — both the
+    # JPY-style and major-pair-style price bands must be checked, not skipped.
+    jpy_style_text = "Der Kurs bewegte sich bis auf 158.15 zurück."
+    with pytest.raises(ValueError):
+        await service.remember({"table": "mem_shared_test", "text": jpy_style_text, "agent_id": "a"})
+
+    major_style_text = "Der Kurs bewegte sich bis auf 1.16812 zurück."
+    with pytest.raises(ValueError):
+        await service.remember({"table": "mem_shared_test", "text": major_style_text, "agent_id": "a"})
+
+
+@pytest.mark.asyncio
+async def test_remember_pair_missing_does_not_reject_indicator_values(service):
+    # Sanity check that the empty-pair fallback (checking both bands) does not
+    # become overly aggressive: indicator values must still be exempt.
+    text = "RSI lag bei etwa 60.87, ATR bei 0.945."
+    result = await service.remember({"table": "mem_shared_test", "text": text, "agent_id": "a"})
+    assert result["table"] == "mem_shared_test"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_remember_to_new_table_does_not_crash(service):
     table = "mem_shared_mt5_oxs_t"
     await asyncio.gather(*[

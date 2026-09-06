@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,90 @@ _COLBERT_WEIGHT = 0.4
 
 def _is_valid_table_name(name: str) -> bool:
     return isinstance(name, str) and name.startswith(_TABLE_PREFIXES)
+
+
+# ── Absolute-price-quote guard ──────────────────────────────────────────────
+#
+# The Examiner agent's own system prompt (config/system.json5, agent id
+# OXS_T-ALL___-EA-EXAM) already instructs it, with a worked example, to
+# describe prices/levels RELATIVELY (pips/ATR distance, position within a
+# range, relative to a level) and never as absolute price quotes — an
+# absolute price from a past trade is meaningless once the market has moved
+# on. In practice the underlying LLM does not reliably follow that rule, so
+# this is a code-level backstop: `remember()` rejects (ValueError) any text
+# that looks like it contains an absolute FX price quote for the given pair.
+#
+# FX price quotes in this system fall into two clear magnitude/precision
+# bands depending on quote convention (see DXY_COMPONENT_PAIRS in
+# openforexai/adapters/brokers/base.py for the pair universe actually
+# traded: EURUSD, USDJPY, GBPUSD, USDCAD, USDCHF):
+#   - JPY-quote pairs (pair ends in "JPY"): ~50-400 magnitude, 2-3 decimals
+#     (e.g. "159.765", "158.946", "158.15").
+#   - Other majors (EURUSD, GBPUSD, USDCAD, USDCHF): ~0.3-3.0 magnitude,
+#     4-5 decimals (e.g. "1.16812").
+# If `pair` is empty/unrecognized, both bands are checked.
+#
+# This is deliberately fuzzy pattern-matching, not a parser: RSI values,
+# Slope_S/ATR/confidence figures and similar indicator numbers routinely
+# fall in the *same* magnitude/decimal range (e.g. RSI "60.87" looks exactly
+# like a plausible USDJPY price) and must NOT be rejected. To avoid that,
+# a number is only flagged if, in addition to matching a price band, none
+# of a small set of "this is not a price" keywords appear in a short
+# window of characters around it (RSI/Slope/ATR/Confidence/Pip/%/Kerzen —
+# candle timing, indicators, and pip/percentage units are never prices).
+# Pip counts, R-multiples, dates and counts ("3 von 4 Trades") are written
+# with commas or without decimals in this system's texts and so don't match
+# the dot-decimal number pattern below at all.
+
+_PRICE_NUMBER_RE = re.compile(r"(?<![\w.])\d{1,4}\.\d{2,5}(?![\w.])")
+
+_JPY_PRICE_BAND = ((50.0, 400.0), (2, 3))       # (magnitude range, decimal-digits range)
+_MAJOR_PRICE_BAND = ((0.3, 3.0), (4, 5))
+
+_PRICE_EXEMPT_KEYWORDS = (
+    "rsi", "slope_s", "slope", "atr", "confidence", "pip", "%", "kerze", "candle",
+)
+_PRICE_EXEMPT_WINDOW_CHARS = 30
+
+
+def _price_bands_for_pair(pair: str) -> list[tuple[tuple[float, float], tuple[int, int]]]:
+    pair = (pair or "").strip().upper()
+    if not pair:
+        return [_JPY_PRICE_BAND, _MAJOR_PRICE_BAND]
+    if pair.endswith("JPY"):
+        return [_JPY_PRICE_BAND]
+    return [_MAJOR_PRICE_BAND]
+
+
+def _reject_absolute_price_quotes(text: str, pair: str) -> None:
+    """Raise ValueError if ``text`` looks like it names an absolute FX price
+    for ``pair`` instead of describing it relatively. See module comment
+    above for the heuristic."""
+    bands = _price_bands_for_pair(pair)
+    for match in _PRICE_NUMBER_RE.finditer(text):
+        number_str = match.group(0)
+        magnitude = abs(float(number_str))
+        decimals = len(number_str.split(".")[1])
+        if not any(
+            lo <= magnitude <= hi and dec_lo <= decimals <= dec_hi
+            for (lo, hi), (dec_lo, dec_hi) in bands
+        ):
+            continue
+        window_start = max(0, match.start() - _PRICE_EXEMPT_WINDOW_CHARS)
+        window_end = min(len(text), match.end() + _PRICE_EXEMPT_WINDOW_CHARS)
+        window = text[window_start:window_end].lower()
+        if any(keyword in window for keyword in _PRICE_EXEMPT_KEYWORDS):
+            continue
+        pair_label = pair or "(unknown/unspecified)"
+        raise ValueError(
+            f"Memory text contains {number_str!r}, which looks like an absolute price "
+            f"quote for pair {pair_label!r}, not a relative description. Rewrite this "
+            "value in relative terms — pips/ATR distance, position within a range, or "
+            "distance to a level — and never as an absolute price quote, since an "
+            "absolute price from a past trade is meaningless once the market has moved "
+            "on. Example: instead of 'Stop bei 158.946', write something like 'Stop etwa "
+            "6 Pips unter dem Einstieg'."
+        )
 
 
 class SemanticMemoryService:
@@ -135,13 +221,32 @@ class SemanticMemoryService:
 
     def _ensure_bge_m3_ready(self) -> None:
         """Blocking: runs in a worker thread via asyncio.to_thread. Downloads the
-        model from HuggingFace Hub if not already cached (idempotent — a fast
-        local-only check when already cached), then loads it once into memory."""
-        from huggingface_hub import snapshot_download
+        model from HuggingFace Hub if not already cached, then loads it once into
+        memory. The download step still contacts HuggingFace to verify the local
+        cache is current even when nothing needs downloading, which is not fast if
+        network access is slow or restricted — every full bootstrap pays that cost.
 
-        _log.info("Checking for local BGE-M3 model weights...", model=_EMBEDDING_MODEL)
-        snapshot_download(repo_id=_EMBEDDING_MODEL)
-        _log.info("BGE-M3 model weights ready locally.")
+        Skipped entirely (straight to loading from local cache, fully offline) when
+        OPENFOREXAI_SKIP_MODEL_CHECK is set. tools/openforexai-wrapper.py sets this
+        only on a browser-triggered restart (/system/restart-now), never on a fresh
+        manual launch — so a manual restart still re-verifies against HuggingFace,
+        but clicking restart in the UI comes back up immediately from cache."""
+        skip_check = os.environ.get("OPENFOREXAI_SKIP_MODEL_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+
+        if skip_check:
+            _log.info(
+                "OPENFOREXAI_SKIP_MODEL_CHECK set — loading BGE-M3 from local cache "
+                "without contacting HuggingFace.",
+                model=_EMBEDDING_MODEL,
+            )
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        else:
+            from huggingface_hub import snapshot_download
+
+            _log.info("Checking for local BGE-M3 model weights...", model=_EMBEDDING_MODEL)
+            snapshot_download(repo_id=_EMBEDDING_MODEL)
+            _log.info("BGE-M3 model weights ready locally.")
 
         from FlagEmbedding import BGEM3FlagModel
 
@@ -278,6 +383,7 @@ class SemanticMemoryService:
             raise ValueError(f"Invalid table name {table!r} — must start with 'mem_agent_' or 'mem_shared_'.")
 
         text = str(args["text"])
+        _reject_absolute_price_quotes(text, str(args.get("pair", "")))
         embedding = await self._embed(text)
 
         expiry_days = args.get("expiry_days")
