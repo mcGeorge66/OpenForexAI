@@ -71,8 +71,6 @@ from openforexai.agents.analysis_snapshot import (
     _SAFE_SCRIPT_BUILTINS,
     _substitute_placeholders,
     build_analysis_snapshot,
-    build_decision_only_system_prompt,
-    build_decision_only_user_message,
     build_snapshot_system_prompt,
     build_snapshot_user_message,
     preview_snapshot_tool_block,
@@ -571,22 +569,24 @@ async def _execute_agent_inspection(
                     source=source,
                     snapshot=snapshot,
                 )
-            built_user_message = build_decision_only_user_message(snapshot, effective_snapshot_profile)
+            built_user_message = build_snapshot_user_message(snapshot, effective_snapshot_profile)
             agent._emit_agent_input_built(
                 trigger=trigger,
                 source=source,
                 raw_payload=trigger_payload,
                 derived_user_message=built_user_message,
             )
-            effective_system_prompt = build_decision_only_system_prompt(
+            effective_system_prompt = build_snapshot_system_prompt(
                 _base_prompt,
                 effective_decision_profile,
+                allow_tools=bool(agent._tool_dispatcher is not None and agent._tool_dispatcher.has_tools()),
             )
             if not validation_errors:
-                final_response, total_tokens, _ = await agent._run_decision_only_cycle(
-                    user_message=built_user_message,
+                final_response, total_tokens, _ = await agent._run_with_tools(
+                    built_user_message,
                     trigger=trigger,
                     source=source,
+                    system_prompt_override=effective_system_prompt,
                 )
         elif agent._is_broker_agent():
             trigger = "analysis_result"
@@ -1194,6 +1194,21 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+async def _read_json5_file(path: Path) -> Any:
+    """Read+parse a JSON5 file off the event loop.
+
+    ``json5.loads`` is a pure-Python parser — for a file the size of
+    ``config/system.json5`` (hundreds of KB once every agent prompt/schema is
+    in there) this routinely takes multiple seconds. Called synchronously
+    inside an ``async def`` handler, that blocks the *entire* process for the
+    whole parse — every other in-flight request, LLM response future, and
+    agent message dispatch stalls too, not just this one endpoint. Always
+    route through this helper (``asyncio.to_thread``) instead of calling
+    ``json5.loads(path.read_text(...))`` directly in a request handler.
+    """
+    return await asyncio.to_thread(lambda: json5.loads(path.read_text(encoding="utf-8")))
+
+
 def _write_json_file(path: Path, content: dict[str, Any] | str) -> None:
     """Atomically write JSON5 content with stable formatting.
 
@@ -1733,8 +1748,7 @@ async def get_chartshot_image(filename: str):  # type: ignore[return]
         raise HTTPException(status_code=400, detail="Invalid chartshot filename")
     root = _project_root()
     try:
-        import json5 as _json5
-        _cs_cfg = _json5.loads((root / "config" / "system.json5").read_text(encoding="utf-8"))
+        _cs_cfg = await _read_json5_file(root / "config" / "system.json5")
         output_dir = str((_cs_cfg.get("chartshot") or {}).get("output_dir") or "data/chartshots")
     except Exception:
         output_dir = "data/chartshots"
@@ -1755,8 +1769,7 @@ async def delete_chartshot_image(filename: str):
         raise HTTPException(status_code=400, detail="Invalid chartshot filename")
     root = _project_root()
     try:
-        import json5 as _json5
-        _cs_cfg = _json5.loads((root / "config" / "system.json5").read_text(encoding="utf-8"))
+        _cs_cfg = await _read_json5_file(root / "config" / "system.json5")
         output_dir = str((_cs_cfg.get("chartshot") or {}).get("output_dir") or "data/chartshots")
     except Exception:
         output_dir = "data/chartshots"
@@ -2108,7 +2121,7 @@ async def preview_snapshot(req: SnapshotPreviewRequest) -> SnapshotPreviewRespon
     if requested_name:
         cfg_path = _project_root() / "config" / "system.json5"
         try:
-            raw_cfg = json5.loads(cfg_path.read_text(encoding="utf-8"))
+            raw_cfg = await _read_json5_file(cfg_path)
         except Exception:
             raw_cfg = {}
         snap_profiles = raw_cfg.get("snapshot_profiles") or {}
@@ -2140,7 +2153,7 @@ async def preview_snapshot(req: SnapshotPreviewRequest) -> SnapshotPreviewRespon
         effective_profile=effective_profile,
         snapshot=snapshot,
         validation_errors=errors,
-        decision_input=build_decision_only_user_message(snapshot, effective_profile),
+        decision_input=build_snapshot_user_message(snapshot, effective_profile),
     )
 
 
@@ -2514,6 +2527,16 @@ class PromptWorkbenchChatRequest(BaseModel):
             "calculate_indicator", "zone_marker", "trade_marker", "candle_marker", "get_annotation",
         ],
     )
+    response_schema: dict[str, Any] | None = Field(
+        default=None,
+        description="/prompt-workbench/simulate-step only: same shape as an agent's "
+                    "tool_config.response_schema (a raw JSON Schema). When set, the AA-under-test's "
+                    "final answer is structurally forced to conform via the real provider mechanism "
+                    "(see Agent._run_with_tools/_response_schema) — the exact production path, so this "
+                    "is where a new schema should be smoke-tested against the real LLM endpoint before "
+                    "being saved into an agent's live config.",
+    )
+    response_schema_name: str = Field(default="agent_result")
     existing_annotations: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Annotations already accumulated client-side (from prior responses in this "
@@ -2631,20 +2654,15 @@ class PromptWorkbenchChatResponse(BaseModel):
     )
     decision_valid: bool = Field(
         default=False,
-        description="/prompt-workbench/simulate-step only: whether `decision` parsed successfully. "
-                    "False means all json_attempts retries were exhausted without valid JSON.",
+        description="/prompt-workbench/simulate-step only: whether `decision` parsed successfully as JSON.",
     )
-    decision_retries: int = Field(
-        default=0,
-        description="/prompt-workbench/simulate-step only: how many times the AA had to be re-prompted "
-                    "after an invalid-JSON answer this step (0 = valid on the first try). Only populated "
-                    "for the decision-only path (empty allowed_tools) — Agent._run_decision_only_cycle is "
-                    "the same method real production AA agents use, so this reflects production behavior.",
-    )
-    decision_discarded: list[str] = Field(
-        default_factory=list,
-        description="/prompt-workbench/simulate-step only: raw text of each rejected invalid-JSON attempt, "
-                    "oldest first — for spotting exactly what about the prompt caused inconsistent output.",
+    schema_enforced: bool = Field(
+        default=False,
+        description="/prompt-workbench/simulate-step only: whether this step's answer was structurally "
+                    "forced via a configured `tool_config.response_schema` (native provider-level "
+                    "enforcement, see Agent._response_schema/_run_with_tools) rather than left to the "
+                    "model's own prompt-following. False means no response_schema is configured for this "
+                    "agent — the same real production mechanism, not a Workbench-only reimplementation.",
     )
     script_input: dict[str, Any] | None = Field(
         default=None,
@@ -3046,14 +3064,16 @@ async def _run_ec_style_script(
 async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> PromptWorkbenchChatResponse:
     """Simulation tab: one AA→BA cycle against the loaded candle window.
 
-    Mirrors the real production split: the LLM plays the AA role and produces only a decision
-    (its tool access is whatever `allowed_tools` the caller configures — empty means a pure
-    decision-only call via Agent._run_decision_only_cycle, the same method production AA agents
-    use for their real decision step, with no data-gathering tools offered at all). The optional
-    `decision_script` then plays the BA role: a deterministic, user-authored script (not a second
-    LLM call) that receives the AA's decision and decides whether/how to act on it, drawing the
-    outcome on the chart via trade_marker. Kept separate from /prompt-workbench/chat because the
-    two flows diverge completely — free tool chat vs. a scripted decision pipeline.
+    Mirrors real production exactly: the LLM plays the AA role via Agent._run_with_tools, the
+    same method every production AA agent uses (its tool access is whatever `allowed_tools` the
+    caller configures — empty means no tools are offered at all, same fail-closed ToolDispatcher
+    allow-list). If `response_schema` is set, the final answer is structurally forced to conform
+    via the real provider mechanism (Agent._response_schema) — this is where a schema should be
+    smoke-tested against the real LLM endpoint before it's saved into an agent's live config. The
+    optional `decision_script` then plays the BA role: a deterministic, user-authored script (not
+    a second LLM call) that receives the AA's decision and decides whether/how to act on it,
+    drawing the outcome on the chart via trade_marker. Kept separate from /prompt-workbench/chat
+    because the two flows diverge completely — free tool chat vs. a scripted decision pipeline.
     """
     if _bus is None or _repository is None:
         raise HTTPException(status_code=503, detail="System not ready")
@@ -3105,8 +3125,6 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
         ]
 
     decision: dict[str, Any] | None = None
-    decision_retries = 0
-    decision_discarded: list[str] = []
     final_text = ""
     total_tokens = 0
     script_input: dict[str, Any] | None = None
@@ -3196,36 +3214,32 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             agent._max_tokens = llm_max_tokens
             agent._tool_context_budget_tokens = max(llm_max_tokens * 8, 16384)
             agent._llm_reasoning_effort = llm_reasoning_effort
-
-            if req.allowed_tools:
-                # AA-under-test has configured tool access — real tool loop, for testing an AA
-                # variant that fetches its own context instead of receiving a pre-built snapshot.
-                aa_tool_context = ToolContext(
-                    agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
-                    monitoring_bus=_monitoring_bus, event_bus=_bus,
-                    extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
-                )
-                agent._tool_dispatcher = ToolDispatcher(
-                    DEFAULT_REGISTRY, aa_tool_context, {
-                        "allowed_tools": req.allowed_tools,
-                        "forced_arguments": forced_candle_arguments,
+            if req.response_schema:
+                agent._config = {
+                    "tool_config": {
+                        "response_schema": req.response_schema,
+                        "response_schema_name": req.response_schema_name,
                     },
-                )
-                final_text, total_tokens, _executed = await asyncio.wait_for(
-                    agent._run_with_tools(user_message=user_message, trigger="workbench_simulation_step", history=[]),
-                    timeout=req.timeout,
-                )
-            else:
-                # No tools configured — the exact method production AA agents use for their real
-                # decision call (data-gathering already done, LLM's only job is the JSON decision).
-                final_text, total_tokens, _executed = await asyncio.wait_for(
-                    agent._run_decision_only_cycle(user_message=user_message, trigger="workbench_simulation_step"),
-                    timeout=req.timeout,
-                )
-                # Populated by _run_decision_only_cycle's own invalid-JSON retry loop — the exact
-                # mechanism real production AA agents now use too, not a Workbench-only reimplementation.
-                decision_retries = agent._last_decision_json_retries
-                decision_discarded = agent._last_decision_json_discarded
+                }
+
+            # AA-under-test's tool access is whatever `allowed_tools` the caller configures — empty
+            # means no tools are offered at all (same ToolDispatcher fail-closed allow-list real
+            # agents use, see tools/dispatcher.py), the exact production behavior, not a special case.
+            aa_tool_context = ToolContext(
+                agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
+                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
+            )
+            agent._tool_dispatcher = ToolDispatcher(
+                DEFAULT_REGISTRY, aa_tool_context, {
+                    "allowed_tools": req.allowed_tools,
+                    "forced_arguments": forced_candle_arguments,
+                },
+            )
+            final_text, total_tokens, _executed = await asyncio.wait_for(
+                agent._run_with_tools(user_message=user_message, trigger="workbench_simulation_step", history=[]),
+                timeout=req.timeout,
+            )
 
             decision = Agent._parse_json_object(final_text)
 
@@ -3274,7 +3288,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             answer=final_text, total_tokens=total_tokens,
             tool_events=_collect_tool_events(),
             decision=decision, decision_valid=decision is not None,
-            decision_retries=decision_retries, decision_discarded=decision_discarded,
+            schema_enforced=agent._last_schema_enforced,
             script_input=script_input, script_result=script_result, script_error=script_error,
             ec_input=step1_input if req.step1_mode == "ec" else None,
             snapshot=snapshot,
@@ -4648,7 +4662,7 @@ async def get_system_config_raw() -> dict:
     if not cfg_path.exists():
         raise HTTPException(status_code=404, detail="system.json5 not found")
     try:
-        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(cfg_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
@@ -5212,7 +5226,7 @@ async def config_file(name: str) -> dict:
         )
 
     try:
-        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(cfg_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
@@ -5286,7 +5300,7 @@ async def get_event_schemas() -> dict:
     if not path.exists():
         return {}
     try:
-        return json5.loads(path.read_text(encoding="utf-8"))
+        return await _read_json5_file(path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read event_schemas.json5: {exc}")
 
@@ -5396,7 +5410,7 @@ async def get_prompt_library(scope: str) -> dict:
     if not lib_path.exists():
         return {"prompts": []}
     try:
-        return json5.loads(lib_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(lib_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
@@ -5435,7 +5449,7 @@ async def get_snippet_library(scope: str) -> dict:
     if not lib_path.exists():
         return {"snippets": []}
     try:
-        return json5.loads(lib_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(lib_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
@@ -5473,7 +5487,7 @@ async def get_prompt_workbench_configs() -> dict:
     if not cfg_path.exists():
         return {"configs": []}
     try:
-        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(cfg_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
@@ -5529,7 +5543,7 @@ async def get_module_config_raw(module_type: str, name: str) -> dict:
     """Return a raw single module config file for editing."""
     cfg_path = _resolve_module_config_path(module_type, name)
     try:
-        return json5.loads(cfg_path.read_text(encoding="utf-8"))
+        return await _read_json5_file(cfg_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=500,
