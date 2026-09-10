@@ -6,6 +6,16 @@
   * {
     box-sizing: border-box;
   }
+  html {
+    /* Shrinks every rem-based Tailwind size (fonts, padding, gaps, widths —
+       the vast majority of the UI) by 20%, matching the 80% browser zoom
+       you were using manually. Root font-size, not `zoom`: `zoom` also
+       scales 100vh/100vw layout boxes without changing what the viewport
+       units resolve to, leaving a blank gap where the box no longer reaches
+       the real (unzoomed) viewport edge. font-size doesn't touch vh/vw at
+       all, so full-height layouts stay correct. */
+    font-size: 80%;
+  }
   body {
     margin: 0;
     padding: 0;

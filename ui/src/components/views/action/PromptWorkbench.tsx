@@ -126,8 +126,7 @@ interface ChatMessage {
   // Simulation-step only (AA-decision + BA-script input/result), assistant messages only.
   decision?: Record<string, unknown> | null
   decisionValid?: boolean
-  decisionRetries?: number
-  decisionDiscarded?: string[]
+  schemaEnforced?: boolean
   scriptInput?: Record<string, unknown> | null
   scriptResult?: Record<string, unknown> | null
   scriptError?: string | null
@@ -509,12 +508,15 @@ export function PromptWorkbench() {
   // Off by default: a recorded trade leg mirrors a real broker fill, which can't be
   // un-sent — enforced server-side in trade_marker, not just a UI label.
   const [allowTradeDelete, setAllowTradeDelete] = useState(false)
-  // AA-under-test's tool access for Step/Run. Empty = decision-only via
-  // Agent._run_decision_only_cycle — the same method production AA agents use for
-  // their real decision call (data already gathered, LLM's only job is the JSON
-  // decision). Non-empty runs the normal tool loop instead, for testing an AA
-  // variant that fetches its own context.
+  // AA-under-test's tool access for Step/Run, via Agent._run_with_tools — the same method
+  // production AA agents use. Empty = no tools offered at all (same fail-closed allow-list
+  // real agents use); non-empty lets it fetch its own context instead of a pre-built snapshot.
   const [simulationAllowedTools, setSimulationAllowedTools] = useState<string[]>([])
+  // Optional JSON Schema forcing the AA-under-test's final answer via the real provider
+  // mechanism (Agent._response_schema) — same field an agent's tool_config.response_schema
+  // uses in production. Smoke-test a schema here before saving it into a live agent config.
+  const [responseSchemaText, setResponseSchemaText] = useState('')
+  const [responseSchemaName, setResponseSchemaName] = useState('agent_result')
   // BA-simulation: a deterministic script (not a second LLM call) that receives the
   // AA's decision and decides whether/how to act on it, drawing the outcome via
   // trade_marker — mirrors the real AA→BA split, with the BA played by user code
@@ -532,8 +534,7 @@ export function PromptWorkbench() {
   const [lastStepResult, setLastStepResult] = useState<{
     decision?: Record<string, unknown> | null
     decisionValid?: boolean
-    decisionRetries?: number
-    decisionDiscarded?: string[]
+    schemaEnforced?: boolean
     scriptInput?: Record<string, unknown> | null
     scriptResult?: Record<string, unknown> | null
     scriptError?: string | null
@@ -848,8 +849,7 @@ export function PromptWorkbench() {
       toolEvents?: PromptWorkbenchToolEvent[]
       decision?: Record<string, unknown> | null
       decisionValid?: boolean
-      decisionRetries?: number
-      decisionDiscarded?: string[]
+      schemaEnforced?: boolean
       scriptInput?: Record<string, unknown> | null
       scriptResult?: Record<string, unknown> | null
       scriptError?: string | null
@@ -1042,6 +1042,8 @@ ${transcript}`
         llm_name: llmName || undefined,
         reasoning_effort: reasoningEffort,
         allowed_tools: simulationAllowedTools,
+        response_schema: (() => { try { return responseSchemaText.trim() ? JSON.parse(responseSchemaText) : null } catch { return null } })(),
+        response_schema_name: responseSchemaName,
         // Read via ref, not the closed-over `annotations` state — see annotationsRef's comment:
         // Run calls this function in a loop using one stale closure, so the state value here
         // would otherwise never reflect trades opened/closed by earlier steps in the same Run.
@@ -1067,13 +1069,13 @@ ${transcript}`
       })
       pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(empty response)'), {
         toolEvents: resp.tool_events, decision: resp.decision,
-        decisionValid: resp.decision_valid, decisionRetries: resp.decision_retries,
-        decisionDiscarded: resp.decision_discarded, scriptInput: resp.script_input,
+        decisionValid: resp.decision_valid, schemaEnforced: resp.schema_enforced,
+        scriptInput: resp.script_input,
         scriptResult: resp.script_result, scriptError: resp.script_error,
       })
       setLastStepResult({
-        decision: resp.decision, decisionValid: resp.decision_valid, decisionRetries: resp.decision_retries,
-        decisionDiscarded: resp.decision_discarded, scriptInput: resp.script_input,
+        decision: resp.decision, decisionValid: resp.decision_valid, schemaEnforced: resp.schema_enforced,
+        scriptInput: resp.script_input,
         scriptResult: resp.script_result, scriptError: resp.script_error,
       })
       if (resp.ec_input) setLastEcInput(resp.ec_input)
@@ -1089,7 +1091,8 @@ ${transcript}`
     setPosition(newPosition)
     return newPosition > 0
   }, [
-    total, stepSize, fifoEnabled, allowTradeDelete, simulationAllowedTools, decisionScript, decisionScriptConfigText,
+    total, stepSize, fifoEnabled, allowTradeDelete, simulationAllowedTools, responseSchemaText, responseSchemaName,
+    decisionScript, decisionScriptConfigText,
     decisionScriptAllowedTools, memoryKey, promptText, pair, brokerName, timeframe, candleCount, llmName,
     reasoningEffort, applyAnnotationUpdates, annotationsRef, indicators, swingEnabled, swingLines, snapshotPipelineFields,
     step1Mode, ecScript, ecScriptConfigText, ecScriptAllowedTools,
@@ -1175,6 +1178,8 @@ ${transcript}`
     setFifoEnabled(found.fifo_enabled ?? false)
     setAllowTradeDelete(found.allow_trade_delete ?? false)
     setSimulationAllowedTools(found.simulation_allowed_tools ?? [])
+    setResponseSchemaText(found.response_schema ? JSON.stringify(found.response_schema, null, 2) : '')
+    setResponseSchemaName(found.response_schema_name ?? 'agent_result')
     setDecisionScript(found.decision_script ?? '')
     setDecisionScriptConfigText(JSON.stringify(found.decision_script_config ?? {}, null, 2))
     setDecisionScriptAllowedTools(found.decision_script_allowed_tools ?? ['assessment_memory', 'trade_marker'])
@@ -1226,6 +1231,8 @@ ${transcript}`
       calculation_blocks: calculationBlocksState.map(b => serializeCalculationBlock(b)),
       assembly_transform_script: assemblyScriptText,
       simulation_allowed_tools: simulationAllowedTools,
+      response_schema: (() => { try { return responseSchemaText.trim() ? JSON.parse(responseSchemaText) : null } catch { return null } })(),
+      response_schema_name: responseSchemaName,
       decision_script: decisionScript,
       decision_script_config: (() => { try { return JSON.parse(decisionScriptConfigText) } catch { return {} } })(),
       decision_script_allowed_tools: decisionScriptAllowedTools,
@@ -1281,6 +1288,8 @@ ${transcript}`
     setFifoEnabled(false)
     setAllowTradeDelete(false)
     setSimulationAllowedTools([])
+    setResponseSchemaText('')
+    setResponseSchemaName('agent_result')
     setDecisionScript('')
     setDecisionScriptConfigText('{}')
     setDecisionScriptAllowedTools(['assessment_memory', 'trade_marker'])
@@ -1625,25 +1634,15 @@ ${transcript}`
                         <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
                           <summary
                             className="cursor-pointer select-none text-gray-400 hover:text-white"
-                            title="Die geparste AA-Entscheidung dieses Schritts — inkl. Retry-Info, falls die Antwort erst nach Korrektur valides JSON war"
+                            title="Die geparste AA-Entscheidung dieses Schritts — 'Schema erzwungen' zeigt, ob response_schema aktiv war (native Provider-Garantie statt Prompt-Bitte)"
                           >
                             Decision
-                            {(msg.decisionRetries ?? 0) > 0 && ` — ${msg.decisionRetries}× retried`}
-                            {msg.decisionValid === false && ' — INVALID after all retries'}
+                            {msg.schemaEnforced && ' — Schema erzwungen'}
+                            {msg.decisionValid === false && ' — INVALID'}
                           </summary>
                           <pre className="mt-1 whitespace-pre-wrap break-all">
                             {msg.decision ? JSON.stringify(msg.decision, null, 2) : '(invalid — no JSON could be parsed)'}
                           </pre>
-                          {(msg.decisionDiscarded?.length ?? 0) > 0 && (
-                            <div className="mt-1.5 pt-1.5 border-t border-gray-800 space-y-1">
-                              <div className="text-gray-500">Discarded attempts:</div>
-                              {msg.decisionDiscarded!.map((text, i) => (
-                                <pre key={i} className="whitespace-pre-wrap break-all text-red-300/80 bg-gray-900/50 rounded px-1 py-0.5 mb-1">
-                                  {text}
-                                </pre>
-                              ))}
-                            </div>
-                          )}
                         </details>
                       )}
                       {msg.scriptInput && (
@@ -1962,9 +1961,9 @@ ${transcript}`
                 <details className="space-y-1">
                   <summary
                     className="text-white cursor-pointer select-none"
-                    title="Tool-Zugriff der AA-Agentin während Step/Run. Leer = reine Entscheidung ohne Tools (Agent._run_decision_only_cycle) — exakt der Aufruf, den echte AA-Agenten für ihre Entscheidung nutzen."
+                    title="Tool-Zugriff der AA-Agentin während Step/Run, über Agent._run_with_tools — den exakten Aufruf, den echte AA-Agenten nutzen. Leer = keine Tools angeboten."
                   >
-                    AA Tool Access (Step/Run) — leer = Decision-Only wie in Produktion
+                    AA Tool Access (Step/Run) — leer = keine Tools wie in Produktion
                     {simulationAllowedTools.length > 0 && ` (${simulationAllowedTools.length})`}
                   </summary>
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -1985,6 +1984,36 @@ ${transcript}`
                         {t.name}
                       </button>
                     ))}
+                  </div>
+                </details>
+
+                <details className="space-y-1">
+                  <summary
+                    className="text-white cursor-pointer select-none"
+                    title="Optionales JSON Schema (tool_config.response_schema), das die finale Antwort der AA-Agentin strukturell erzwingt — über den echten Provider-Mechanismus (OpenAI response_format strict / Anthropic forced tool_choice), nicht per Prompt-Bitte. Hier gegen den echten LLM-Endpoint testen, bevor es in eine Agent-Config übernommen wird."
+                  >
+                    Response Schema — optional, erzwingt die JSON-Struktur der Antwort
+                    {responseSchemaText.trim() && ' (aktiv)'}
+                  </summary>
+                  <div className="mt-1 space-y-1">
+                    <input
+                      type="text"
+                      value={responseSchemaName}
+                      onChange={e => setResponseSchemaName(e.target.value)}
+                      placeholder="schema_name (z.B. agent_result)"
+                      className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                    />
+                    <textarea
+                      value={responseSchemaText}
+                      onChange={e => setResponseSchemaText(e.target.value)}
+                      placeholder='{"type": "object", "properties": {...}}'
+                      rows={6}
+                      className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono"
+                    />
+                    {responseSchemaText.trim() && (() => {
+                      try { JSON.parse(responseSchemaText); return null }
+                      catch (err) { return <p className="text-red-400 text-xs">Ungültiges JSON: {String(err)}</p> }
+                    })()}
                   </div>
                 </details>
 
@@ -2112,26 +2141,16 @@ ${transcript}`
                     <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2" open>
                       <summary
                         className="cursor-pointer select-none text-gray-400 hover:text-white"
-                        title="Die geparste AA-Entscheidung des letzten Step/Run-Ticks — inkl. Retry-Info, falls die Antwort erst nach Korrektur valides JSON war"
+                        title="Die geparste AA-Entscheidung des letzten Step/Run-Ticks — 'Schema erzwungen' zeigt, ob response_schema aktiv war (native Provider-Garantie statt Prompt-Bitte)"
                       >
                         Decision
-                        {(lastStepResult.decisionRetries ?? 0) > 0 && ` — ${lastStepResult.decisionRetries}× retried`}
-                        {lastStepResult.decisionValid === false && ' — INVALID after all retries'}
+                        {lastStepResult.schemaEnforced && ' — Schema erzwungen'}
+                        {lastStepResult.decisionValid === false && ' — INVALID'}
                       </summary>
                       {lastStepResult.decision ? (
                         <JsonViewer data={lastStepResult.decision} defaultExpandLevel={2} className="mt-1" />
                       ) : (
                         <p className="mt-1 text-gray-500">(invalid — no JSON could be parsed)</p>
-                      )}
-                      {(lastStepResult.decisionDiscarded?.length ?? 0) > 0 && (
-                        <div className="mt-1.5 pt-1.5 border-t border-gray-800 space-y-1">
-                          <div className="text-gray-500">Discarded attempts:</div>
-                          {lastStepResult.decisionDiscarded!.map((text, i) => (
-                            <pre key={i} className="whitespace-pre-wrap break-all text-red-300/80 bg-gray-950/60 rounded px-1 py-0.5 mb-1">
-                              {text}
-                            </pre>
-                          ))}
-                        </div>
                       )}
                     </details>
                     {lastStepResult.scriptInput && (

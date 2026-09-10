@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import JSON5 from 'json5'
-import { Bot, BookOpen, Check, Clock, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
+import { Bot, BookOpen, Check, ChevronRight, Clock, Copy, Maximize2, MessageSquare, Play, RefreshCw, Save, Trash2, Plus, Minus } from 'lucide-react'
 import { api, type ToolInfo } from '@/api/client'
 import { EventTestModal } from '@/components/views/events/EventTestModal'
 import { PromptLibraryModal } from '@/components/common/PromptLibraryModal'
@@ -40,6 +40,21 @@ type SystemConfig = Record<string, unknown> & {
   decision_prompt_profiles?: Record<string, Record<string, unknown>>
 }
 
+// JSON Result Designer: a flat property list, with one level of object nesting — matches
+// every current agent's real output shape (see e.g. AA-PTJ's entry_decision/broker_instruction
+// nested objects). Serializes to/from tool_config.response_schema, a raw JSON Schema dict.
+type SchemaPropertyType = 'string' | 'number' | 'integer' | 'boolean' | 'array_string' | 'object'
+
+type SchemaPropertyForm = {
+  key: string
+  name: string
+  type: SchemaPropertyType
+  enumValues: string  // comma-separated, only used for type === 'string'
+  nullable: boolean
+  description: string
+  objectProperties: SchemaPropertyForm[]  // only used for type === 'object' — one level deep
+}
+
 type AgentForm = {
   agent_id: string
   comment: string
@@ -63,6 +78,85 @@ type AgentForm = {
   pass_trigger: boolean
   temperature: number | null
   reasoning_effort: string  // '' = use module default
+  response_schema_name: string
+  response_schema_properties: SchemaPropertyForm[]
+}
+
+let _schemaPropertyKeySeq = 0
+function newSchemaProperty(): SchemaPropertyForm {
+  return {
+    key: `sp-${++_schemaPropertyKeySeq}`,
+    name: '', type: 'string', enumValues: '', nullable: false, description: '', objectProperties: [],
+  }
+}
+
+function jsonSchemaPropertyToForm(name: string, spec: Record<string, unknown>): SchemaPropertyForm {
+  const rawType = spec.type
+  const typeList = Array.isArray(rawType) ? (rawType as unknown[]).map(String) : [String(rawType ?? 'string')]
+  const nullable = typeList.includes('null')
+  const baseType = typeList.find(t => t !== 'null') ?? 'string'
+
+  let type: SchemaPropertyType = 'string'
+  let objectProperties: SchemaPropertyForm[] = []
+  if (baseType === 'object' && spec.properties && typeof spec.properties === 'object') {
+    type = 'object'
+    objectProperties = Object.entries(spec.properties as Record<string, unknown>).map(
+      ([childName, childSpec]) => jsonSchemaPropertyToForm(childName, (childSpec ?? {}) as Record<string, unknown>),
+    )
+  } else if (baseType === 'array') {
+    type = 'array_string'
+  } else if (baseType === 'integer' || baseType === 'number' || baseType === 'boolean') {
+    type = baseType
+  }
+
+  return {
+    key: `sp-${++_schemaPropertyKeySeq}`,
+    name,
+    type,
+    enumValues: Array.isArray(spec.enum) ? (spec.enum as unknown[]).map(String).join(', ') : '',
+    nullable,
+    description: typeof spec.description === 'string' ? spec.description : '',
+    objectProperties,
+  }
+}
+
+function jsonSchemaToProperties(schema: unknown): SchemaPropertyForm[] {
+  if (!schema || typeof schema !== 'object') return []
+  const properties = (schema as Record<string, unknown>).properties
+  if (!properties || typeof properties !== 'object') return []
+  return Object.entries(properties as Record<string, unknown>).map(
+    ([name, spec]) => jsonSchemaPropertyToForm(name, (spec ?? {}) as Record<string, unknown>),
+  )
+}
+
+function schemaPropertyToJsonSchema(prop: SchemaPropertyForm): Record<string, unknown> {
+  let base: Record<string, unknown>
+  if (prop.type === 'object') {
+    base = {
+      type: 'object',
+      properties: Object.fromEntries(
+        prop.objectProperties.filter(p => p.name.trim()).map(p => [p.name.trim(), schemaPropertyToJsonSchema(p)]),
+      ),
+    }
+  } else if (prop.type === 'array_string') {
+    base = { type: 'array', items: { type: 'string' } }
+  } else {
+    base = { type: prop.type }
+    const enumList = prop.enumValues.split(',').map(s => s.trim()).filter(Boolean)
+    if (enumList.length > 0) base.enum = enumList
+  }
+  if (prop.nullable) base.type = [base.type as string, 'null']
+  if (prop.description.trim()) base.description = prop.description.trim()
+  return base
+}
+
+function schemaPropertiesToJsonSchema(properties: SchemaPropertyForm[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: Object.fromEntries(
+      properties.filter(p => p.name.trim()).map(p => [p.name.trim(), schemaPropertyToJsonSchema(p)]),
+    ),
+  }
 }
 
 type AgentRow = {
@@ -105,6 +199,8 @@ const EMPTY_FORM: AgentForm = {
   pass_trigger: false,
   temperature: null,
   reasoning_effort: '',
+  response_schema_name: 'agent_result',
+  response_schema_properties: [],
 }
 
 const AGENT_ID_RE = /^[A-Z0-9_]{5}-[A-Z0-9_]{6}-[A-Z]{2}-[A-Z0-9]{1,5}(?:-.+)?$/
@@ -130,6 +226,7 @@ const TIPS = {
   forced_arguments: 'Per-tool fixed arguments. These values are injected at runtime and override any value the LLM attempts to send. Placeholders like {llm}, {broker}, {pair}, {type}, {name}, {agent_id} are resolved from the current agent config.',
   max_tool_turns: 'Maximum tool-calling iterations per cycle. Prevents runaway tool loops.',
   max_tokens: 'Maximum token budget for this agent response/tool cycle.',
+  response_schema: 'Optional JSON Schema that structurally forces this agent\'s final answer via the real provider mechanism (OpenAI response_format strict mode / Anthropic forced tool_choice) — not a prompt request. Empty = no enforcement, agent behaves as before (free-form / best-effort JSON).',
 } as const
 
 function toText(v: unknown): string {
@@ -306,6 +403,8 @@ function normalizeAgent(raw: Record<string, unknown>, agentId: string): AgentFor
     reasoning_effort: typeof (raw.llm_config as Record<string, unknown> | undefined)?.reasoning_effort === 'string'
       ? (raw.llm_config as Record<string, unknown>).reasoning_effort as string
       : '',
+    response_schema_name: toText(toolCfg.response_schema_name) || 'agent_result',
+    response_schema_properties: jsonSchemaToProperties(toolCfg.response_schema),
   }
 }
 
@@ -365,6 +464,15 @@ function serializeAgent(
     forced_arguments: serializeForcedArguments(form.forced_arguments, toolsByName, form),
     max_tool_turns: form.max_tool_turns,
     max_tokens: form.max_tokens,
+  }
+  const schemaProperties = form.response_schema_properties.filter(p => p.name.trim())
+  const nextToolConfig = next.tool_config as Record<string, unknown>
+  if (schemaProperties.length > 0) {
+    nextToolConfig.response_schema = schemaPropertiesToJsonSchema(schemaProperties)
+    nextToolConfig.response_schema_name = form.response_schema_name.trim() || 'agent_result'
+  } else {
+    delete nextToolConfig.response_schema
+    delete nextToolConfig.response_schema_name
   }
 
   return next
@@ -806,6 +914,55 @@ export function AgentConfigWizard() {
     }))
   }
 
+  const addSchemaProperty = () => {
+    setForm(prev => ({ ...prev, response_schema_properties: [...prev.response_schema_properties, newSchemaProperty()] }))
+  }
+
+  const removeSchemaProperty = (key: string) => {
+    setForm(prev => ({
+      ...prev,
+      response_schema_properties: prev.response_schema_properties.filter(p => p.key !== key),
+    }))
+  }
+
+  const updateSchemaProperty = (key: string, patch: Partial<SchemaPropertyForm>) => {
+    setForm(prev => ({
+      ...prev,
+      response_schema_properties: prev.response_schema_properties.map(p =>
+        p.key === key ? { ...p, ...patch } : p,
+      ),
+    }))
+  }
+
+  const addNestedSchemaProperty = (parentKey: string) => {
+    setForm(prev => ({
+      ...prev,
+      response_schema_properties: prev.response_schema_properties.map(p =>
+        p.key === parentKey ? { ...p, objectProperties: [...p.objectProperties, newSchemaProperty()] } : p,
+      ),
+    }))
+  }
+
+  const removeNestedSchemaProperty = (parentKey: string, childKey: string) => {
+    setForm(prev => ({
+      ...prev,
+      response_schema_properties: prev.response_schema_properties.map(p =>
+        p.key === parentKey ? { ...p, objectProperties: p.objectProperties.filter(c => c.key !== childKey) } : p,
+      ),
+    }))
+  }
+
+  const updateNestedSchemaProperty = (parentKey: string, childKey: string, patch: Partial<SchemaPropertyForm>) => {
+    setForm(prev => ({
+      ...prev,
+      response_schema_properties: prev.response_schema_properties.map(p =>
+        p.key === parentKey
+          ? { ...p, objectProperties: p.objectProperties.map(c => c.key === childKey ? { ...c, ...patch } : c) }
+          : p,
+      ),
+    }))
+  }
+
   const summary = useMemo(() => {
     const triggers = kickoffTriggers(form)
     const lines: string[] = []
@@ -822,6 +979,8 @@ export function AgentConfigWizard() {
     lines.push(`Triggers: ${triggers.length}`)
     lines.push(`Allowed tools: ${form.allowed_tools.length}`)
     lines.push(`Forced tool args: ${Object.values(form.forced_arguments).reduce((sum, args) => sum + Object.values(args).filter(Boolean).length, 0)}`)
+    const schemaPropCount = form.response_schema_properties.filter(p => p.name.trim()).length
+    lines.push(`Response schema: ${schemaPropCount > 0 ? `${schemaPropCount} field(s) enforced` : 'none'}`)
     return lines.join('\n')
   }, [form])
 
@@ -1161,24 +1320,22 @@ export function AgentConfigWizard() {
                           const tool = toolsByName.get(toolName)
                           const props = Object.entries(tool?.input_schema.properties ?? {})
                           return (
-                            <div key={toolName} className="rounded border border-gray-700 bg-gray-950/50 p-3">
-                              <div className="mb-2 flex items-center justify-between gap-3">
-                                <div>
-                                  <div className="font-mono text-sm text-emerald-300">{toolName}</div>
-                                  <div className="text-[11px] text-white">
-                                    {tool?.description ?? 'Tool schema unavailable.'}
-                                  </div>
-                                  <div className="text-[11px] text-white">
-                                    Placeholders: {'{llm}'}, {'{broker}'}, {'{pair}'}, {'{type}'}, {'{name}'}, {'{agent_id}'}
-                                  </div>
-                                </div>
+                            <details key={toolName} className="rounded border border-gray-700 bg-gray-950/50 p-3">
+                              <summary className="flex items-center justify-between gap-3 cursor-pointer select-none">
+                                <span className="font-mono text-sm text-emerald-300">{toolName}</span>
                                 <button
                                   type="button"
-                                  onClick={() => clearForcedArgumentsForTool(toolName)}
+                                  onClick={e => { e.preventDefault(); e.stopPropagation(); clearForcedArgumentsForTool(toolName) }}
                                   className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
                                 >
                                   Clear
                                 </button>
+                              </summary>
+                              <div className="mt-2 text-[11px] text-white">
+                                {tool?.description ?? 'Tool schema unavailable.'}
+                              </div>
+                              <div className="mb-2 text-[11px] text-white">
+                                Placeholders: {'{llm}'}, {'{broker}'}, {'{pair}'}, {'{type}'}, {'{name}'}, {'{agent_id}'}
                               </div>
                               {props.length === 0 ? (
                                 <div className="text-[11px] text-white">This tool has no configurable arguments.</div>
@@ -1231,12 +1388,171 @@ export function AgentConfigWizard() {
                                   })}
                                 </div>
                               )}
-                            </div>
+                            </details>
                           )
                         })
                       )}
                     </div>
                   </div>
+
+                  <details title={TIPS.response_schema} className="group col-span-full text-xs text-gray-300 rounded border border-gray-700 bg-gray-950/50">
+                    <summary className="cursor-pointer select-none flex items-center justify-between gap-2 px-3 py-2 rounded hover:bg-gray-800/60 [&::-webkit-details-marker]:hidden">
+                      <span className="flex items-center gap-1.5">
+                        <ChevronRight className="w-3.5 h-3.5 text-gray-500 shrink-0 transition-transform duration-150 group-open:rotate-90" />
+                        JSON Result Designer — tool_config.response_schema
+                        {form.response_schema_properties.filter(p => p.name.trim()).length > 0 &&
+                          ` (${form.response_schema_properties.filter(p => p.name.trim()).length})`}
+                      </span>
+                      <input
+                        type="text" value={form.response_schema_name} placeholder="schema name"
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => setField('response_schema_name', e.target.value)}
+                        className="w-40 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-[11px] text-gray-200"
+                      />
+                    </summary>
+
+                    <div className="mt-1 px-3 pb-3">
+                      {form.response_schema_properties.length === 0 ? (
+                        <div className="rounded border border-dashed border-gray-700 px-2 py-1 text-gray-500">
+                          No fields — not schema-enforced.
+                        </div>
+                      ) : (
+                        <table className="w-full border-collapse text-[11px]">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="text-left font-normal py-0.5">Name</th>
+                              <th className="text-left font-normal py-0.5 w-28">Type</th>
+                              <th className="text-left font-normal py-0.5">Enum (string) / Description</th>
+                              <th className="text-center font-normal py-0.5 w-6" title="Nullable">∅</th>
+                              <th className="w-12" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {form.response_schema_properties.flatMap(prop => [
+                              <tr key={prop.key} className="border-t border-gray-800">
+                                <td className="py-0.5 pr-1">
+                                  <input
+                                    type="text" placeholder="field name" value={prop.name}
+                                    onChange={e => updateSchemaProperty(prop.key, { name: e.target.value })}
+                                    className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 font-mono text-gray-200"
+                                  />
+                                </td>
+                                <td className="py-0.5 pr-1">
+                                  <select
+                                    value={prop.type}
+                                    onChange={e => updateSchemaProperty(prop.key, { type: e.target.value as SchemaPropertyType })}
+                                    className="w-full bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200"
+                                  >
+                                    <option value="string">string</option>
+                                    <option value="number">number</option>
+                                    <option value="integer">integer</option>
+                                    <option value="boolean">boolean</option>
+                                    <option value="array_string">array[string]</option>
+                                    <option value="object">object</option>
+                                  </select>
+                                </td>
+                                <td className="py-0.5 pr-1">
+                                  {prop.type === 'object' ? (
+                                    <span className="text-gray-600">— nested below —</span>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      placeholder={prop.type === 'string' ? 'A, B, C' : 'description'}
+                                      value={prop.type === 'string' ? prop.enumValues : prop.description}
+                                      onChange={e => updateSchemaProperty(
+                                        prop.key,
+                                        prop.type === 'string' ? { enumValues: e.target.value } : { description: e.target.value },
+                                      )}
+                                      className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-gray-200"
+                                    />
+                                  )}
+                                </td>
+                                <td className="py-0.5 text-center">
+                                  <input
+                                    type="checkbox" checked={prop.nullable}
+                                    onChange={e => updateSchemaProperty(prop.key, { nullable: e.target.checked })}
+                                  />
+                                </td>
+                                <td className="py-0.5 text-right whitespace-nowrap">
+                                  {prop.type === 'object' && (
+                                    <button
+                                      type="button" title="Add nested field" onClick={() => addNestedSchemaProperty(prop.key)}
+                                      className="text-gray-400 hover:text-white mr-1"
+                                    >
+                                      <Plus className="w-3 h-3 inline" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button" title="Remove field" onClick={() => removeSchemaProperty(prop.key)}
+                                    className="text-red-300 hover:text-red-200"
+                                  >
+                                    <Minus className="w-3 h-3 inline" />
+                                  </button>
+                                </td>
+                              </tr>,
+                              ...prop.objectProperties.map(child => (
+                                <tr key={child.key} className="border-t border-gray-800/60 bg-gray-950/40">
+                                  <td className="py-0.5 pr-1 pl-3 text-gray-500">
+                                    <span className="mr-1">↳</span>
+                                    <input
+                                      type="text" placeholder="field name" value={child.name}
+                                      onChange={e => updateNestedSchemaProperty(prop.key, child.key, { name: e.target.value })}
+                                      className="w-[calc(100%-1rem)] bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 font-mono text-gray-200"
+                                    />
+                                  </td>
+                                  <td className="py-0.5 pr-1">
+                                    <select
+                                      value={child.type}
+                                      onChange={e => updateNestedSchemaProperty(prop.key, child.key, { type: e.target.value as SchemaPropertyType })}
+                                      className="w-full bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200"
+                                    >
+                                      <option value="string">string</option>
+                                      <option value="number">number</option>
+                                      <option value="integer">integer</option>
+                                      <option value="boolean">boolean</option>
+                                      <option value="array_string">array[string]</option>
+                                    </select>
+                                  </td>
+                                  <td className="py-0.5 pr-1">
+                                    <input
+                                      type="text"
+                                      placeholder={child.type === 'string' ? 'A, B, C' : 'description'}
+                                      value={child.type === 'string' ? child.enumValues : child.description}
+                                      onChange={e => updateNestedSchemaProperty(
+                                        prop.key, child.key,
+                                        child.type === 'string' ? { enumValues: e.target.value } : { description: e.target.value },
+                                      )}
+                                      className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-gray-200"
+                                    />
+                                  </td>
+                                  <td className="py-0.5 text-center">
+                                    <input
+                                      type="checkbox" checked={child.nullable}
+                                      onChange={e => updateNestedSchemaProperty(prop.key, child.key, { nullable: e.target.checked })}
+                                    />
+                                  </td>
+                                  <td className="py-0.5 text-right">
+                                    <button
+                                      type="button" title="Remove field" onClick={() => removeNestedSchemaProperty(prop.key, child.key)}
+                                      className="text-red-300 hover:text-red-200"
+                                    >
+                                      <Minus className="w-3 h-3 inline" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              )),
+                            ])}
+                          </tbody>
+                        </table>
+                      )}
+                      <button
+                        type="button" onClick={addSchemaProperty}
+                        className="mt-1 text-[11px] px-2 py-0.5 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+                      >
+                        + Field
+                      </button>
+                    </div>
+                  </details>
 
                   <label title={TIPS.max_tool_turns} className="text-xs text-gray-300 col-span-2">max_tool_turns<input title={TIPS.max_tool_turns} type="number" value={form.max_tool_turns} onChange={e => setField('max_tool_turns', Number(e.target.value))} className="mt-1 w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" /></label>
                   <div className="col-span-2" />

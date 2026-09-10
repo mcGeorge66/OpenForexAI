@@ -812,6 +812,12 @@ export interface PromptWorkbenchChatRequest {
   llm_name?: string | null
   reasoning_effort?: string | null
   allowed_tools?: string[]
+  // Same shape as an agent's tool_config.response_schema (a raw JSON Schema). When set, the
+  // AA-under-test's final answer is structurally forced to conform via the real provider
+  // mechanism — the exact production path, so a new schema should be smoke-tested here before
+  // being saved into an agent's live config.
+  response_schema?: Record<string, unknown> | null
+  response_schema_name?: string
   existing_annotations?: unknown[]
   tool_blocks?: Record<string, unknown>[]
   calculation_blocks?: Record<string, unknown>[]
@@ -933,13 +939,11 @@ export interface PromptWorkbenchChatResponse {
   snapshot_errors?: string[]
   // /prompt-workbench/simulate-step only — undefined when returned by /prompt-workbench/chat.
   decision?: Record<string, unknown> | null
-  // True if `decision` parsed successfully — false means all retries (see decision_retries)
-  // were exhausted without the AA producing valid JSON.
+  // True if `decision` parsed successfully as JSON.
   decision_valid?: boolean
-  // How many times the AA had to be re-prompted after an invalid-JSON answer (0 = first try).
-  decision_retries?: number
-  // Raw text of each rejected invalid-JSON attempt, oldest first.
-  decision_discarded?: string[]
+  // Whether this step's answer was structurally forced via a configured response_schema
+  // (native provider-level enforcement) rather than left to the model's own prompt-following.
+  schema_enforced?: boolean
   script_input?: Record<string, unknown> | null
   script_result?: Record<string, unknown> | null
   script_error?: string | null
@@ -984,9 +988,13 @@ export interface PromptWorkbenchSavedConfig {
   tool_blocks: Record<string, unknown>[]
   calculation_blocks: Record<string, unknown>[]
   assembly_transform_script: string
-  // AA-under-test's tool access during Step/Run — empty means decision-only
-  // (Agent._run_decision_only_cycle), matching a production AA's real decision call.
+  // AA-under-test's tool access during Step/Run — empty means no tools are offered at all,
+  // matching a production AA's real cycle (Agent._run_with_tools with an empty allow-list).
   simulation_allowed_tools: string[]
+  // Optional JSON Schema forcing the AA-under-test's final answer (Agent._response_schema) —
+  // same field an agent's tool_config.response_schema uses in production.
+  response_schema?: Record<string, unknown> | null
+  response_schema_name?: string
   // BA-simulation: deterministic script (async def main(input, config, tools)) that
   // decides whether/how to act on the AA's decision and draws it via trade_marker.
   decision_script: string
