@@ -220,33 +220,67 @@ class SemanticMemoryService:
         return lancedb.connect(str(self._lancedb_path))
 
     def _ensure_bge_m3_ready(self) -> None:
-        """Blocking: runs in a worker thread via asyncio.to_thread. Downloads the
-        model from HuggingFace Hub if not already cached, then loads it once into
-        memory. The download step still contacts HuggingFace to verify the local
-        cache is current even when nothing needs downloading, which is not fast if
-        network access is slow or restricted — every full bootstrap pays that cost.
+        """Blocking: runs in a worker thread via asyncio.to_thread. Loads the
+        already-downloaded BGE-M3 model from the local cache, fully offline.
 
-        Skipped entirely (straight to loading from local cache, fully offline) when
-        OPENFOREXAI_SKIP_MODEL_CHECK is set. tools/openforexai-wrapper.py sets this
-        only on a browser-triggered restart (/system/restart-now), never on a fresh
-        manual launch — so a manual restart still re-verifies against HuggingFace,
-        but clicking restart in the UI comes back up immediately from cache."""
-        skip_check = os.environ.get("OPENFOREXAI_SKIP_MODEL_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+        Previously this contacted HuggingFace on every restart that didn't set
+        OPENFOREXAI_SKIP_MODEL_CHECK (i.e. every manual restart) "to verify the
+        cache is current", and — worse — relied on setting HF_HUB_OFFLINE /
+        TRANSFORMERS_OFFLINE *after* that check to force offline mode for the
+        rest of the process. Both parts were broken in production:
 
-        if skip_check:
+        1. huggingface_hub/transformers read these env vars once, at their own
+           first import, and cache the result internally. By the time this
+           method set them, `from huggingface_hub import snapshot_download`
+           (a few lines below, in the old code) had already imported and
+           cached "online" — setting the env var afterward changed nothing.
+        2. Even setting them *before* any import, the "verify freshness"
+           network call itself was the actual problem: on this deployment's
+           network, HF Hub requests aren't actively refused, they're silently
+           dropped — so every restart paid a multi-minute hang (repeatedly
+           measured: 2-8 minutes) before falling through to the local files
+           anyway, since they were already present and current. A real
+           encode() call measured in isolation with offline mode forced from
+           the very start took 0.43s — the model, the data, the CPU were
+           never the problem.
+
+        So: no network call here at all, ever, by default. HF_HUB_OFFLINE and
+        TRANSFORMERS_OFFLINE are set FIRST, before any huggingface_hub/
+        transformers/FlagEmbedding import — including the one below — so
+        every library that reads them at its own import time sees "1". If the
+        local cache is genuinely missing/incomplete, loading fails fast with a
+        clear error instead of hanging; that's the correct failure mode, not
+        a silent multi-minute stall on a background freshness check nobody
+        asked for on every single restart.
+
+        Set OPENFOREXAI_FORCE_MODEL_CHECK to explicitly opt into the old
+        behavior (e.g. once, deliberately, after bumping the model version) —
+        never automatically, and never as a restart default again.
+        """
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+        force_check = os.environ.get("OPENFOREXAI_FORCE_MODEL_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+        if force_check:
             _log.info(
-                "OPENFOREXAI_SKIP_MODEL_CHECK set — loading BGE-M3 from local cache "
-                "without contacting HuggingFace.",
+                "OPENFOREXAI_FORCE_MODEL_CHECK set — contacting HuggingFace to verify "
+                "the local BGE-M3 cache is current (this can take minutes).",
                 model=_EMBEDDING_MODEL,
             )
+            os.environ["HF_HUB_OFFLINE"] = "0"
+            os.environ["TRANSFORMERS_OFFLINE"] = "0"
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(repo_id=_EMBEDDING_MODEL)
+            _log.info("BGE-M3 model weights verified against HuggingFace.")
             os.environ["HF_HUB_OFFLINE"] = "1"
             os.environ["TRANSFORMERS_OFFLINE"] = "1"
         else:
-            from huggingface_hub import snapshot_download
-
-            _log.info("Checking for local BGE-M3 model weights...", model=_EMBEDDING_MODEL)
-            snapshot_download(repo_id=_EMBEDDING_MODEL)
-            _log.info("BGE-M3 model weights ready locally.")
+            _log.info(
+                "Loading BGE-M3 from local cache, fully offline (default — set "
+                "OPENFOREXAI_FORCE_MODEL_CHECK=1 to verify against HuggingFace instead).",
+                model=_EMBEDDING_MODEL,
+            )
 
         from FlagEmbedding import BGEM3FlagModel
 
