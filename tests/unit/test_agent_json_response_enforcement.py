@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -8,8 +9,13 @@ import openforexai.agents.agent as agent_module
 from openforexai.agents.agent import Agent
 from openforexai.messaging.bus import EventBus
 from openforexai.monitoring.bus import MonitoringBus
-from openforexai.ports.llm import LLMResponseWithTools
+from openforexai.ports.llm import LLMResponseWithTools, LLMStructuredResponse
 from tests.conftest import MockRepository
+
+_SCHEMA = {
+    "type": "object",
+    "properties": {"decision": {"type": "string"}},
+}
 
 
 def _make_agent(tool_config: dict[str, Any]) -> tuple[Agent, MonitoringBus]:
@@ -40,90 +46,61 @@ def _patch_llm_responses(monkeypatch: pytest.MonkeyPatch, responses: list[LLMRes
 
 
 @pytest.mark.asyncio
-async def test_json_not_required_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_no_schema_configured_returns_raw_content_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agents without response_schema (chat assistants, EA reports, ...) are byte-for-byte
+    unaffected — this is the regression guard for every agent that isn't opting in."""
     agent, monitoring_bus = _make_agent({})
     _patch_llm_responses(monkeypatch, [_text_response("just some prose, not json")])
 
     final_text, _tokens, _executed = await agent._run_with_tools("hi", trigger="test")
 
     assert final_text == "just some prose, not json"
+    assert agent._last_schema_enforced is False
     assert monitoring_bus.pinned_events() == []
 
 
 @pytest.mark.asyncio
-async def test_valid_json_on_first_try_needs_no_nudge(monkeypatch: pytest.MonkeyPatch) -> None:
-    agent, monitoring_bus = _make_agent({"require_json_response": True})
-    _patch_llm_responses(monkeypatch, [_text_response('{"decision": "WAIT"}')])
-
-    final_text, _tokens, _executed = await agent._run_with_tools("hi", trigger="test")
-
-    assert final_text == '{"decision": "WAIT"}'
-    assert monitoring_bus.pinned_events() == []
-
-
-@pytest.mark.asyncio
-async def test_invalid_json_triggers_nudge_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    agent, monitoring_bus = _make_agent({"require_json_response": True})
-    _patch_llm_responses(
-        monkeypatch,
-        [
-            _text_response("Sure, here is my analysis: looks bullish."),  # turn 0: not JSON
-            _text_response('{"decision": "BIAS_LONG"}'),  # turn 1: corrected after nudge
-        ],
-    )
-
-    final_text, _tokens, _executed = await agent._run_with_tools("hi", trigger="test")
-
-    assert final_text == '{"decision": "BIAS_LONG"}'
-    assert monitoring_bus.pinned_events() == []
-
-
-@pytest.mark.asyncio
-async def test_invalid_json_exhausts_reminders_then_pinned_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    agent, monitoring_bus = _make_agent({"require_json_response": True})
-    _patch_llm_responses(
-        monkeypatch,
-        [
-            _text_response("prose 1"),
-            _text_response("prose 2"),
-            _text_response("prose 3"),
-            _text_response("prose 4"),
-        ],
-    )
-
-    final_text, _tokens, _executed = await agent._run_with_tools("hi", trigger="test")
-
-    assert final_text == "prose 3"  # 1 initial attempt + 2 reminders
-
-    pinned = monitoring_bus.pinned_events()
-    assert len(pinned) == 1
-    assert "kein gültiges JSON" in pinned[0]["payload"]["message"]
-    assert "2 Erinnerung" in pinned[0]["payload"]["message"]
-
-
-@pytest.mark.asyncio
-async def test_configured_json_response_format_is_injected_and_reused_in_nudge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    configured_format = '{"decision": "BIAS_LONG | BIAS_SHORT"}'
+async def test_response_schema_forces_structured_finalize_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With response_schema configured, the free-form turn's content is discarded and the
+    real final answer comes from the schema-enforced complete_structured call instead."""
     agent, monitoring_bus = _make_agent(
-        {"require_json_response": True, "json_response_format": configured_format}
+        {"response_schema": _SCHEMA, "response_schema_name": "agent_result"}
     )
+    _patch_llm_responses(monkeypatch, [_text_response("some free-form prose the model wrote")])
 
-    captured_system_prompts: list[str] = []
+    captured_kwargs: dict[str, Any] = {}
 
-    async def _fake_llm_complete_with_tools(**kwargs: Any) -> LLMResponseWithTools:
-        captured_system_prompts.append(kwargs["system_prompt"])
-        if len(captured_system_prompts) == 1:
-            return _text_response("not json yet")
-        return _text_response('{"decision": "BIAS_LONG"}')
+    async def _fake_llm_complete_structured(**kwargs: Any) -> LLMStructuredResponse:
+        captured_kwargs.update(kwargs)
+        return LLMStructuredResponse(
+            parsed={"decision": "WAIT"}, model="mock", input_tokens=10, output_tokens=5, raw={},
+        )
 
-    monkeypatch.setattr(agent_module, "llm_complete_with_tools", _fake_llm_complete_with_tools)
+    monkeypatch.setattr(agent_module, "llm_complete_structured", _fake_llm_complete_structured)
 
-    final_text, _tokens, _executed = await agent._run_with_tools("hi", trigger="test")
+    final_text, total_tokens, _executed = await agent._run_with_tools("hi", trigger="test")
 
-    assert final_text == '{"decision": "BIAS_LONG"}'
-    # The configured format must be injected into the system prompt on every turn,
-    # not just hoped-for from hand-written prompt text.
-    assert all(configured_format in p for p in captured_system_prompts)
+    assert final_text == json.dumps({"decision": "WAIT"})
+    assert agent._last_schema_enforced is True
+    assert total_tokens == 15
+    assert captured_kwargs["response_schema"] == _SCHEMA
+    assert captured_kwargs["schema_name"] == "agent_result"
     assert monitoring_bus.pinned_events() == []
+
+
+@pytest.mark.asyncio
+async def test_response_schema_name_defaults_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent, _monitoring_bus = _make_agent({"response_schema": _SCHEMA})
+    _patch_llm_responses(monkeypatch, [_text_response("prose")])
+
+    captured_kwargs: dict[str, Any] = {}
+
+    async def _fake_llm_complete_structured(**kwargs: Any) -> LLMStructuredResponse:
+        captured_kwargs.update(kwargs)
+        return LLMStructuredResponse(parsed={}, model="mock", input_tokens=0, output_tokens=0, raw={})
+
+    monkeypatch.setattr(agent_module, "llm_complete_structured", _fake_llm_complete_structured)
+
+    await agent._run_with_tools("hi", trigger="test")
+
+    assert captured_kwargs["schema_name"] == "agent_result"

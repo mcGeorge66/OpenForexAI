@@ -31,11 +31,12 @@ import uuid
 from typing import Any
 
 from openforexai.models.messaging import AgentMessage, EventType
-from openforexai.ports.llm import LLMResponse, LLMResponseWithTools, ToolCall
+from openforexai.ports.llm import LLMResponse, LLMResponseWithTools, LLMStructuredResponse, ToolCall
 from openforexai.services.llm_service import llm_service_id
 
-_DEFAULT_TOOL_TIMEOUT   = 180.0
-_DEFAULT_SIMPLE_TIMEOUT = 180.0
+_DEFAULT_TOOL_TIMEOUT      = 180.0
+_DEFAULT_SIMPLE_TIMEOUT    = 180.0
+_DEFAULT_STRUCTURED_TIMEOUT = 180.0
 
 
 # ── Core helpers ──────────────────────────────────────────────────────────────
@@ -153,6 +154,72 @@ async def llm_complete(
         input_tokens = resp_payload.get("input_tokens", 0),
         output_tokens= resp_payload.get("output_tokens", 0),
         raw          = resp_payload,
+    )
+
+
+async def llm_complete_structured(
+    event_bus:         Any,
+    llm_name:          str,
+    source_id:         str,
+    system_prompt:     str,
+    messages:          list[dict[str, Any]],
+    response_schema:   dict[str, Any],
+    schema_name:       str,
+    tools:             list[dict[str, Any]] | None = None,
+    images:            list[str] | None = None,
+    temperature:       float | None = None,
+    max_tokens:        int   | None = None,
+    reasoning_effort:  str   | None = None,
+    timeout:           float        = _DEFAULT_STRUCTURED_TIMEOUT,
+) -> LLMStructuredResponse:
+    """Send a *complete_structured* request to ``llm:{llm_name}`` on the bus.
+
+    The answer is structurally forced to conform to *response_schema* (a raw
+    JSON Schema dict) by the provider itself — see ``AbstractLLMProvider.
+    complete_structured`` and the adapters for how each provider enforces this.
+    """
+    target = llm_service_id(llm_name)
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    msg = AgentMessage(
+        event_type      = EventType.LLM_REQUEST,
+        source_agent_id = source_id,
+        target_agent_id = target,
+        payload         = {
+            "method":           "complete_structured",
+            "system_prompt":    system_prompt,
+            "messages":         messages,
+            "response_schema":  response_schema,
+            "schema_name":      schema_name,
+            "tools":            tools,
+            "images":           images,
+            "temperature":      temperature,
+            "max_tokens":       max_tokens,
+            "reasoning_effort": reasoning_effort,
+        },
+    )
+    future_key = str(msg.id)
+    event_bus.register_response_future(future_key, future)
+    try:
+        await event_bus.publish(msg)
+        resp_payload: dict[str, Any] = await asyncio.wait_for(
+            asyncio.shield(future), timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        event_bus.cancel_response_future(future_key)
+        raise
+
+    if resp_payload.get("error"):
+        raise RuntimeError(
+            f"LLM '{llm_name}' returned error: {resp_payload['error']}"
+        )
+
+    return LLMStructuredResponse(
+        parsed        = resp_payload.get("parsed") or {},
+        model         = resp_payload.get("model", ""),
+        input_tokens  = resp_payload.get("input_tokens", 0),
+        output_tokens = resp_payload.get("output_tokens", 0),
+        raw           = resp_payload,
     )
 
 

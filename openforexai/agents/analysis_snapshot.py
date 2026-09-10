@@ -1112,15 +1112,6 @@ def build_snapshot_system_prompt(
     return f"{effective_prompt}\n\n" + "\n".join(override_lines) + "\n"
 
 
-def build_decision_only_system_prompt(
-    base_system_prompt: str,
-    profile: dict[str, Any] | None = None,
-    *,
-    snapshot: dict[str, Any] | None = None,
-) -> str:
-    return build_snapshot_system_prompt(base_system_prompt, profile, allow_tools=False, snapshot=snapshot)
-
-
 def build_snapshot_user_message(
     snapshot: dict[str, Any],
     profile: dict[str, Any] | None = None,
@@ -1129,7 +1120,3 @@ def build_snapshot_user_message(
     prefix = str(profile.get("decision_input_prefix", "")).strip() or DEFAULT_DECISION_INPUT_PREFIX
     payload = _build_decision_payload(snapshot, profile)
     return f"{prefix}\n\n{_json_snapshot(payload)}"
-
-
-def build_decision_only_user_message(snapshot: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
-    return build_snapshot_user_message(snapshot, profile)

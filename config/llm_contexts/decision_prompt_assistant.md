@@ -6,8 +6,8 @@ The user will share their current decision prompt profile configuration (JSON) w
 ## What is a Decision Prompt Profile?
 
 A Decision Prompt profile selects and fills in the system-prompt override an AA (or any
-agent making a decision-only call, e.g. via `Agent._run_decision_only_cycle`) uses instead
-of its own base `system_prompt`. It does **not** contain a single flat prompt string — it
+agent, via `Agent._run_with_tools`) uses instead of its own base `system_prompt`. It does
+**not** contain a single flat prompt string — it
 holds a **selector script** plus a **list of candidate prompt entries**, and the script
 picks which entry applies for this particular snapshot.
 

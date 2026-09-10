@@ -74,6 +74,16 @@ class LLMResponse:
 
 
 @dataclass
+class LLMStructuredResponse:
+    """Response from a schema-enforced completion (see ``complete_structured``)."""
+    parsed: dict[str, Any]
+    model: str
+    input_tokens: int
+    output_tokens: int
+    raw: dict[str, Any]
+
+
+@dataclass
 class ToolCall:
     """A single tool invocation requested by the LLM."""
     id: str                      # provider-assigned unique call ID
@@ -121,7 +131,9 @@ class AbstractLLMProvider(ABC):
         for _method in ('complete', 'complete_structured', 'complete_with_tools'):
             if _method in cls.__dict__:
                 _original = cls.__dict__[_method]
-                _is_tool_method = _method == 'complete_with_tools'
+                # complete_structured takes `messages` (a list), same shape as
+                # complete_with_tools — only plain complete() takes a bare `user_message`.
+                _is_tool_method = _method in ('complete_with_tools', 'complete_structured')
 
                 @functools.wraps(_original)
                 async def _wrapper(
@@ -174,9 +186,24 @@ class AbstractLLMProvider(ABC):
     async def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
-        response_schema: type,  # Pydantic model class
-    ) -> dict[str, Any]: ...
+        messages: list[dict[str, Any]],
+        response_schema: dict[str, Any],
+        schema_name: str,
+        tools: list[ToolSpec] | None = None,
+        images: list[str] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMStructuredResponse:
+        """Closing turn of a conversation, with the answer structurally forced to
+        conform to *response_schema* (a raw JSON Schema dict) — a real, provider-
+        enforced guarantee, not a prompt request. *messages* is the conversation so
+        far (may include prior tool_use/tool_result turns). *tools* lets real tools
+        remain visible on this same turn if the caller wants that (OpenAI supports
+        this natively; the Anthropic adapter must still force the schema — see its
+        docstring for how it reconciles the two).
+        """
+        ...
 
     # ── Tool-use completions ──────────────────────────────────────────────────
 

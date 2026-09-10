@@ -18,6 +18,7 @@ from openforexai.ports.llm import (
     AbstractLLMProvider,
     LLMResponse,
     LLMResponseWithTools,
+    LLMStructuredResponse,
     ToolCall,
     ToolSpec,
 )
@@ -40,6 +41,25 @@ def _inject_images_openai(
             augmented[i] = {**augmented[i], "content": content}
             break
     return augmented
+
+
+def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Recursively add the two constraints OpenAI's Structured Outputs strict mode
+    requires — every property listed in `required`, `additionalProperties: false`
+    on every object — so schema authors only describe properties/types and never
+    hand-maintain these (a forgotten `additionalProperties: false` on a nested
+    object silently disables strict validation for that branch)."""
+    if not isinstance(schema, dict):
+        return schema
+    result = dict(schema)
+    if result.get("type") == "object" and isinstance(result.get("properties"), dict):
+        properties = {key: _openai_strict_schema(value) for key, value in result["properties"].items()}
+        result["properties"] = properties
+        result["required"] = list(properties.keys())
+        result["additionalProperties"] = False
+    elif result.get("type") == "array" and isinstance(result.get("items"), dict):
+        result["items"] = _openai_strict_schema(result["items"])
+    return result
 
 
 def _to_openai_tool(spec: ToolSpec) -> dict:
@@ -349,23 +369,101 @@ class OpenAILLMProvider(AbstractLLMProvider):
     async def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
-        response_schema: type,
-    ) -> dict[str, Any]:
-        schema = response_schema.model_json_schema()
-        augmented_prompt = (
-            f"{system_prompt}\n\nRespond ONLY with valid JSON matching this schema:\n"
-            f"{json.dumps(schema, indent=2)}"
+        messages: list[dict[str, Any]],
+        response_schema: dict[str, Any],
+        schema_name: str,
+        tools: list[ToolSpec] | None = None,
+        images: list[str] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMStructuredResponse:
+        """Force schema-conforming JSON via OpenAI's native Structured Outputs
+        (`response_format` json_schema, strict mode) — a real API-level guarantee,
+        not a prompt request. Compatible with `tools` in the same call per OpenAI's
+        documented contract, but callers that want the answer *forced* right now
+        should not pass tools (the model may call one instead of answering)."""
+        clean_system, clean_messages, _, regular_paths, tmp_paths = scan_prompts_for_images(
+            system_prompt=system_prompt,
+            messages=messages,
         )
-        response = await self.complete(
-            system_prompt=augmented_prompt,
-            user_message=user_message,
-            temperature=0.0,
+        openai_tools = [_to_openai_tool(t) for t in (tools or [])]
+        effective_messages = _inject_images_openai(
+            clean_messages, resolve_images(regular_paths + tmp_paths + list(images or []))
         )
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1].lstrip("json").strip()
-        return json.loads(raw)
+        full_messages = [{"role": "system", "content": clean_system}] + \
+            self._sanitize_messages(effective_messages)
+
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
+        resolved_reasoning = self._reasoning_effort if reasoning_effort is None else reasoning_effort
+
+        async def _call() -> LLMStructuredResponse:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": full_messages,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "schema": _openai_strict_schema(response_schema),
+                        "strict": True,
+                    },
+                },
+            }
+            if openai_tools:
+                kwargs["tools"] = openai_tools
+                kwargs["tool_choice"] = "auto"
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            if resolved_max_tokens is not None:
+                kwargs["max_completion_tokens"] = resolved_max_tokens
+            # Same documented Azure AI Foundry / GPT-5 quirk as complete_with_tools:
+            # tools + reasoning_effort together are rejected on /chat/completions.
+            if resolved_reasoning is not None and not openai_tools:
+                kwargs["reasoning_effort"] = resolved_reasoning
+            if self._verbosity is not None:
+                kwargs["verbosity"] = self._verbosity
+            await self._write_transcript_record(direction="request", operation="complete_structured", payload=kwargs)
+            resp = await self._client.chat.completions.create(**kwargs)
+            await self._write_transcript_record(
+                direction="response", operation="complete_structured", payload=resp.model_dump(),
+            )
+            choice = resp.choices[0]
+            content = choice.message.content
+            if not content:
+                raise RuntimeError(
+                    f"complete_structured: model returned no content for schema {schema_name!r} "
+                    f"(finish_reason={choice.finish_reason!r}) — it may have called a tool instead "
+                    "of answering; do not pass `tools` to complete_structured if the answer must "
+                    "be forced immediately."
+                )
+            return LLMStructuredResponse(
+                parsed=json.loads(content),
+                model=resp.model,
+                input_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+                output_tokens=resp.usage.completion_tokens if resp.usage else 0,
+                raw=resp.model_dump(),
+            )
+
+        def _on_attempt_error(attempt: int, total: int, elapsed_ms: float, exc: Exception) -> None:
+            detail = describe_exception(exc)
+            self._schedule_transcript_record(
+                direction="response",
+                operation="complete_structured_error",
+                payload=detail,
+                error_type=detail["error_type"],
+            )
+
+        try:
+            return await llm_retry(
+                _call,
+                attempts=self._retry_attempts,
+                base_delay=self._retry_base_delay,
+                on_attempt_error=_on_attempt_error,
+            )
+        finally:
+            delete_tmp_images(tmp_paths)
 
     # ── Tool-use completions ──────────────────────────────────────────────────
 

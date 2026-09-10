@@ -10,6 +10,7 @@ from openforexai.ports.llm import (
     AbstractLLMProvider,
     LLMResponse,
     LLMResponseWithTools,
+    LLMStructuredResponse,
     ToolCall,
     ToolSpec,
 )
@@ -47,11 +48,24 @@ class DemoLLMProvider(AbstractLLMProvider):
     async def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
-        response_schema: type,
-    ) -> dict[str, Any]:
-        # Real providers would parse/validate against response_schema.
-        return {"status": "ok", "model": self._model, "message": user_message}
+        messages: list[dict[str, Any]],
+        response_schema: dict[str, Any],
+        schema_name: str,
+        tools: list[ToolSpec] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMStructuredResponse:
+        # Real providers force this via a native mechanism (OpenAI response_format
+        # json_schema strict mode; Anthropic forced tool_choice) — see adapters/llm/.
+        last_text = str(messages[-1].get("content", "")) if messages else ""
+        return LLMStructuredResponse(
+            parsed={"status": "ok", "model": self._model, "message": last_text},
+            model=self._model,
+            input_tokens=20,
+            output_tokens=10,
+            raw={"provider": "demo", "schema_name": schema_name},
+        )
 
     async def complete_with_tools(
         self,

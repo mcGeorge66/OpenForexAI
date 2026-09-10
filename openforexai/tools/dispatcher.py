@@ -91,6 +91,12 @@ class ToolDispatcher:
             results.append(result)
         return results
 
+    def has_tools(self) -> bool:
+        """True if this agent's config grants at least one tool — the single source
+        of truth for whether it can call tools at all (see agent.py's use of this to
+        decide whether the "tools exist" prompt framing applies)."""
+        return bool(self._allowed)
+
     def visible_specs(
         self,
         used_tokens: int = 0,

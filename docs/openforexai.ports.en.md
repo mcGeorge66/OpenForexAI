@@ -102,9 +102,11 @@ class AbstractLLMProvider(ABC):
 
     @abstractmethod
     async def complete_structured(
-        self, system_prompt, user_message, response_schema
-    ) -> dict:
-        # Pydantic-typed structured output
+        self, system_prompt, messages, response_schema, schema_name, tools=None
+    ) -> LLMStructuredResponse:
+        # Closing turn with the answer forced to conform to a raw JSON Schema dict
+        # via the provider's own native mechanism (OpenAI response_format strict
+        # mode; Anthropic forced tool_choice) — not a prompt request.
         ...
 
     @abstractmethod

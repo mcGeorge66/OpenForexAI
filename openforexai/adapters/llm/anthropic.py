@@ -15,6 +15,7 @@ from openforexai.ports.llm import (
     AbstractLLMProvider,
     LLMResponse,
     LLMResponseWithTools,
+    LLMStructuredResponse,
     ToolCall,
     ToolSpec,
 )
@@ -148,23 +149,72 @@ class AnthropicLLMProvider(AbstractLLMProvider):
     async def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
-        response_schema: type,
-    ) -> dict[str, Any]:
-        schema = response_schema.model_json_schema()
-        augmented_prompt = (
-            f"{system_prompt}\n\nRespond ONLY with valid JSON matching this schema:\n"
-            f"{json.dumps(schema, indent=2)}"
+        messages: list[dict[str, Any]],
+        response_schema: dict[str, Any],
+        schema_name: str,
+        tools: list[ToolSpec] | None = None,
+        images: list[str] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,  # noqa: ARG002 — accepted for port compatibility, not used by Anthropic
+    ) -> LLMStructuredResponse:
+        """Force schema-conforming JSON via a forced tool call — Anthropic has no
+        response-format field like OpenAI, so the only reliable mechanism is
+        `tool_choice={"type": "tool", "name": schema_name}` against a synthetic
+        tool whose `input_schema` *is* the desired schema. Claude validates
+        tool-use input against `input_schema` natively, so the returned `input`
+        dict is already guaranteed-conforming — no text parsing needed. Any real
+        *tools* passed alongside are still visible to the model as ordinary tools,
+        but the forced `tool_choice` means this call always ends by "calling" the
+        schema tool, not a real one — callers that want the answer forced right
+        now should not pass tools (same caveat as the OpenAI adapter)."""
+        resolved_temp = self._default_temperature if temperature is None else temperature
+        resolved_max_tokens = self._default_max_tokens if max_tokens is None else max_tokens
+
+        clean_system, clean_messages, _, regular_paths, tmp_paths = scan_prompts_for_images(
+            system_prompt=system_prompt,
+            messages=messages,
         )
-        response = await self.complete(
-            system_prompt=augmented_prompt,
-            user_message=user_message,
-            temperature=0.0,
+        effective_messages = _inject_images_anthropic(
+            clean_messages, resolve_images(regular_paths + tmp_paths + list(images or []))
         )
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1].lstrip("json").strip()
-        return json.loads(raw)
+        schema_tool = {
+            "name": schema_name,
+            "description": f"Submit the final structured result matching the {schema_name!r} schema.",
+            "input_schema": response_schema,
+        }
+
+        async def _call() -> LLMStructuredResponse:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": resolved_max_tokens,
+                "system": clean_system,
+                "messages": effective_messages,
+                "tools": [*(tools or []), schema_tool],
+                "tool_choice": {"type": "tool", "name": schema_name},
+            }
+            if resolved_temp is not None:
+                kwargs["temperature"] = resolved_temp
+            msg = await self._client.messages.create(**kwargs)  # type: ignore[arg-type]
+
+            for block in msg.content:
+                if block.type == "tool_use" and block.name == schema_name:
+                    return LLMStructuredResponse(
+                        parsed=block.input if isinstance(block.input, dict) else {},
+                        model=msg.model,
+                        input_tokens=msg.usage.input_tokens,
+                        output_tokens=msg.usage.output_tokens,
+                        raw=msg.model_dump(),
+                    )
+            raise RuntimeError(
+                f"complete_structured: no {schema_name!r} tool_use block in Anthropic response "
+                f"(stop_reason={msg.stop_reason!r})"
+            )
+
+        try:
+            return await llm_retry(_call, attempts=self._retry_attempts, base_delay=self._retry_base_delay)
+        finally:
+            delete_tmp_images(tmp_paths)
 
     # ── Tool-use completions ──────────────────────────────────────────────────
 

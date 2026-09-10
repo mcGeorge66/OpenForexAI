@@ -24,6 +24,7 @@ from openforexai.ports.llm import (
     AbstractLLMProvider,
     LLMResponse,
     LLMResponseWithTools,
+    LLMStructuredResponse,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -219,10 +220,22 @@ class MockLLMProvider(AbstractLLMProvider):
     async def complete_structured(
         self,
         system_prompt: str,
-        user_message: str,
-        response_schema: type,
-    ) -> dict[str, Any]:
-        return self._structured
+        messages: list[dict[str, Any]],
+        response_schema: dict[str, Any],
+        schema_name: str,
+        tools: list[dict[str, Any]] | None = None,
+        images: list[str] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMStructuredResponse:
+        return LLMStructuredResponse(
+            parsed=self._structured,
+            model="mock-model",
+            input_tokens=100,
+            output_tokens=50,
+            raw={},
+        )
 
     async def complete_with_tools(
         self,

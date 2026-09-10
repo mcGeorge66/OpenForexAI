@@ -9,9 +9,11 @@ optionally receive a pre-built `snapshot` global, configured via the Snapshot ta
 The Prompt Workbench's Step/Run loop mirrors the real AA→BA production split:
 
 - **Step 1** produces a decision each step — a directional market read, not a trade instruction.
-  By default this is the **AA-under-test** (the LLM, configured via the Prompt tab and "AA Tool
-  Access"; empty tool access runs it via `Agent._run_decision_only_cycle`, the exact method real
-  production AA agents use for their decision). The Prompt/EC toggle at the top-right of the tab
+  By default this is the **AA-under-test** (the LLM, configured via the Prompt tab, "AA Tool
+  Access", and an optional "Response Schema"; it always runs via `Agent._run_with_tools`, the
+  exact method real production AA agents use — empty tool access means no tools are offered at
+  all, and a configured Response Schema structurally forces the final answer via the real
+  provider mechanism). The Prompt/EC toggle at the top-right of the tab
   bar can switch Step 1 to a deterministic **EC script** instead (no LLM at all) — see
   `script_pwb_ec_context.md` for that contract. Either way, this script (Step 2) receives the
   result identically: a `decision` dict, whichever kind of Step 1 produced it.

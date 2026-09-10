@@ -45,13 +45,12 @@ from typing import Any
 
 from openforexai.agents.analysis_snapshot import (
     build_analysis_snapshot,
-    build_decision_only_system_prompt,
     build_snapshot_system_prompt,
     build_snapshot_user_message,
 )
 from openforexai.messaging.agent_id import AgentId
 from openforexai.messaging.bus import EventBus
-from openforexai.messaging.llm_helpers import llm_complete, llm_complete_with_tools
+from openforexai.messaging.llm_helpers import llm_complete_structured, llm_complete_with_tools
 from openforexai.models.agent import AgentDecision, AgentRole
 from openforexai.models.messaging import AgentMessage, EventType
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
@@ -67,10 +66,6 @@ from openforexai.utils.logging import get_logger
 _CONFIG_TIMEOUT = 30.0   # seconds to wait for config response
 _DEFAULT_MAX_TOOL_TURNS = 10
 _MAX_REQUIRED_TOOL_CALL_REMINDERS = 2
-_DEFAULT_JSON_FORMAT_NUDGE = (
-    "Deine letzte Antwort war kein gültiges JSON. Antworte erneut ausschließlich mit "
-    "einem einzigen gültigen JSON-Objekt im geforderten Format — kein Text davor oder danach."
-)
 _DEFAULT_ANY_CANDLE_DIVIDER = 1
 _LONG_CYCLE_WARN_SECONDS = 30.0
 _QUERY_BASE_SYSTEM_PROMPT = (
@@ -133,11 +128,10 @@ class Agent:
         self._decision_prompt_profile_config: dict[str, Any] = {}
         self._run_lock: asyncio.Lock = asyncio.Lock()
 
-        # Set by _run_decision_only_cycle: how many invalid-JSON retries the most
-        # recent decision call needed, and the raw text of each rejected attempt —
-        # lets callers (and the Workbench) show why a decision took multiple tries.
-        self._last_decision_json_retries: int = 0
-        self._last_decision_json_discarded: list[str] = []
+        # Set by _run_with_tools: whether the most recent cycle's final answer went
+        # through complete_structured (a configured response_schema) — lets callers
+        # (e.g. the Prompt Workbench) show whether the schema guarantee was active.
+        self._last_schema_enforced: bool = False
         # Set on every cycle (see _last_received_input assignment below): the most
         # recent trigger/source/timestamp/user_message this agent actually processed.
         self._last_received_input: dict[str, Any] | None = None
@@ -976,7 +970,7 @@ class Agent:
                 snapshot_system_prompt = build_snapshot_system_prompt(
                     _base_prompt,
                     self._decision_prompt_profile_config,
-                    allow_tools=not self._should_use_snapshot_decision_engine(trigger),
+                    allow_tools=bool(self._tool_dispatcher is not None and self._tool_dispatcher.has_tools()),
                     snapshot=decision_snapshot,
                 )
 
@@ -1038,23 +1032,14 @@ class Agent:
             )
             self._logger.debug("Starting cycle", trigger=trigger, pair=context.pair if context else None)
             try:
-                if decision_snapshot is not None and self._should_use_snapshot_decision_engine(trigger):
-                    final_text, total_tokens, executed_tool_names = await self._run_decision_only_cycle(
-                        user_message=user_msg,
-                        trigger=trigger,
-                        source=source,
-                        snapshot=decision_snapshot,
-                        triggering_msg=triggering_msg,
-                    )
-                else:
-                    final_text, total_tokens, executed_tool_names = await self._run_with_tools(
-                        user_msg,
-                        trigger=trigger,
-                        source=source,
-                        correlation_id=correlation_id,
-                        system_prompt_override=snapshot_system_prompt,
-                        history=chat_history,
-                    )
+                final_text, total_tokens, executed_tool_names = await self._run_with_tools(
+                    user_msg,
+                    trigger=trigger,
+                    source=source,
+                    correlation_id=correlation_id,
+                    system_prompt_override=snapshot_system_prompt,
+                    history=chat_history,
+                )
             except Exception as exc:
                 self._logger.exception("Cycle failed", trigger=trigger, error=str(exc))
                 self._emit_system_error(f"Cycle failed: {type(exc).__name__}: {exc}")
@@ -1165,15 +1150,9 @@ class Agent:
         executed_tool_names: list[str] = []
         executed_tool_calls: list[Any] = []
         required_tool_calls = self._required_tool_calls()
-        require_json_response = self._requires_json_response()
         reminders_sent = 0
 
         effective_system_prompt = system_prompt_override or self._system_prompt
-        configured_json_format = self._configured_json_response_format()
-        if require_json_response and configured_json_format:
-            effective_system_prompt = (
-                f"{effective_system_prompt}\n\n# Required response format\n\n{configured_json_format}"
-            )
 
         for turn in range(self._max_tool_turns + 1):
             tool_specs = (
@@ -1256,16 +1235,10 @@ class Agent:
                     if required_tool_calls
                     else []
                 )
-                json_invalid = require_json_response and self._parse_json_object(final_text) is None
-                if (unmet or json_invalid) and reminders_sent < _MAX_REQUIRED_TOOL_CALL_REMINDERS:
+                if unmet and reminders_sent < _MAX_REQUIRED_TOOL_CALL_REMINDERS:
                     reminders_sent += 1
-                    nudge_parts = []
-                    if unmet:
-                        nudge_parts.append(self._build_required_tool_call_nudge(unmet))
-                    if json_invalid:
-                        nudge_parts.append(self._build_json_format_nudge())
                     messages.append(self._build_assistant_turn(response))
-                    messages.append({"role": "user", "content": "\n\n".join(nudge_parts)})
+                    messages.append({"role": "user", "content": self._build_required_tool_call_nudge(unmet)})
                     continue
                 break
 
@@ -1297,157 +1270,33 @@ class Agent:
             if required_tool_calls
             else []
         )
-        json_still_invalid = require_json_response and self._parse_json_object(final_text) is None
-        if unmet_final or json_still_invalid:
-            problems = []
-            if unmet_final:
-                tool_names = ", ".join(sorted({str(entry.get("tool", "?")) for entry in unmet_final}))
-                problems.append(f"Pflicht-Tool-Aufruf(e) fehlen: {tool_names}")
-            if json_still_invalid:
-                problems.append("Antwort ist kein gültiges JSON")
+        if unmet_final:
+            tool_names = ", ".join(sorted({str(entry.get("tool", "?")) for entry in unmet_final}))
             self._emit_system_error(
-                f"Zyklus nach {reminders_sent} Erinnerung(en) nicht vollständig: {'; '.join(problems)}"
+                f"Zyklus nach {reminders_sent} Erinnerung(en) nicht vollständig: "
+                f"Pflicht-Tool-Aufruf(e) fehlen: {tool_names}"
             )
+
+        response_schema, schema_name = self._response_schema()
+        self._last_schema_enforced = False
+        if response_schema is not None:
+            structured = await llm_complete_structured(
+                event_bus       = self._bus,
+                llm_name        = self._llm_name or "",
+                source_id       = self.agent_id,
+                system_prompt   = effective_system_prompt,
+                messages        = messages,
+                response_schema = response_schema,
+                schema_name     = schema_name,
+                temperature     = self._llm_temperature,
+                max_tokens      = self._max_tokens,
+                reasoning_effort = self._llm_reasoning_effort,
+            )
+            final_text = json.dumps(structured.parsed)
+            total_tokens += structured.input_tokens + structured.output_tokens
+            self._last_schema_enforced = True
 
         return final_text, total_tokens, executed_tool_names
-
-    async def _run_decision_only_cycle(
-        self,
-        *,
-        user_message: str,
-        trigger: str,
-        source: str | None = None,
-        snapshot: dict[str, Any] | None = None,
-        triggering_msg=None,
-        max_json_attempts: int = 3,
-    ) -> tuple[str, int, list[str]]:
-        """Decision-only LLM call, retried (up to `max_json_attempts` total tries) if the
-        answer doesn't parse as JSON — production decisions are only ever consumed as JSON
-        (see _parse_json_object callers), so a non-JSON answer is never usable as-is. Each
-        rejected attempt's raw text is appended to self._last_decision_json_discarded and the
-        retry count to self._last_decision_json_retries, so callers (e.g. the Prompt Workbench)
-        can show exactly why/whether a prompt needed correction, instead of only seeing the
-        final result.
-        """
-        from openforexai.ports.llm import LLMResponse
-
-        if self._llm_service_id is None:
-            raise RuntimeError("LLM service is not initialized.")
-
-        self._last_decision_json_retries = 0
-        self._last_decision_json_discarded = []
-
-        _decision_started = perf_counter()
-        await self._bus.publish(AgentMessage(
-            event_type=EventType.DECISION_START,
-            source_agent_id=self.agent_id,
-            payload={"agent_id": self.agent_id, "trigger": trigger, "source": source},
-        ), triggered_by=triggering_msg)
-
-        diagnostics_enabled = self._is_debug_diagnostics_enabled()
-        current_user_message = user_message
-        total_tokens = 0
-        final_text = ""
-
-        for attempt in range(max_json_attempts):
-            messages: list[dict[str, Any]] = [{"role": "user", "content": current_user_message}]
-            tool_specs: list[dict[str, Any]] = []
-            turn = attempt
-            self._emit_llm_request(messages, tool_specs, turn)
-            turn_started = perf_counter()
-            if diagnostics_enabled:
-                self._emit_llm_diagnostic_event(
-                    MonitoringEventType.LLM_TURN_STARTED,
-                    trigger=trigger,
-                    source=source,
-                    turn=turn,
-                    message_count=1,
-                    tool_count=0,
-                    approx_system_prompt_chars=len(self._system_prompt),
-                    approx_messages_chars=self._estimate_payload_chars(messages),
-                    approx_tool_schema_chars=0,
-                    call_mode="decision_only",
-                )
-            try:
-                response: LLMResponse = await llm_complete(
-                    event_bus        = self._bus,
-                    llm_name         = self._llm_name or "",
-                    source_id        = self.agent_id,
-                    system_prompt    = build_decision_only_system_prompt(
-                        self._system_prompt,
-                        self._decision_prompt_profile_config,
-                        snapshot=snapshot,
-                    ),
-                    user_message     = current_user_message,
-                    temperature      = self._llm_temperature,
-                    max_tokens       = self._max_tokens,
-                    reasoning_effort = self._llm_reasoning_effort,
-                )
-            except Exception as exc:
-                self._emit_llm_error(
-                    turn=turn, trigger=trigger, source=source,
-                    error_type=type(exc).__name__, error=str(exc), call_mode="decision_only",
-                )
-                if diagnostics_enabled:
-                    self._emit_llm_diagnostic_event(
-                        MonitoringEventType.LLM_TURN_FAILED,
-                        trigger=trigger,
-                        source=source,
-                        turn=turn,
-                        message_count=1,
-                        tool_count=0,
-                        elapsed_ms=round((perf_counter() - turn_started) * 1000.0, 1),
-                        error_type=type(exc).__name__,
-                        error=str(exc),
-                        call_mode="decision_only",
-                    )
-                raise
-
-            elapsed_ms = round((perf_counter() - turn_started) * 1000.0, 1)
-            if diagnostics_enabled:
-                self._emit_llm_diagnostic_event(
-                    MonitoringEventType.LLM_TURN_COMPLETED,
-                    trigger=trigger,
-                    source=source,
-                    turn=turn,
-                    message_count=1,
-                    tool_count=0,
-                    elapsed_ms=elapsed_ms,
-                    stop_reason="end_turn",
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
-                    tool_calls=0,
-                    call_mode="decision_only",
-                )
-            self._emit_llm_monitoring(response, turn)
-            total_tokens += response.input_tokens + response.output_tokens
-            final_text = response.content or ""
-
-            if self._parse_json_object(final_text) is not None or attempt == max_json_attempts - 1:
-                self._last_decision_json_retries = attempt
-                break
-
-            self._last_decision_json_discarded.append(final_text)
-            current_user_message = (
-                f"{user_message}\n\n"
-                f"Your previous answer was rejected because it was not valid JSON:\n{final_text}\n\n"
-                "Respond again with ONLY a single valid JSON object matching the required schema "
-                "— no prose, no markdown code fences."
-            )
-
-        await self._bus.publish(AgentMessage(
-            event_type=EventType.DECISION_END,
-            source_agent_id=self.agent_id,
-            payload={
-                "agent_id": self.agent_id,
-                "trigger": trigger,
-                "success": True,
-                "elapsed_ms": round((perf_counter() - _decision_started) * 1000, 1),
-                "tokens": total_tokens,
-                "json_retries": self._last_decision_json_retries,
-            },
-        ), triggered_by=triggering_msg)
-        return final_text, total_tokens, []
 
     def _is_debug_diagnostics_enabled(self) -> bool:
         if self._monitoring_bus is None:
@@ -1683,35 +1532,21 @@ class Agent:
         ]
         return "\n".join(lines)
 
-    def _requires_json_response(self) -> bool:
-        """Read `tool_config.require_json_response` — opt-in, so agents that legitimately
-        answer with prose (chat assistants, EA's report-driven cycle) are unaffected. This is
-        the code-level guarantee: a hand-written 'return only JSON' sentence in the prompt is
-        never enough on its own, since nothing enforces the model actually followed it."""
+    def _response_schema(self) -> tuple[dict[str, Any] | None, str]:
+        """Read `tool_config.response_schema`/`response_schema_name` from this agent's
+        live config. When set, the final answer is structurally forced to conform via
+        the provider's own native mechanism (see `llm_complete_structured` and the
+        adapters) — a real guarantee, not a prompt request. Opt-in: agents that legitimately
+        answer with prose (chat assistants, EA's report-driven cycle) are unaffected."""
         tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
         if not isinstance(tool_config, dict):
-            return False
-        return bool(tool_config.get("require_json_response"))
-
-    def _configured_json_response_format(self) -> str | None:
-        """Optional `tool_config.json_response_format` — when set, this is the single source
-        of truth for the expected JSON shape: it gets injected into the system prompt actually
-        sent to the model (so the format can live in config instead of being hand-copied into
-        prompt text) and reused verbatim in the retry nudge if the model gets it wrong."""
-        tool_config = self._config.get("tool_config") if isinstance(self._config, dict) else None
-        if not isinstance(tool_config, dict):
-            return None
-        value = tool_config.get("json_response_format")
-        return value.strip() if isinstance(value, str) and value.strip() else None
-
-    def _build_json_format_nudge(self) -> str:
-        configured_format = self._configured_json_response_format()
-        if configured_format:
-            return (
-                "Deine letzte Antwort war kein gültiges JSON. Antworte erneut ausschließlich "
-                f"mit einem einzigen gültigen JSON-Objekt in diesem Format:\n\n{configured_format}"
-            )
-        return _DEFAULT_JSON_FORMAT_NUDGE
+            return None, ""
+        schema = tool_config.get("response_schema")
+        if not isinstance(schema, dict) or not schema:
+            return None, ""
+        name = tool_config.get("response_schema_name")
+        name = name.strip() if isinstance(name, str) and name.strip() else "agent_result"
+        return schema, name
 
     async def _semantic_memory_read_tables(self) -> list[str]:
         """Resolve this agent's semantic_memory read grant from its own live config —
@@ -1902,19 +1737,6 @@ class Agent:
 
         return candle_timestamp
 
-    def _should_use_snapshot_decision_engine(self, trigger: str) -> bool:
-        """Fast, single-shot decision path (no tool-calling) for AA's real m5_candle_trigger
-        cycle. Selection depends only on agent role, trigger, and snapshot profile — never
-        on tool_config/allowed_tools. Tool access is an orthogonal grant (which tools this
-        agent may call if it runs the general tool-calling loop instead) and must never
-        silently change which loop runs for a given cycle; config for one concern (tool
-        permissions) must not have invisible side effects on another (decision-engine
-        selection)."""
-        return (
-            self._is_analysis_agent()
-            and trigger == EventType.M5_CANDLE_TRIGGER.value
-            and bool(self._snapshot_profile_config)
-        )
 
     def _should_use_snapshot_context(self, trigger: str) -> bool:
         if not self._snapshot_profile_config:

@@ -15,11 +15,13 @@ Message protocol
 ----------------
 Incoming  ``LLM_REQUEST``  payload keys:
 
-    method          "complete_with_tools" | "complete"
+    method          "complete_with_tools" | "complete" | "complete_structured"
     system_prompt   str
-    messages        list[dict]   canonical role/content format
-    tools           list[dict]   ToolSpec list (complete_with_tools only)
+    messages        list[dict]   canonical role/content format (complete_with_tools, complete_structured)
+    tools           list[dict]   ToolSpec list (complete_with_tools, complete_structured — optional)
     user_message    str          (complete only)
+    response_schema dict         raw JSON Schema (complete_structured only)
+    schema_name     str          (complete_structured only)
     temperature     float | None
     max_tokens      int | None
     reasoning_effort str | None
@@ -27,7 +29,8 @@ Incoming  ``LLM_REQUEST``  payload keys:
 Outgoing  ``LLM_RESPONSE``  payload keys:
 
     method          echoed from request
-    content         str | None
+    content         str | None            (complete, complete_with_tools)
+    parsed          dict | None            (complete_structured only)
     tool_calls      list[dict]  {id, name, arguments}
     stop_reason     str
     model           str
@@ -134,6 +137,27 @@ class LLMService:
                     "model":         result.model,
                     "input_tokens":  result.input_tokens,
                     "output_tokens": result.output_tokens,
+                    "elapsed_ms":    round((time.monotonic() - started) * 1000, 1),
+                    "error":         None,
+                }
+            elif method == "complete_structured":
+                structured = await self._llm.complete_structured(
+                    system_prompt    = _strip_prompt_comments(payload.get("system_prompt", "")),
+                    messages         = _strip_messages_comments(payload.get("messages", [])),
+                    response_schema  = payload.get("response_schema", {}),
+                    schema_name      = payload.get("schema_name", "result"),
+                    tools            = payload.get("tools") or None,
+                    images           = payload.get("images") or None,
+                    temperature      = payload.get("temperature"),
+                    max_tokens       = payload.get("max_tokens"),
+                    reasoning_effort = payload.get("reasoning_effort"),
+                )
+                response_payload = {
+                    "method":        "complete_structured",
+                    "parsed":        structured.parsed,
+                    "model":         structured.model,
+                    "input_tokens":  structured.input_tokens,
+                    "output_tokens": structured.output_tokens,
                     "elapsed_ms":    round((time.monotonic() - started) * 1000, 1),
                     "error":         None,
                 }

@@ -10,8 +10,8 @@ from openforexai.agents.analysis_snapshot import (
     DEFAULT_CANDLE_TRANSFORM_SCRIPT,
     DEFAULT_INDICATOR_TRANSFORM_SCRIPT,
     build_analysis_snapshot,
-    build_decision_only_system_prompt,
-    build_decision_only_user_message,
+    build_snapshot_system_prompt,
+    build_snapshot_user_message,
     preview_snapshot_tool_block,
 )
 from openforexai.models.market import Candle
@@ -139,14 +139,16 @@ async def test_build_analysis_snapshot_uses_tool_blocks_and_keeps_extra_outputs(
 # System prompt helpers
 # =============================================================================
 
-def test_build_decision_only_system_prompt_uses_profile_override_modes() -> None:
-    replaced = build_decision_only_system_prompt(
+def test_build_snapshot_system_prompt_uses_profile_override_modes() -> None:
+    replaced = build_snapshot_system_prompt(
         "BASE",
         {"prompt": "PROFILE", "mode": "replace"},
+        allow_tools=False,
     )
-    appended = build_decision_only_system_prompt(
+    appended = build_snapshot_system_prompt(
         "BASE",
         {"prompt": "PROFILE", "mode": "append"},
+        allow_tools=False,
     )
 
     assert replaced.startswith("PROFILE")
@@ -160,7 +162,7 @@ def test_build_decision_only_system_prompt_uses_profile_override_modes() -> None
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_build_decision_only_user_message_contains_assembled_payload_not_pipeline_metadata() -> None:
+async def test_build_snapshot_user_message_contains_assembled_payload_not_pipeline_metadata() -> None:
     """The assembly transform script builds the payload; pipeline metadata is excluded."""
     start = datetime(2026, 5, 7, 10, 0, tzinfo=UTC)
     m5 = [
@@ -205,7 +207,7 @@ result = {
     )
 
     assert errors == []
-    message = build_decision_only_user_message(snapshot, profile)
+    message = build_snapshot_user_message(snapshot, profile)
     assert message.startswith("PREFIX LINE")
     payload = _payload_from_message(message)
 
