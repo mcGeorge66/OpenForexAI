@@ -203,6 +203,18 @@
     "description": "RepositoryService response to a repo_request"
   },
 
+  // ── Semantic memory service ───────────────────────────────────────────────────
+  "memory_request": {
+    "required": ["operation"],
+    "trace_root": false,
+    "description": "Internal semantic-memory read/write request to SemanticMemoryService"
+  },
+  "memory_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "SemanticMemoryService response to a memory_request"
+  },
+
   // ── Market data queries ───────────────────────────────────────────────────────
   "candles_request": {
     "required": ["timeframe"],
