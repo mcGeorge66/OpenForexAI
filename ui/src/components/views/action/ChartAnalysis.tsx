@@ -471,8 +471,8 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
 
   // ── Indicator computation ──────────────────────────────────────────────────
 
-  const recomputeIndicators = useCallback(async (newCandles: CandleBar[], inds: IndicatorInstance[]) => {
-    if (newCandles.length === 0) return inds
+  const recomputeIndicators = useCallback(async (hasCandles: boolean, inds: IndicatorInstance[]) => {
+    if (!hasCandles) return inds
 
     const results = await Promise.all(inds.map(async ind => {
       if (!ind.visible) return ind
@@ -530,9 +530,15 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
       // local timezone here would be wrong. Uses the shared anchorIso memo (defined
       // above) rather than a local re-derivation, so candles/indicators/DXY/swing
       // levels all agree on exactly the same anchor value.
-      const [newCandles, analyses] = await Promise.all([
+      // Indicators are recomputed entirely server-side from pair/timeframe/count —
+      // they never read the candle values themselves — so there's no need to wait
+      // for getCandles/getAnalyses before starting them. The optimistic `true`
+      // below assumes candleCount > 0 candles will come back; if the pair actually
+      // has none, the result is discarded below exactly like the old guard did.
+      const [newCandles, analyses, indicatorsResult] = await Promise.all([
         api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso),
         api.getAnalyses({ pair, limit: 300 }),
+        recomputeIndicators(true, indicatorsRef.current),
       ])
       setCandles(newCandles)
       setAnalysisRecords(analyses)
@@ -556,8 +562,7 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
         }
         chartRef.current?.resetView()
       }
-      const updated = await recomputeIndicators(newCandles, indicatorsRef.current)
-      setIndicators(updated)
+      setIndicators(newCandles.length > 0 ? indicatorsResult : indicatorsRef.current)
 
       // Load DXY per-candle data silently (does not block chart load)
       api.calculateIndicator({
@@ -786,7 +791,7 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
     }
     const updated = [...indicators, newInd]
     setIndicators(updated)
-    void recomputeIndicators(candles, updated).then(setIndicators)
+    void recomputeIndicators(candles.length > 0, updated).then(setIndicators)
   }
 
   function removeIndicator(id: string) {
@@ -798,7 +803,7 @@ export function ChartAnalysis({ focusOrderId, onFocusOrderConsumed }: ChartAnaly
       const updated = prev.map(i => i.id === id ? { ...i, ...patch } : i)
       if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current)
       recomputeTimerRef.current = setTimeout(() => {
-        void recomputeIndicators(candles, updated).then(setIndicators)
+        void recomputeIndicators(candles.length > 0, updated).then(setIndicators)
       }, 400)
       return updated
     })

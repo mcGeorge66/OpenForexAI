@@ -315,8 +315,8 @@ export function PromptWorkbench() {
   useEffect(() => { indicatorsRef.current = indicators }, [indicators])
   const recomputeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const recomputeIndicators = useCallback(async (newCandles: CandleBar[], inds: IndicatorInstance[]) => {
-    if (newCandles.length === 0) return inds
+  const recomputeIndicators = useCallback(async (hasCandles: boolean, inds: IndicatorInstance[]) => {
+    if (!hasCandles) return inds
     const results = await Promise.all(inds.map(async ind => {
       if (!ind.visible) return ind
       try {
@@ -368,7 +368,7 @@ export function PromptWorkbench() {
     }
     const updated = [...indicators, newInd]
     setIndicators(updated)
-    void recomputeIndicators(candles, updated).then(setIndicators)
+    void recomputeIndicators(candles.length > 0, updated).then(setIndicators)
   }
 
   function removeIndicator(id: string) {
@@ -380,7 +380,7 @@ export function PromptWorkbench() {
       const updated = prev.map(i => i.id === id ? { ...i, ...patch } : i)
       if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current)
       recomputeTimerRef.current = setTimeout(() => {
-        void recomputeIndicators(candles, updated).then(setIndicators)
+        void recomputeIndicators(candles.length > 0, updated).then(setIndicators)
       }, 400)
       return updated
     })
@@ -402,14 +402,23 @@ export function PromptWorkbench() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso)
+      // Indicators are recomputed entirely server-side from pair/timeframe/count —
+      // they never read the candle values themselves — so there's no need to wait
+      // for getCandles before starting them. Firing both in parallel turns the
+      // total wait from candles-time + indicators-time into max(candles-time,
+      // indicators-time). The optimistic `true` below assumes candleCount > 0
+      // candles will come back; if the pair actually has none, the result is
+      // discarded below exactly like the old sequential guard did.
+      const [data, updated] = await Promise.all([
+        api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso),
+        recomputeIndicators(true, indicatorsRef.current),
+      ])
       setCandles(data)
       candleAnchorRef.current = data.length > 0
         ? data.reduce((newest, c) => c.timestamp > newest ? c.timestamp : newest, data[0].timestamp)
         : null
       setPosition(0) // fully revealed by default; lower it to set up a simulation start point
-      const updated = await recomputeIndicators(data, indicatorsRef.current)
-      setIndicators(updated)
+      setIndicators(data.length > 0 ? updated : indicatorsRef.current)
       // Fresh candle set — stale zones/trade lines from a previous load no longer apply.
       clearAnnotations()
     } catch (err) {

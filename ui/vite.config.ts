@@ -69,20 +69,42 @@ export default defineConfig({
     host: devHost,
     port: devPort,
     proxy: {
-      // Proxy all API calls to the FastAPI backend during dev
+      // Proxy all API calls to the FastAPI backend during dev. Kept in sync with
+      // every top-level route prefix registered on either backend router —
+      // openforexai/management/api.py's `router` and handbook_router.py's `/kb`
+      // router — not just the ones some feature happened to need when this list
+      // was last touched. A path missing here doesn't error, it silently falls
+      // through to Vite's SPA index.html, which then fails JSON parsing with a
+      // confusing "Unexpected token '<'" — much harder to diagnose than a
+      // missing-entry gap should be.
       '/agents': httpTarget,
-      '/health': httpTarget,
-      '/version': httpTarget,
-      '/metrics': httpTarget,
-      '/routing': httpTarget,
-      '/events': httpTarget,
-      '/monitoring': httpTarget,
-      '/indicators': httpTarget,
-      '/tools': httpTarget,
-      '/config': httpTarget,
-      '/runtime': httpTarget,
-      '/docs': httpTarget,
+      '/analyses': httpTarget,
+      '/candles': httpTarget,
       '/chartshots': httpTarget,
+      '/composers': httpTarget,
+      '/config': httpTarget,
+      '/console': httpTarget,
+      '/debug': httpTarget,
+      '/docs': httpTarget,
+      '/entity-history': httpTarget,
+      '/events': httpTarget,
+      '/health': httpTarget,
+      '/image': httpTarget,
+      '/indicators': httpTarget,
+      '/kb': httpTarget,
+      '/llm-assistant': httpTarget,
+      '/llm-contexts': httpTarget,
+      '/metrics': httpTarget,
+      '/monitoring': httpTarget,
+      '/orderbook': httpTarget,
+      '/prompt-workbench': httpTarget,
+      '/routing': httpTarget,
+      '/runtime': httpTarget,
+      '/scripts': httpTarget,
+      '/system': httpTarget,
+      '/test': httpTarget,
+      '/tools': httpTarget,
+      '/version': httpTarget,
       '/ws': {
         target: wsTarget,
         ws: true,
