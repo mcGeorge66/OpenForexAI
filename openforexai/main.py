@@ -14,6 +14,7 @@ from openforexai.config.json_loader import load_json_config, resolve_config_path
 from openforexai.management.server import ManagementServer
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.monitoring.agent_health import stale_watch_loop
+from openforexai.monitoring.alert_bridge import alert_bridge_loop
 from openforexai.monitoring.bus import MonitoringBus
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.utils.logging import configure_logging, get_logger, normalize_log_level
@@ -200,6 +201,10 @@ async def main() -> None:
         tg.create_task(
             stale_watch_loop(bus, monitoring_bus, cfg),
             name="agent-health-watch",
+        )
+        tg.create_task(
+            alert_bridge_loop(monitoring_bus, bus),
+            name="alert-bridge",
         )
         tg.create_task(mgmt_server.serve(), name="mgmt-api")
         for svc in llm_services:

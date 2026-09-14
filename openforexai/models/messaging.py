@@ -124,6 +124,9 @@ class EventType(StrEnum):
     SYSTEM_ERROR   = "system_error"
     SLOW_RESPONSE  = "slow_response"
     AGENT_STALE    = "agent_stale"
+    # Every auto-pinned monitoring error, bridged onto the bus so it is durable
+    # and can drive notification rules. The kind is in payload.alert_type.
+    SYSTEM_ALERT   = "system_alert"
 
     # ── Notifications (outbound channel: Telegram today, email later) ────────
     NOTIFY_REQUEST  = "notify_request"

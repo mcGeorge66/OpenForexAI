@@ -216,6 +216,11 @@
   },
 
   // ── System health (durable, so notification rules can act on them) ────────
+  "system_alert": {
+    "required": ["alert_type"],
+    "trace_root": false,
+    "description": "An auto-pinned monitoring error, bridged onto the bus — payload: {alert_type, source, message, broker, pair} plus the original fields of the underlying event (agent_id / ec_id / tool / turn / ...). One type for all of them so a new auto-pinned kind needs no enum, schema or rule change; filter on alert_type."
+  },
   "system_error": {
     "required": ["message"],
     "trace_root": false,
