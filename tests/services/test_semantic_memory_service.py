@@ -282,6 +282,44 @@ async def test_remember_pair_missing_does_not_reject_indicator_values(service):
 
 
 @pytest.mark.asyncio
+async def test_remember_rejects_a_price_that_merely_sits_next_to_a_unit_word(service):
+    """Real leak: three quotes reached the store because an exempt word was
+    within 30 characters. Nearby is not the same as attached."""
+    text = (
+        "Der Trade wurde brokerseitig per Stop bei 156.020 nach etwa zwei "
+        "M5-Kerzen geschlossen."
+    )
+    with pytest.raises(ValueError):
+        await service.remember({
+            "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
+        })
+
+
+@pytest.mark.asyncio
+async def test_remember_rejects_prices_written_with_a_comma(service):
+    """The texts are German — a price is as likely to read 1,16270 as 1.16270."""
+    text = "Die Market-Sell-Order wurde bei rund 1,16304 ausgeführt, etwa 2,9 Pips unter dem Level."
+    with pytest.raises(ValueError):
+        await service.remember({
+            "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "EURUSD",
+        })
+
+
+@pytest.mark.asyncio
+async def test_remember_still_accepts_units_attached_to_the_number(service):
+    """Guard against the tightened rule turning into a false-positive machine."""
+    text = (
+        "Der Stop lag rund 12,60 Pips unter dem Fill, das Ziel etwa 7,90 Pips "
+        "darüber; der Trade erreichte rund 0,63-mal die Stop-Distanz. "
+        "Die Trefferquote lag bei 62,50% über 8 Fälle."
+    )
+    result = await service.remember({
+        "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
+    })
+    assert result["table"] == "mem_agent_test"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_remember_to_new_table_does_not_crash(service):
     table = "mem_shared_mt5_oxs_t"
     await asyncio.gather(*[

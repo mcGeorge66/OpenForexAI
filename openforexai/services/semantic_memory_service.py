@@ -129,24 +129,46 @@ def _is_valid_table_name(name: str) -> bool:
 # This is deliberately fuzzy pattern-matching, not a parser: RSI values,
 # Slope_S/ATR/confidence figures and similar indicator numbers routinely
 # fall in the *same* magnitude/decimal range (e.g. RSI "60.87" looks exactly
-# like a plausible USDJPY price) and must NOT be rejected. To avoid that,
-# a number is only flagged if, in addition to matching a price band, none
-# of a small set of "this is not a price" keywords appear in a short
-# window of characters around it (RSI/Slope/ATR/Confidence/Pip/%/Kerzen —
-# candle timing, indicators, and pip/percentage units are never prices).
-# Pip counts, R-multiples, dates and counts ("3 von 4 Trades") are written
-# with commas or without decimals in this system's texts and so don't match
-# the dot-decimal number pattern below at all.
+# like a plausible USDJPY price) and must NOT be rejected. So a number in a
+# price band is exempt when a unit or indicator label is *attached* to it —
+# directly before ("RSI 60.87") or directly after ("63.50%", "0.63-mal").
+#
+# Attached, not nearby: an earlier version exempted the number whenever such
+# a word appeared anywhere within 30 characters, and the Examiner's texts are
+# dense with exactly those words. Three real price quotes reached the store
+# that way, e.g. "per Stop bei 156.020 nach etwa zwei M5-Kerzen" (exempted by
+# "Kerzen") and "bei 1,16270, rund 3,4 Pips" (exempted by "Pips").
+#
+# Both decimal separators are matched. The texts are German, and prices get
+# written with a comma just as readily as with a dot — the two comma-written
+# quotes above are the proof.
 
-_PRICE_NUMBER_RE = re.compile(r"(?<![\w.])\d{1,4}\.\d{2,5}(?![\w.])")
+# The lookarounds only rule out matching *part* of a longer number
+# ("1.234.567"); a trailing comma or full stop is punctuation, and excluding
+# those let "…bei rund 1,16304, etwa 4,7 Pips…" through.
+_PRICE_NUMBER_RE = re.compile(
+    r"(?<!\w)(?<!\d[.,])\d{1,4}[.,]\d{2,5}(?!\w)(?![.,]\d)"
+)
 
 _JPY_PRICE_BAND = ((50.0, 400.0), (2, 3))       # (magnitude range, decimal-digits range)
 _MAJOR_PRICE_BAND = ((0.3, 3.0), (4, 5))
 
-_PRICE_EXEMPT_KEYWORDS = (
-    "rsi", "slope_s", "slope", "atr", "confidence", "pip", "%", "kerze", "candle",
+# Indicator/metric name in front of the number, with only filler between them
+# ("RSI 60.87", "RSI lag bei etwa 60.87", "Slope_S: 0.945").
+_PRICE_LABEL_BEFORE_RE = re.compile(
+    r"(?:rsi|slope_s|slope|atr|confidence|konfidenz|adx|macd|stoch)"
+    r"(?:[\s:=-]*(?:lag|liegt|liegen|war|ist|betrug|beträgt|bei|von|mit|um|auf"
+    r"|ca\.|circa|etwa|rund|about|at|of|was|is)\b){0,4}"
+    r"[\s:=-]*$",
+    re.IGNORECASE,
 )
-_PRICE_EXEMPT_WINDOW_CHARS = 30
+# Unit immediately after the number.
+_PRICE_UNIT_AFTER_RE = re.compile(
+    r"^\s*-?\s*(?:%|prozent|pips?|punkte?|points?|kerzen?|candles?|atr|mal|r\b)",
+    re.IGNORECASE,
+)
+# Enough for the longest label plus its filler ("confidence lag bei etwa ").
+_PRICE_LABEL_LOOKBACK = 40
 
 
 def _price_bands_for_pair(pair: str) -> list[tuple[tuple[float, float], tuple[int, int]]]:
@@ -158,25 +180,33 @@ def _price_bands_for_pair(pair: str) -> list[tuple[tuple[float, float], tuple[in
     return [_MAJOR_PRICE_BAND]
 
 
-def _reject_absolute_price_quotes(text: str, pair: str) -> None:
-    """Raise ValueError if ``text`` looks like it names an absolute FX price
-    for ``pair`` instead of describing it relatively. See module comment
-    above for the heuristic."""
+def find_absolute_price_quotes(text: str, pair: str) -> list[str]:
+    """Return the numbers in *text* that read as absolute price quotes for *pair*."""
     bands = _price_bands_for_pair(pair)
+    found: list[str] = []
     for match in _PRICE_NUMBER_RE.finditer(text):
         number_str = match.group(0)
-        magnitude = abs(float(number_str))
-        decimals = len(number_str.split(".")[1])
+        magnitude = abs(float(number_str.replace(",", ".")))
+        decimals = len(re.split(r"[.,]", number_str)[1])
         if not any(
             lo <= magnitude <= hi and dec_lo <= decimals <= dec_hi
             for (lo, hi), (dec_lo, dec_hi) in bands
         ):
             continue
-        window_start = max(0, match.start() - _PRICE_EXEMPT_WINDOW_CHARS)
-        window_end = min(len(text), match.end() + _PRICE_EXEMPT_WINDOW_CHARS)
-        window = text[window_start:window_end].lower()
-        if any(keyword in window for keyword in _PRICE_EXEMPT_KEYWORDS):
+        prefix = text[max(0, match.start() - _PRICE_LABEL_LOOKBACK):match.start()]
+        if _PRICE_LABEL_BEFORE_RE.search(prefix):
             continue
+        if _PRICE_UNIT_AFTER_RE.match(text[match.end():]):
+            continue
+        found.append(number_str)
+    return found
+
+
+def _reject_absolute_price_quotes(text: str, pair: str) -> None:
+    """Raise ValueError if ``text`` looks like it names an absolute FX price
+    for ``pair`` instead of describing it relatively. See module comment
+    above for the heuristic."""
+    for number_str in find_absolute_price_quotes(text, pair):
         pair_label = pair or "(unknown/unspecified)"
         raise ValueError(
             f"Memory text contains {number_str!r}, which looks like an absolute price "
