@@ -120,6 +120,11 @@ class EventType(StrEnum):
     BRIDGE_CALL_START  = "bridge_call_start"
     BRIDGE_CALL_END    = "bridge_call_end"
 
+    # ── System health (durable counterparts to monitoring-only signals) ──────
+    SYSTEM_ERROR   = "system_error"
+    SLOW_RESPONSE  = "slow_response"
+    AGENT_STALE    = "agent_stale"
+
     # ── Notifications (outbound channel: Telegram today, email later) ────────
     NOTIFY_REQUEST  = "notify_request"
     NOTIFY_RESPONSE = "notify_response"

@@ -200,6 +200,52 @@
       "from": "*",
       "to": "GLOBL-ALL___-GA-*",
       "priority": 40
+    },
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    // Delivering an event here only makes it *available* to the notification
+    // service; whether it actually becomes a message is decided by the rules in
+    // system.json5 → notifications.rules. Both are hot-reloadable, so a new
+    // warning needs no code and no restart.
+    {
+      "id": "order_result_to_notify",
+      "description": "Order result → NotificationService (rule filters to failures)",
+      "event": "order_result",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50
+    },
+    {
+      "id": "system_error_to_notify",
+      "description": "Failed agent/EC cycle → NotificationService",
+      "event": "system_error",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50
+    },
+    {
+      "id": "agent_stale_to_notify",
+      "description": "Agent did not react to its trigger → NotificationService",
+      "event": "agent_stale",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50
+    },
+    {
+      "id": "risk_breach_to_notify",
+      "description": "Risk limit breached → NotificationService",
+      "event": "risk_breach",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50
+    },
+    {
+      "id": "slow_response_to_notify",
+      "description": "Slow bus round-trip → NotificationService (rule filters by duration)",
+      "event": "slow_response",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50
     }
   ]
 }

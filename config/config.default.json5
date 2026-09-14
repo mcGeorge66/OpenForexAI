@@ -50,6 +50,52 @@
         // "warning":  "123456789",
         // "critical": "123456789"
       }
+    },
+    // Turn bus events into messages — adding a warning is config, not code.
+    // The event must also be routed here in config/RunTime/event_routing.json5
+    // (target SYSTM-ALL___-GA-NOTIFY), otherwise it never reaches this service.
+    //
+    //   only_if   per field: a literal (equality), {"regex": "..."},
+    //             {"contains": "..."}, {"ne": ...} or {"lt"/"lte"/"gt"/"gte": n}
+    //   title /   templates; {placeholders} are filled from the event — nested
+    //   template  paths work ({order.signal.pair}), plus envelope fields
+    //             {event}, {source}, {instrument}. Missing fields render empty.
+    //   dedup_by  fields that make the suppression key distinct, so e.g. EURUSD
+    //             and USDJPY do not silence each other.
+    "rules": {
+      "order_result": {
+        "severity": "critical",
+        "title": "{instrument}: Order abgelehnt",
+        "template": "{error}",
+        "only_if": { "success": false },
+        "dedup_by": ["instrument"]
+      },
+      "system_error": {
+        "severity": "critical",
+        "title": "Zyklus fehlgeschlagen: {agent_id}",
+        "template": "{message}",
+        "dedup_by": ["agent_id"]
+      },
+      "agent_stale": {
+        "severity": "warning",
+        "title": "Agent reagiert nicht: {agent_id}",
+        "template": "{reason}",
+        "dedup_by": ["agent_id"]
+      },
+      "risk_breach": {
+        "severity": "critical",
+        "title": "Risikolimit überschritten",
+        "template": "{reason}"
+      },
+      // Only genuinely slow round-trips; the service already warns in the log
+      // at 5s, but not everything at 5s is worth a phone notification.
+      "slow_response": {
+        "severity": "warning",
+        "title": "Langsame Verarbeitung: {event}",
+        "template": "{elapsed_ms} ms (Schwelle {threshold_ms} ms), Absender {sender}",
+        "only_if": { "elapsed_ms": { "gte": 60000 } },
+        "dedup_by": ["event"]
+      }
     }
   },
   "data": {

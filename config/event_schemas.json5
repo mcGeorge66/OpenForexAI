@@ -215,6 +215,23 @@
     "description": "SemanticMemoryService response to a memory_request"
   },
 
+  // ── System health (durable, so notification rules can act on them) ────────
+  "system_error": {
+    "required": ["message"],
+    "trace_root": false,
+    "description": "An agent/EC cycle failed — payload: {agent_id, message}. Previously monitoring-only and therefore invisible after the fact."
+  },
+  "slow_response": {
+    "required": ["event", "elapsed_ms"],
+    "trace_root": false,
+    "description": "A bus request/response round-trip exceeded its threshold — payload: {event, sender, correlation_id, elapsed_ms, threshold_ms}"
+  },
+  "agent_stale": {
+    "required": ["agent_id", "reason"],
+    "trace_root": false,
+    "description": "An agent did not react to a trigger it should have acted on — payload: {agent_id, reason}"
+  },
+
   // ── Notification service ──────────────────────────────────────────────────
   "notify_request": {
     "required": ["severity"],

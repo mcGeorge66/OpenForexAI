@@ -36,6 +36,12 @@ from typing import Any
 
 from openforexai.messaging.bus import EventBus
 from openforexai.models.messaging import AgentMessage, EventType
+from openforexai.services.notification_rules import (
+    dedup_key_for,
+    event_view,
+    render,
+    rule_applies,
+)
 from openforexai.utils.logging import get_logger
 
 NOTIFICATION_SERVICE_ID = "SYSTM-ALL___-GA-NOTIFY"
@@ -72,6 +78,7 @@ class NotificationService:
         chat_ids: dict[str, str] | None = None,
         dedup_window_seconds: int = 900,
         max_per_hour: int = 20,
+        rules: dict[str, Any] | None = None,
         bus: EventBus | None = None,
         monitoring_bus: Any = None,
     ) -> None:
@@ -79,6 +86,7 @@ class NotificationService:
         self._dry_run = dry_run
         self._bot_token = bot_token
         self._chat_ids = chat_ids or {}
+        self._rules = rules or {}
         self._dedup_window = max(int(dedup_window_seconds), 0)
         self._max_per_hour = max(int(max_per_hour), 1)
         self._bus = bus
@@ -126,6 +134,7 @@ class NotificationService:
             chat_ids=chat_ids,
             dedup_window_seconds=int(cfg.get("dedup_window_seconds", 900) or 900),
             max_per_hour=int(cfg.get("max_per_hour", 20) or 20),
+            rules=cfg.get("rules") if isinstance(cfg.get("rules"), dict) else {},
             bus=bus,
             monitoring_bus=monitoring_bus,
         )
@@ -254,9 +263,37 @@ class NotificationService:
             except asyncio.CancelledError:
                 break
 
-            if msg.event_type != EventType.NOTIFY_REQUEST:
-                continue
-            await self._handle(msg)
+            if msg.event_type == EventType.NOTIFY_REQUEST:
+                await self._handle(msg)
+            else:
+                # Anything else only arrives here because a routing rule sent it
+                # (config/RunTime/event_routing.json5) — turn it into a
+                # notification if a rule covers it, otherwise ignore it quietly.
+                await self._handle_routed_event(msg)
+
+    async def _handle_routed_event(self, msg: AgentMessage) -> None:
+        """Apply the configured rules to a plain bus event. Never answers."""
+        event_type = str(getattr(msg.event_type, "value", msg.event_type))
+        rule = self._rules.get(event_type)
+        if not isinstance(rule, dict):
+            return
+
+        data = event_view(event_type, msg.source_agent_id, msg.instrument, msg.payload)
+        try:
+            if not rule_applies(rule, data):
+                return
+            args = {
+                "severity": rule.get("severity", "warning"),
+                "title": render(str(rule.get("title") or event_type), data),
+                "message": render(str(rule.get("template") or ""), data),
+                "dedup_key": dedup_key_for(event_type, rule, data),
+            }
+        except Exception as exc:
+            # A malformed rule must not silence the channel for everything else.
+            _log.error("Notification rule failed", event=event_type, error=str(exc))
+            return
+
+        await self.notify(args)
 
     async def _handle(self, msg: AgentMessage) -> None:
         try:

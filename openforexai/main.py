@@ -13,6 +13,7 @@ from openforexai.composers.composer import EventComposer
 from openforexai.config.json_loader import load_json_config
 from openforexai.management.server import ManagementServer
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+from openforexai.monitoring.agent_health import stale_watch_loop
 from openforexai.monitoring.bus import MonitoringBus
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.utils.logging import configure_logging, get_logger, normalize_log_level
@@ -195,6 +196,10 @@ async def main() -> None:
         if memory_service is not None:
             tg.create_task(memory_service.run(), name="semantic-memory-service")
         tg.create_task(notification_service.run(), name="notification-service")
+        tg.create_task(
+            stale_watch_loop(bus, monitoring_bus, cfg),
+            name="agent-health-watch",
+        )
         tg.create_task(mgmt_server.serve(), name="mgmt-api")
         for svc in llm_services:
             tg.create_task(svc.run(), name=f"llm-service:{svc.module_name}")

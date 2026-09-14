@@ -1948,19 +1948,34 @@ class Agent:
         }
 
     def _emit_system_error(self, message: str) -> None:
-        """Emit a SYSTEM_ERROR to the MonitoringBus.  Never raises."""
-        if self._monitoring_bus is None:
-            return
-        try:
-            from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
-            self._monitoring_bus.emit(MonitoringEvent(
-                timestamp=datetime.now(UTC),
-                source_module=f"agent:{self.agent_id}",
-                event_type=MonitoringEventType.SYSTEM_ERROR,
-                payload={"agent_id": self.agent_id, "message": message},
-            ))
-        except Exception:
-            pass  # monitoring must never mask a real problem
+        """Report a cycle failure to the MonitoringBus *and* the EventBus. Never raises.
+
+        The bus event is what makes this durable: monitoring alone is in-memory,
+        which is why `SELECT ... WHERE event_type='system_error'` returned zero
+        rows for the entire history before 2026-09-14 while cycles were failing.
+        On the bus it lands in the event log and can drive notification rules.
+        """
+        if self._monitoring_bus is not None:
+            try:
+                from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
+                self._monitoring_bus.emit(MonitoringEvent(
+                    timestamp=datetime.now(UTC),
+                    source_module=f"agent:{self.agent_id}",
+                    event_type=MonitoringEventType.SYSTEM_ERROR,
+                    payload={"agent_id": self.agent_id, "message": message},
+                ))
+            except Exception:
+                pass  # monitoring must never mask a real problem
+
+        if self._bus is not None:
+            try:
+                asyncio.ensure_future(self._bus.publish(AgentMessage(
+                    event_type=EventType.SYSTEM_ERROR,
+                    source_agent_id=self.agent_id,
+                    payload={"agent_id": self.agent_id, "message": message},
+                )))
+            except Exception:
+                pass  # same rule: reporting a failure must not create one
 
     def _emit_llm_error(
         self,

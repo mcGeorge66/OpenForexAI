@@ -431,15 +431,22 @@ class EventBus:
             "Slow request/response: %r took %.1fs (threshold %.1fs) — sender=%r correlation_id=%r",
             event_val, elapsed_s, threshold, sender_id, correlation_id,
         )
-        self._emit_monitoring(
-            "eventbus",
-            "SLOW_RESPONSE",
-            event=event_val,
-            sender=sender_id,
-            correlation_id=correlation_id,
-            elapsed_ms=round(elapsed_s * 1000, 1),
-            threshold_ms=round(threshold * 1000, 1),
-        )
+        payload = {
+            "event": event_val,
+            "sender": sender_id,
+            "correlation_id": correlation_id,
+            "elapsed_ms": round(elapsed_s * 1000, 1),
+            "threshold_ms": round(threshold * 1000, 1),
+        }
+        self._emit_monitoring("eventbus", "SLOW_RESPONSE", **payload)
+        # Also on the bus, so it is durable in the event log and can drive
+        # notification rules. SLOW_RESPONSE itself carries no correlation future,
+        # so publishing here cannot trigger another slow-response check.
+        asyncio.ensure_future(self.publish(AgentMessage(
+            event_type=EventType.SLOW_RESPONSE,
+            source_agent_id="eventbus",
+            payload=payload,
+        )))
 
     def _warn_unmatched(
         self, event_val: str, sender_id: str, message: AgentMessage

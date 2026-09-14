@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import re
 import sys
 from pathlib import Path
 from typing import cast
@@ -9,6 +10,34 @@ from typing import cast
 import structlog
 
 _LOG_DIR = Path("logs")
+
+# Telegram requires the bot token inside the URL path, and HTTP clients log the
+# URL — so a plain "POST https://api.telegram.org/bot<token>/sendMessage" line
+# writes the secret to disk. Anyone holding it can send convincing fake alerts
+# through the channel the operator trusts. Redacted centrally so it also covers
+# any future code path that builds such a URL.
+_SECRET_PATTERNS = (
+    (re.compile(r"(/bot)\d{6,}:[A-Za-z0-9_-]{30,}"), r"\1<redacted>"),
+)
+
+
+class _RedactSecrets(logging.Filter):
+    """Strip credentials from log records before they reach any handler."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        redacted = message
+        for pattern, replacement in _SECRET_PATTERNS:
+            redacted = pattern.sub(replacement, redacted)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
 # Kept long enough that a failure discovered days later is still reconstructable —
 # the 2026-09-14 incident (10 rejected orders over three days) went unnoticed
 # precisely because nothing but a transient console stream recorded it.
@@ -50,8 +79,11 @@ def configure_logging(log_level: str = "INFO") -> None:
             renderer,
         ],
     )
+    redactor = _RedactSecrets()
+
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
+    handler.addFilter(redactor)
 
     root = logging.getLogger()
     root.handlers.clear()
@@ -85,6 +117,7 @@ def configure_logging(log_level: str = "INFO") -> None:
             )
             file_handler.setLevel(file_level)
             file_handler.setFormatter(file_formatter)
+            file_handler.addFilter(redactor)
             root.addHandler(file_handler)
     except OSError as exc:  # never let logging setup take the app down
         logging.getLogger(__name__).warning("File logging unavailable: %s", exc)
