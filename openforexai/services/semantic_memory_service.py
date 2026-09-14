@@ -537,6 +537,29 @@ class SemanticMemoryService:
         )
         return rows[:max(1, limit)]
 
+    @staticmethod
+    def _merge_pattern_matches(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        """Matches from several tables into one list, newest first, capped at *limit*.
+
+        Notes written to both an agent's table and the shared one are the same
+        observation twice; they are collapsed by their text so one note cannot
+        fill the limit on its own. The copy from the table named first wins,
+        which keeps the reported table stable.
+        """
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for row in rows:
+            key = " ".join(str(row.get("text") or "").split()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        unique.sort(
+            key=lambda r: (r.get("created_at") or 0, r.get("created_at_iso") or ""),
+            reverse=True,
+        )
+        return unique[:max(1, limit)]
+
     # ── Public operations ─────────────────────────────────────────────────────
 
     async def remember(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -641,7 +664,14 @@ class SemanticMemoryService:
         """Exact-match lookup by pattern_key across one or more tables — the "have we seen
         this exact setup before?" primitive, deliberately separate from recall()'s fuzzy
         similarity search so a caller can rely on it deterministically instead of trusting a
-        score threshold. Tables are checked in the given order; the first match wins."""
+        score threshold.
+
+        Every granted table is searched and the matches are merged, newest first. Stopping
+        at the first table that matched — the earlier behaviour — hid observations: the EA
+        writes most notes to both an agent's own table and the shared one, but not all of
+        them, so a key present in both tables could have a note in the shared table that
+        the agent never saw. The same note arriving from two tables is collapsed by its
+        text, so a duplicate write does not fill the limit with one observation."""
         tables = args.get("tables") or []
         if not isinstance(tables, list) or not tables:
             raise ValueError("'tables' must be a non-empty list.")
@@ -654,40 +684,48 @@ class SemanticMemoryService:
             raise ValueError("'pattern_key' is required.")
 
         limit = max(1, min(int(args.get("limit", 1) or 1), 20))
+
+        collected: list[dict[str, Any]] = []
         for table in tables:
-            rows = await self._run_blocking(self._find_by_pattern_sync, table, pattern_key, limit)
-            if rows:
-                row = rows[0]
-                # "matches" carries every observation, newest first; the flat
-                # fields mirror the newest one so existing callers that read
-                # them keep working unchanged.
-                matches = [
-                    {
-                        "id": r.get("id", ""),
-                        "text": r.get("text", ""),
-                        "tags": list(r.get("tags") or []),
-                        "importance": float(r.get("importance", 0.5)),
-                        "created_at_iso": r.get("created_at_iso", ""),
-                        "table": r.get("_table", table),
-                    }
-                    for r in rows
-                ]
-                return {
-                    "found": True,
-                    "match_count": len(matches),
-                    "matches": matches,
-                    "table": row["_table"],
-                    "id": row.get("id", ""),
-                    "text": row.get("text", ""),
-                    "tags": list(row.get("tags") or []),
-                    "importance": float(row.get("importance", 0.5)),
-                    "pair": row.get("pair", ""),
-                    "broker": row.get("broker", ""),
-                    "created_at_iso": row.get("created_at_iso", ""),
-                    "metadata_json": row.get("metadata_json", "{}"),
-                    "pattern_key": row.get("pattern_key", ""),
-                }
-        return {"found": False}
+            # Each table is asked for the full limit; the merge below decides
+            # which of them actually make the cut.
+            collected.extend(
+                await self._run_blocking(self._find_by_pattern_sync, table, pattern_key, limit)
+            )
+        rows = self._merge_pattern_matches(collected, limit)
+        if not rows:
+            return {"found": False}
+
+        row = rows[0]
+        # "matches" carries every observation, newest first; the flat fields
+        # mirror the newest one so existing callers that read them keep
+        # working unchanged.
+        matches = [
+            {
+                "id": r.get("id", ""),
+                "text": r.get("text", ""),
+                "tags": list(r.get("tags") or []),
+                "importance": float(r.get("importance", 0.5)),
+                "created_at_iso": r.get("created_at_iso", ""),
+                "table": r.get("_table", ""),
+            }
+            for r in rows
+        ]
+        return {
+            "found": True,
+            "match_count": len(matches),
+            "matches": matches,
+            "table": row.get("_table", ""),
+            "id": row.get("id", ""),
+            "text": row.get("text", ""),
+            "tags": list(row.get("tags") or []),
+            "importance": float(row.get("importance", 0.5)),
+            "pair": row.get("pair", ""),
+            "broker": row.get("broker", ""),
+            "created_at_iso": row.get("created_at_iso", ""),
+            "metadata_json": row.get("metadata_json", "{}"),
+            "pattern_key": row.get("pattern_key", ""),
+        }
 
     async def recall(self, args: dict[str, Any]) -> dict[str, Any]:
         tables = args.get("tables") or []

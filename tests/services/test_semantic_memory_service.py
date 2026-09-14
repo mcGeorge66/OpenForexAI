@@ -154,7 +154,7 @@ async def test_find_pattern_not_found_returns_found_false(service):
 
 
 @pytest.mark.asyncio
-async def test_find_pattern_checks_tables_in_order_first_match_wins(service):
+async def test_find_pattern_names_the_table_a_match_came_from(service):
     await service.remember({
         "table": "mem_agent_a", "text": "in table a", "agent_id": "a", "pattern_key": "shared_key",
     })
@@ -381,3 +381,45 @@ async def test_find_pattern_defaults_to_one(service):
 async def test_find_pattern_reports_nothing_for_an_unknown_key(service):
     out = await service.find_pattern({"tables": ["mem_agent_test"], "pattern_key": "GIBTSNICHT"})
     assert out.get("found") is False
+
+
+@pytest.mark.asyncio
+async def test_find_pattern_merges_matches_from_every_granted_table(service):
+    """Stopping at the first table that matched hid notes: the EA writes most
+    observations to both the agent's table and the shared one, but not all of
+    them — so a key present in both could have a shared note the agent never
+    saw."""
+    await service.remember({
+        "table": "mem_agent_a", "agent_id": "a", "pattern_key": "K",
+        "text": "aus der Agenten-Tabelle",
+    })
+    await service.remember({
+        "table": "mem_shared_b", "agent_id": "a", "pattern_key": "K",
+        "text": "nur im gemeinsamen Speicher",
+    })
+    out = await service.find_pattern({
+        "tables": ["mem_agent_a", "mem_shared_b"], "pattern_key": "K", "limit": 3,
+    })
+    texts = [m["text"] for m in out["matches"]]
+    assert out["match_count"] == 2
+    assert "nur im gemeinsamen Speicher" in texts
+    assert "aus der Agenten-Tabelle" in texts
+
+
+@pytest.mark.asyncio
+async def test_find_pattern_collapses_the_same_note_written_to_two_tables(service):
+    """The EA writes the same observation twice — that must not consume two of
+    the three slots."""
+    for table in ("mem_agent_a", "mem_shared_b"):
+        await service.remember({
+            "table": table, "agent_id": "a", "pattern_key": "K",
+            "text": "Einstieg lag 22 Pips über dem Trigger",
+        })
+    await service.remember({
+        "table": "mem_shared_b", "agent_id": "a", "pattern_key": "K",
+        "text": "Stop stand 7 Pips hinter der Invalidierung",
+    })
+    out = await service.find_pattern({
+        "tables": ["mem_agent_a", "mem_shared_b"], "pattern_key": "K", "limit": 3,
+    })
+    assert out["match_count"] == 2, [m["text"] for m in out["matches"]]
