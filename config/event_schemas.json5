@@ -317,16 +317,6 @@
     "trace_root": false,
     "description": "Market snapshot build finished — instrument carries the pair"
   },
-  "decision_start": {
-    "required": ["agent_id", "trigger"],
-    "trace_root": false,
-    "description": "Decision-only LLM cycle started"
-  },
-  "decision_end": {
-    "required": ["agent_id", "trigger", "success"],
-    "trace_root": false,
-    "description": "Decision-only LLM cycle finished"
-  },
   "ec_cycle_start": {
     "required": ["ec_id", "trigger"],
     "trace_root": false,

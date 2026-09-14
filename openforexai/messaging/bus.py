@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC
 from pathlib import Path
 
@@ -52,6 +53,18 @@ _SCHEMA_PATH = Path("config/event_schemas.json5")
 
 # Maximum messages held per member queue before backpressure kicks in
 _MEMBER_QUEUE_MAXSIZE = 1_000
+
+# Request/response round-trips slower than this raise a warning + monitoring
+# event, keyed by the *response* EventType. Internal services (memory, repo,
+# market-data lookups) are expected to answer in low single-digit seconds —
+# a multi-minute stall here (the 2026-09-10 semantic-memory incident: an
+# offline-mode env var was read too late, causing HuggingFace network calls
+# to hang) previously only showed up via manual event-log forensics. LLM
+# calls get a much higher ceiling since 30-120s is normal for reasoning models.
+_SLOW_RESPONSE_THRESHOLD_S: dict[str, float] = {
+    "llm_response": 150.0,
+}
+_SLOW_RESPONSE_DEFAULT_THRESHOLD_S = 5.0
 
 
 class EventBus:
@@ -92,6 +105,10 @@ class EventBus:
         # When a response message arrives with a matching correlation_id,
         # the future is resolved and the message is NOT routed further.
         self._pending_futures: dict[str, asyncio.Future] = {}
+        # correlation_id → time.monotonic() at registration, used only to
+        # detect abnormally slow request/response round-trips (see
+        # _SLOW_RESPONSE_THRESHOLD_S below).
+        self._pending_since: dict[str, float] = {}
 
         # Internal inbound queue (all published messages land here)
         self._inbound: asyncio.Queue[AgentMessage] = asyncio.Queue()
@@ -202,10 +219,12 @@ class EventBus:
         if the caller times out before the response arrives.
         """
         self._pending_futures[correlation_id] = future
+        self._pending_since[correlation_id] = time.monotonic()
 
     def cancel_response_future(self, correlation_id: str) -> None:
         """Remove a pending future (call in finally after wait_for)."""
         self._pending_futures.pop(correlation_id, None)
+        self._pending_since.pop(correlation_id, None)
 
     # ── Publishing ────────────────────────────────────────────────────────────
 
@@ -297,8 +316,11 @@ class EventBus:
         cid = message.correlation_id
         if cid and cid in self._pending_futures:
             future = self._pending_futures.pop(cid)
+            since = self._pending_since.pop(cid, None)
             if not future.done():
                 future.set_result(message.payload)
+            if since is not None:
+                self._check_slow_response(event_val, sender_id, cid, time.monotonic() - since)
             self._emit_monitoring(
                 "eventbus",
                 event_val,
@@ -398,6 +420,26 @@ class EventBus:
         self._routing = routing
 
     # ── Monitoring helpers ────────────────────────────────────────────────────
+
+    def _check_slow_response(
+        self, event_val: str, sender_id: str, correlation_id: str, elapsed_s: float
+    ) -> None:
+        threshold = _SLOW_RESPONSE_THRESHOLD_S.get(event_val, _SLOW_RESPONSE_DEFAULT_THRESHOLD_S)
+        if elapsed_s <= threshold:
+            return
+        _log.warning(
+            "Slow request/response: %r took %.1fs (threshold %.1fs) — sender=%r correlation_id=%r",
+            event_val, elapsed_s, threshold, sender_id, correlation_id,
+        )
+        self._emit_monitoring(
+            "eventbus",
+            "SLOW_RESPONSE",
+            event=event_val,
+            sender=sender_id,
+            correlation_id=correlation_id,
+            elapsed_ms=round(elapsed_s * 1000, 1),
+            threshold_ms=round(threshold * 1000, 1),
+        )
 
     def _warn_unmatched(
         self, event_val: str, sender_id: str, message: AgentMessage

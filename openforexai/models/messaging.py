@@ -113,8 +113,6 @@ class EventType(StrEnum):
     AGENT_CYCLE_END    = "agent_cycle_end"
     SNAPSHOT_START     = "snapshot_start"
     SNAPSHOT_END       = "snapshot_end"
-    DECISION_START     = "decision_start"
-    DECISION_END       = "decision_end"
     EC_CYCLE_START     = "ec_cycle_start"
     EC_CYCLE_END       = "ec_cycle_end"
     CHARTSHOT_START    = "chartshot_start"

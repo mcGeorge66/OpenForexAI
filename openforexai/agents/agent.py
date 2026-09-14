@@ -1053,7 +1053,13 @@ class Agent:
                         },
                         correlation_id=correlation_id,
                     ), triggered_by=triggering_msg)
-                return
+                # Re-raise so _run_cycle's own handler (which is correct) sees the
+                # failure and publishes agent_cycle_end with success=False + the real
+                # error — otherwise it observes a clean return and reports success=True,
+                # silently discarding the whole decision (no analysis_result, nothing
+                # durable). This was measured live: ~50% of EURUSD-AA-PTJ and ~36% of
+                # USDJPY-AA-PTJ decisions were lost this way on 2026-09-11.
+                raise
             cycle_latency_ms = (perf_counter() - cycle_started) * 1000.0
             if cycle_latency_ms >= (_LONG_CYCLE_WARN_SECONDS * 1000.0):
                 self._logger.warning(
