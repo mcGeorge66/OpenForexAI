@@ -141,6 +141,11 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
   const [analysisRecords, setAnalysisRecords] = useState<AnalysisRecord[]>([])
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null)
   const [showAnalyses, setShowAnalyses] = useState(true)
+  // Bumped by refreshEntries so the detail/chart effect reruns even when the
+  // selection is unchanged — Refresh keeps the previously selected order, so
+  // without this the freshly broker-synced detail and candles were never
+  // refetched and the chart kept showing the pre-refresh state.
+  const [detailReloadToken, setDetailReloadToken] = useState(0)
   const [tablePercent, setTablePercent] = useState(48)
   const [draggingDivider, setDraggingDivider] = useState(false)
   const splitRootRef = useRef<HTMLDivElement | null>(null)
@@ -168,6 +173,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
       const data = await api.getOrderbookEntries({ status_filter: statusFilter, limit: maxOrders })
       setEntriesWithRef(data)
       setSelectedId(prev => (prev && data.some(entry => entry.id === prev) ? prev : (data[0]?.id ?? '')))
+      setDetailReloadToken(t => t + 1)
     } catch (err) {
       setError(String(err))
     } finally {
@@ -206,7 +212,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
     return () => {
       cancelled = true
     }
-  }, [selectedId, chartTimeframe])
+  }, [selectedId, chartTimeframe, detailReloadToken])
 
   const selectedSummary = useMemo(
     () => entries.find(entry => entry.id === selectedId) ?? null,
