@@ -111,6 +111,11 @@ class BrokerBase(AbstractBroker):
     ``stop_background_tasks()`` is called.
     """
 
+    # Consecutive failed account polls before the connection counts as lost.
+    # One failure is a hiccup; at the default 60s interval two of them mean the
+    # broker has been unreachable for around two minutes.
+    ACCOUNT_POLL_FAILURES_UNTIL_DISCONNECTED = 2
+
     def __init__(self, monitoring_bus=None) -> None:
         # Injected after construction via start_background_tasks() to avoid
         # circular imports at module level.
@@ -128,6 +133,13 @@ class BrokerBase(AbstractBroker):
         # When one of these pairs is later started as a trading pair it must be
         # cancelled and restarted with emit_agent_trigger=True.
         self._dxy_only_pairs: set[str] = set()
+        # Connection health, derived from the account poll (see
+        # _account_poll_loop). Until 2026-09-14 nothing noticed a broker going
+        # away: BROKER_CONNECTED was emitted once at startup, BROKER_DISCONNECTED
+        # was declared and never raised, and a dead terminal produced nothing but
+        # a stream of individual errors.
+        self._account_poll_failures = 0
+        self._connection_lost = False
 
     # ── Background task lifecycle ─────────────────────────────────────────────
 
@@ -664,6 +676,7 @@ class BrokerBase(AbstractBroker):
                     margin_level=status.margin_level,
                     trade_allowed=status.trade_allowed,
                 )
+                self._note_account_poll_success(source)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -672,7 +685,46 @@ class BrokerBase(AbstractBroker):
                     source, MonitoringEventType.ACCOUNT_POLL_ERROR,
                     broker_name=self.short_name, error=str(exc),
                 )
+                self._note_account_poll_failure(source, str(exc))
             await asyncio.sleep(interval_seconds)
+
+    # ── Connection health ─────────────────────────────────────────────────────
+
+    def _note_account_poll_success(self, source: str) -> None:
+        """A reachable broker. Reports recovery once, not on every poll."""
+        self._account_poll_failures = 0
+        if not self._connection_lost:
+            return
+        self._connection_lost = False
+        _log.info("Broker connection restored broker=%s", self.short_name)
+        self._emit(
+            source, MonitoringEventType.BROKER_CONNECTED,
+            broker_name=self.short_name, recovered=True,
+        )
+
+    def _note_account_poll_failure(self, source: str, error: str) -> None:
+        """Declare the connection lost after repeated failures, once per outage.
+
+        Edge-triggered on purpose: a broker that stays away would otherwise
+        raise an alert every minute, and a channel that repeats itself is one
+        people stop reading.
+        """
+        self._account_poll_failures += 1
+        if self._connection_lost:
+            return
+        if self._account_poll_failures < self.ACCOUNT_POLL_FAILURES_UNTIL_DISCONNECTED:
+            return
+        self._connection_lost = True
+        _log.error(
+            "Broker connection lost broker=%s after %d failed account polls: %s",
+            self.short_name, self._account_poll_failures, error,
+        )
+        self._emit(
+            source, MonitoringEventType.BROKER_DISCONNECTED,
+            broker_name=self.short_name,
+            failed_polls=self._account_poll_failures,
+            error=error,
+        )
 
     # ── Order-book sync loop ──────────────────────────────────────────────────
 
