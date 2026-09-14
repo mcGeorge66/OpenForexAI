@@ -118,6 +118,8 @@ export function TelegramDesigner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [active, setActive] = useState(false)
+  const [inactiveReason, setInactiveReason] = useState<string | null>(null)
 
   const rules = block.rules ?? {}
   const ruleNames = useMemo(() => Object.keys(rules).sort(), [rules])
@@ -129,11 +131,16 @@ export function TelegramDesigner() {
       const next = res.notifications ?? {}
       setBlock(next)
       setEventTypes(res.event_types ?? [])
+      setActive(res.active)
+      setInactiveReason(res.inactive_reason)
       if (res.severities && res.severities.length > 0) setSeverities(res.severities)
       const nextRules = next.rules ?? {}
       const first = Object.keys(nextRules).sort()[0]
-      if (first) { setSelected(first); setDraft(ruleToDraft(first, nextRules[first])) }
-      else { setSelected(null); setDraft(EMPTY_DRAFT) }
+      if (first) {
+        setSelected(first)
+        setDraft(ruleToDraft(first, nextRules[first]))
+        void loadRealSample(first, true)
+      } else { setSelected(null); setDraft(EMPTY_DRAFT) }
     } catch (err) { setError(String(err)) }
     finally { setLoading(false) }
   }
@@ -221,15 +228,64 @@ export function TelegramDesigner() {
 
   const handleSettingsSave = () => persist(rules, selected, 'Einstellungen gespeichert')
 
-  const sendTest = async () => {
+  /** Pull the newest real event of this type as the sample payload.
+   *  A preview against a made-up payload proves nothing; against the last
+   *  real one it shows exactly what the next message will look like. */
+  const loadRealSample = async (eventType: string, quiet = false): Promise<boolean> => {
+    if (!eventType) return false
+    try {
+      const events = await api.getEvents({ event_type: eventType, limit: 1 })
+      const payload = events?.[0]?.payload
+      if (!payload || typeof payload !== 'object') {
+        if (!quiet) setError(`Kein gespeichertes "${eventType}"-Event gefunden — Beispiel bitte von Hand eintragen.`)
+        return false
+      }
+      setSamplePayload(JSON.stringify(payload, null, 2))
+      if (!quiet) setMessage(`Letztes echtes "${eventType}"-Event geladen.`)
+      return true
+    } catch (err) {
+      if (!quiet) setError(String(err))
+      return false
+    }
+  }
+
+  const selectRule = (name: string) => {
+    setSelected(name)
+    setDraft(ruleToDraft(name, rules[name]))
+    setError(null); setMessage(null)
+    void loadRealSample(name, true)
+  }
+
+  /** Sends the channel smoke test — generic text, no rule involved. */
+  const sendChannelTest = async () => {
     setError(null); setMessage(null)
     try {
       const res = await api.sendNotificationTest({
-        severity: preview?.severity || draft.severity,
-        title: preview?.title || 'OpenForexAI Testnachricht',
-        text: preview?.text || 'Wenn du das liest, funktioniert der Kanal.',
+        severity: 'info',
+        title: 'OpenForexAI Testnachricht',
+        text: 'Wenn du das liest, funktioniert der Kanal.',
       })
       setMessage(res.sent ? 'Testnachricht verschickt.' : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
+    } catch (err) { setError(String(err)) }
+  }
+
+  /** Sends exactly what the preview shows, so the phone gets the real thing. */
+  const sendRuleTest = async () => {
+    setError(null); setMessage(null)
+    if (!preview) { setError('Keine Vorschau — Event-Typ wählen und Beispiel-Payload prüfen.'); return }
+    if (!preview.title && !preview.text) {
+      setError('Titel und Text sind leer — es gäbe nichts zu senden.')
+      return
+    }
+    try {
+      const res = await api.sendNotificationTest({
+        severity: preview.severity,
+        title: preview.title,
+        text: preview.text,
+      })
+      setMessage(res.sent
+        ? `Gesendet an Chat ${preview.chat_id ?? '—'}. Prüfe Telegram.`
+        : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
     } catch (err) { setError(String(err)) }
   }
 
@@ -263,14 +319,30 @@ export function TelegramDesigner() {
 
         {!loading && (
           <>
+            {/* Effective state, not the config flag — the two can disagree. */}
+            <div className={`rounded border px-3 py-2 text-xs flex items-start gap-2 ${
+              active
+                ? 'border-emerald-600/40 bg-emerald-950/30 text-emerald-200'
+                : 'border-red-600/50 bg-red-950/30 text-red-200'}`}>
+              <span className="mt-0.5">{active ? '●' : '▲'}</span>
+              <span>
+                {active ? (
+                  <>Dienst <strong>sendet</strong>{block.dry_run ? ' — aber Dry-Run ist an, es wird nur geloggt' : ''}.</>
+                ) : (
+                  <>Dienst sendet <strong>nicht</strong>. {inactiveReason}</>
+                )}
+              </span>
+            </div>
+
             {/* ── Channel settings ── */}
             <section className="border border-gray-700 rounded p-3 bg-gray-900/40">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm text-gray-200 font-medium">Kanal</h3>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => void sendTest()}
+                  <button onClick={() => void sendChannelTest()}
+                    title="Sendet eine allgemeine Nachricht, um den Kanal zu prüfen"
                     className="text-xs px-3 py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white flex items-center gap-1">
-                    <Send className="w-3.5 h-3.5" /> Testnachricht
+                    <Send className="w-3.5 h-3.5" /> Kanal testen
                   </button>
                   <button onClick={() => void handleSettingsSave()} disabled={saving}
                     className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 flex items-center gap-1">
@@ -282,7 +354,7 @@ export function TelegramDesigner() {
                 <label className="flex items-center gap-2 text-xs text-gray-300 pt-5">
                   <input type="checkbox" checked={block.enable ?? false} className="w-3.5 h-3.5 accent-emerald-500"
                     onChange={e => setBlock(b => ({ ...b, enable: e.target.checked }))} />
-                  Aktiv
+                  Aktiv (Konfiguration)
                 </label>
                 <label className="flex items-center gap-2 text-xs text-gray-300 pt-5">
                   <input type="checkbox" checked={block.dry_run ?? false} className="w-3.5 h-3.5 accent-amber-500"
@@ -336,7 +408,7 @@ export function TelegramDesigner() {
                   {ruleNames.map(name => (
                     <li key={name}>
                       <button
-                        onClick={() => { setSelected(name); setDraft(ruleToDraft(name, rules[name])); setError(null); setMessage(null) }}
+                        onClick={() => selectRule(name)}
                         className={`w-full text-left px-3 py-2 border-b border-gray-800 text-xs ${
                           name === selected ? 'bg-orange-950/80 text-gray-100' : 'text-gray-300 hover:bg-gray-900/60'}`}>
                         <span className="font-mono">{name}</span>
@@ -368,6 +440,11 @@ export function TelegramDesigner() {
                     {selected ? `Regel: ${selected}` : 'Neue Regel'}
                   </h3>
                   <div className="flex items-center gap-2">
+                    <button onClick={() => void sendRuleTest()} disabled={!preview?.title && !preview?.text}
+                      title="Schickt genau die Nachricht aus der Vorschau an Telegram"
+                      className="text-xs px-3 py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white disabled:opacity-40 flex items-center gap-1">
+                      <Send className="w-3.5 h-3.5" /> An Telegram senden
+                    </button>
                     <button onClick={() => void handleSave()} disabled={saving}
                       className="text-xs px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 flex items-center gap-1">
                       <Save className="w-3.5 h-3.5" /> Speichern
@@ -476,11 +553,18 @@ export function TelegramDesigner() {
 
                 {/* Preview */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <label className="block text-xs text-gray-300">
-                    Beispiel-Payload (JSON)
+                  <div className="block text-xs text-gray-300">
+                    <div className="flex items-center justify-between">
+                      <span>Beispiel-Payload (JSON)</span>
+                      <button onClick={() => void loadRealSample(draft.event)} disabled={!draft.event}
+                        title="Holt das letzte tatsächlich aufgetretene Event dieses Typs aus dem Event-Log"
+                        className="text-[10px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-40">
+                        Echtes Event laden
+                      </button>
+                    </div>
                     <textarea rows={7} className={`${inputCls} font-mono resize-y`} value={samplePayload}
                       onChange={e => setSamplePayload(e.target.value)} />
-                  </label>
+                  </div>
                   <div className="rounded border border-gray-700 bg-gray-950/50 p-2 text-xs">
                     <p className="text-[10px] text-white uppercase tracking-wide font-semibold mb-1">
                       Vorschau (echte Regel-Engine)

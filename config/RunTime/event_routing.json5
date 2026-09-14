@@ -220,6 +220,15 @@
       "owner": "telegram"
     },
     {
+      "id": "notify_position_closed",
+      "description": "position_closed → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "position_closed",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
       "id": "notify_risk_breach",
       "description": "risk_breach → NotificationService (abgeleitet aus notifications.rules)",
       "event": "risk_breach",

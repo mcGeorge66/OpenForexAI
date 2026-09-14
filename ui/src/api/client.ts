@@ -112,6 +112,10 @@ export type NotificationsConfigResponse = {
   event_types: string[]
   severities: string[]
   routing_owner: string
+  /** What the service actually does — not what the config asks for. */
+  active: boolean
+  inactive_reason: string | null
+  dry_run: boolean
 }
 
 export type NotificationsSaveResponse = {

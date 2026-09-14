@@ -5238,11 +5238,37 @@ async def get_notifications_config() -> dict[str, Any]:
         except Exception:
             event_types = []
 
+    # The config flag says what was intended; the service says what is. Showing
+    # only the flag would let the UI claim "active" while nothing is delivered —
+    # exactly what happened on 2026-09-14, when the process was started from a
+    # shell without the bot-token variable and Telegram was silently off.
+    active = False
+    inactive_reason: str | None = "NotificationService nicht verfügbar"
+    if _notification_service is not None:
+        active = bool(getattr(_notification_service, "_enabled", False))
+        if active:
+            inactive_reason = None
+        elif not block.get("enable", False):
+            inactive_reason = "In der Konfiguration abgeschaltet"
+        elif not getattr(_notification_service, "_bot_token", ""):
+            inactive_reason = (
+                "Kein Bot-Token — die Umgebungsvariable OFAI_TELEGRAM_BOT_TOKEN war "
+                "beim Start des Prozesses nicht gesetzt. Neustart aus einer Sitzung, "
+                "die sie kennt."
+            )
+        elif not getattr(_notification_service, "_chat_ids", {}):
+            inactive_reason = "Keine Chat-ID konfiguriert"
+        else:
+            inactive_reason = "Inaktiv, Grund unbekannt"
+
     return {
         "notifications": _redact_token(block),
         "event_types": event_types,
         "severities": list(_NOTIFY_SEVERITIES),
         "routing_owner": "telegram",
+        "active": active,
+        "inactive_reason": inactive_reason,
+        "dry_run": bool(getattr(_notification_service, "_dry_run", False)),
     }
 
 
