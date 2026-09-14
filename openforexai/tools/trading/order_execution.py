@@ -12,8 +12,11 @@ from openforexai.data.indicators import atr
 from openforexai.models.messaging import EventType
 from openforexai.models.trade import CloseReason, OrderBookEntry, OrderStatus
 from openforexai.tools.base import ToolContext, bus_request, candle_dicts_to_objects, repo_request
+from openforexai.utils.logging import get_logger
 from openforexai.utils.time_utils import is_market_open, utcnow
 from openforexai.utils.sync_keys import generate_sync_key
+
+_log = get_logger(__name__)
 
 
 AUTO_ORDER_DEFAULTS: dict[str, Any] = {
@@ -518,7 +521,27 @@ async def execute_place_order_arguments(
     )
 
     if order_response.get("error"):
-        raise RuntimeError(f"Order failed: {order_response['error']}")
+        # Write the reason onto the entry itself before propagating. Without this
+        # the row ends up marked REJECTED with an empty close_reasoning and the
+        # only trace of *why* is a transient log line — exactly how 10 rejected
+        # orders between 2026-09-11 and 2026-09-14 stayed invisible in the
+        # Orderbook. The broker-side rejection path below already does this
+        # (close_reasoning="retcode=...; comment=..."); the exception path did not.
+        error_text = str(order_response["error"])
+        try:
+            await repo_request(context, "update_order_book_entry", {
+                "entry_id": str(entry.id),
+                "updates": {
+                    "status": OrderStatus.REJECTED.value,
+                    "last_broker_sync": datetime.now(UTC).isoformat(),
+                    "close_reason": CloseReason.REJECTED.value,
+                    "close_reasoning": error_text[:1000],
+                },
+            })
+        except Exception as persist_exc:  # never mask the original failure
+            _log.error("Could not persist order failure reason on entry %s: %s",
+                       entry.id, persist_exc)
+        raise RuntimeError(f"Order failed: {error_text}")
 
     # Update order book entry with broker response
     result_status = order_response.get("status", "UNKNOWN")
