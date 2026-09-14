@@ -158,7 +158,7 @@ Ein Agent kann einen session- oder nachrichtenbewussten Agenten abfragen, um bev
 
 ---
 
-## Konfiguration in system.json5
+## Konfiguration in config.json5
 
 Bridge Tools werden Agenten über die `allowed_tools`-Liste zugewiesen und entweder inline in `tool_config` oder als Top-Level-`bridge_tools`-Liste definiert.
 
@@ -414,7 +414,7 @@ Eine Bridge-Tool-Definition allein aktiviert das Tool für keinen Agenten. Es mu
 
 Schritte zur Aktivierung eines Bridge Tools für einen Agenten:
 
-1. Bridge Tool definieren (im Bridge-Tools-Editor oder direkt in `system.json5`)
+1. Bridge Tool definieren (im Bridge-Tools-Editor oder direkt in `config.json5`)
 2. Agent Config für den gewünschten Agenten öffnen
 3. Den `name` des Bridge Tools zur `allowed_tools`-Liste des Agenten hinzufügen
 4. Agent Config speichern
@@ -474,6 +474,6 @@ Bridge Tools verwenden **direkte Adressierung** und durchlaufen nicht das Routin
 
 - [Agent Config](ui.config.agent_config.de.md) — Vollständige Agentenkonfiguration einschließlich Allowed Tools
 - [Event Routing](ui.config.event_routing.de.md) — Regelbasiertes Event-Routing (getrennt von Bridge-Tool-Direktadressierung)
-- [System Config](ui.config.system_config.de.md) — system.json5 direkt bearbeiten
+- [System Config](ui.config.system_config.de.md) — config.json5 direkt bearbeiten
 - [Snapshot Config](ui.config.snapshot_config.de.md) — Wie Agenten-Snapshots vor dem LLM-Aufruf assembliert werden
 - [Snapshot-Helferfunktionen](snapshot-helper-functions.de.md) — Python-Helfer für Transform-Scripts

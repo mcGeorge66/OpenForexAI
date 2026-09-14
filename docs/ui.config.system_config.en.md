@@ -2,9 +2,9 @@
 
 # System Config
 
-System Config is a direct editor for the central configuration file `config/system.json5`. This file controls the global runtime behavior of the entire system — log level, broker timezone offset, management API settings, LLM module references, broker module references, snapshot profiles, decision prompt profiles, agents, and event composers.
+System Config is a direct editor for the central configuration file `config/config.json5`. This file controls the global runtime behavior of the entire system — log level, broker timezone offset, management API settings, LLM module references, broker module references, snapshot profiles, decision prompt profiles, agents, and event composers.
 
-> **Caution:** This is the highest-impact configuration page. Errors in `system.json5` can prevent the system from starting or cause incorrect behavior across all agents simultaneously. Use the specialized wizard pages (Agent Config, Entity Config) for per-agent changes, and reserve System Config for global settings that have no dedicated UI.
+> **Caution:** This is the highest-impact configuration page. Errors in `config.json5` can prevent the system from starting or cause incorrect behavior across all agents simultaneously. Use the specialized wizard pages (Agent Config, Entity Config) for per-agent changes, and reserve System Config for global settings that have no dedicated UI.
 
 ---
 
@@ -13,7 +13,7 @@ System Config is a direct editor for the central configuration file `config/syst
 1. [Interface Overview](#interface-overview)
 2. [Save Behavior and Validation](#save-behavior-and-validation)
 3. [JSON5 Syntax Primer](#json5-syntax-primer)
-4. [Key Sections of system.json5](#key-sections-of-systemjson5)
+4. [Key Sections of config.json5](#key-sections-of-systemjson5)
 5. [The `system` Section](#the-system-section)
 6. [broker_candle_utc_offset_hours — Critical Setting](#broker_candle_utc_offset_hours--critical-setting)
 7. [The `modules` Section](#the-modules-section)
@@ -23,7 +23,7 @@ System Config is a direct editor for the central configuration file `config/syst
 11. [The `event_composers` Section](#the-event_composers-section)
 12. [Typical Workflow](#typical-workflow)
 13. [When to Use System Config vs. Dedicated Pages](#when-to-use-system-config-vs-dedicated-pages)
-14. [Recovering from a Broken system.json5](#recovering-from-a-broken-systemjson5)
+14. [Recovering from a Broken config.json5](#recovering-from-a-broken-systemjson5)
 
 ---
 
@@ -35,7 +35,7 @@ The System Config screen consists of four elements:
 
 | Element | Function |
 |---------|----------|
-| **File path** | Displays the full path to `config/system.json5` |
+| **File path** | Displays the full path to `config/config.json5` |
 | **Refresh** | Reloads the current file from disk, discarding any unsaved edits |
 | **Save** | Validates the JSON5 content and writes it to disk |
 | **Position** | Shows the current cursor position as line:column |
@@ -46,7 +46,7 @@ Displayed on the left side of the editor, scrolling in sync with the text. Use t
 
 ### Editor Textarea
 
-Free-text editing area for `system.json5`. Syntax highlighting is applied (read-only visual aid only — the textarea remains fully editable):
+Free-text editing area for `config.json5`. Syntax highlighting is applied (read-only visual aid only — the textarea remains fully editable):
 
 | Color | Applied to |
 |-------|-----------|
@@ -74,13 +74,13 @@ When you click Save, the system:
 3. If parsing fails: shows an error message with the line/column of the syntax error; does not write the file
 4. If parsing succeeds: writes the file to disk and shows "Saved."
 
-**Important**: A running system does not automatically re-read `system.json5`. Changes take effect at the next system start or when the affected module is reloaded. If you change only a module reference path, restart the system. If you change agent configuration, the dedicated Agent Config page offers hot-reload without a full restart.
+**Important**: A running system does not automatically re-read `config.json5`. Changes take effect at the next system start or when the affected module is reloaded. If you change only a module reference path, restart the system. If you change agent configuration, the dedicated Agent Config page offers hot-reload without a full restart.
 
 ---
 
 ## JSON5 Syntax Primer
 
-`system.json5` uses JSON5 format, which is a superset of JSON with quality-of-life additions:
+`config.json5` uses JSON5 format, which is a superset of JSON with quality-of-life additions:
 
 ```json5
 {
@@ -104,7 +104,7 @@ Keys do not require quotes unless they contain special characters. Trailing comm
 
 ---
 
-## Key Sections of system.json5
+## Key Sections of config.json5
 
 The file is organized into these top-level sections:
 
@@ -254,7 +254,7 @@ Adding a new LLM or broker adapter: add its config file path to the appropriate 
 
 ## The `snapshot_profiles` Section
 
-Snapshot profiles can be defined inline in `system.json5` or referenced by path. In most installations, profiles are stored in `system.json5` directly for single-file simplicity. The Snapshot Config UI page reads from and writes to these definitions.
+Snapshot profiles can be defined inline in `config.json5` or referenced by path. In most installations, profiles are stored in `config.json5` directly for single-file simplicity. The Snapshot Config UI page reads from and writes to these definitions.
 
 The profile structure is documented fully in [Snapshot Config](ui.config.snapshot_config.en.md).
 
@@ -325,9 +325,9 @@ For module path changes:
 
 ---
 
-## Recovering from a Broken system.json5
+## Recovering from a Broken config.json5
 
-If you save a `system.json5` with a syntax error and the system fails to start:
+If you save a `config.json5` with a syntax error and the system fails to start:
 
 **Option 1 — Fix via UI** (if the UI still loads)
 1. Open System Config
@@ -336,14 +336,14 @@ If you save a `system.json5` with a syntax error and the system fails to start:
 4. Save again
 
 **Option 2 — Fix via file editor**
-1. Open `config/system.json5` in any text editor
+1. Open `config/config.json5` in any text editor
 2. Find and fix the syntax error
 3. Restart the system
 
 **Option 3 — Restore from backup**
-The system writes a backup before each save to `config/system.json5.bak`. If the current file is corrupt:
-1. Rename `config/system.json5` to `config/system.json5.broken`
-2. Rename `config/system.json5.bak` to `config/system.json5`
+The system writes a backup before each save to `config/config.json5.bak`. If the current file is corrupt:
+1. Rename `config/config.json5` to `config/config.json5.broken`
+2. Rename `config/config.json5.bak` to `config/config.json5`
 3. Restart
 
 **Common syntax errors:**

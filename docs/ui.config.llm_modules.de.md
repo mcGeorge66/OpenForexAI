@@ -69,7 +69,7 @@ Jeder Agent gibt an, welches LLM-Modul er über das `llm`-Feld in seiner Agent-C
 
 | Element | Funktion |
 |---------|----------|
-| **Modul-Auswahl** | Dropdown mit allen LLM-Modulen aus `modules.llm` der `system.json5` |
+| **Modul-Auswahl** | Dropdown mit allen LLM-Modulen aus `modules.llm` der `config.json5` |
 | **Dateipfad** | Vollständiger Pfad zur Konfigurationsdatei des gewählten Moduls |
 | **Refresh** | Aktuelle Dateiversion von der Festplatte neu laden (nur aktiv wenn Modul gewählt) |
 | **Save** | Validieren und Datei schreiben (nur aktiv wenn Modul gewählt) |
@@ -77,7 +77,7 @@ Jeder Agent gibt an, welches LLM-Modul er über das `llm`-Feld in seiner Agent-C
 
 ### Modul-Auswahl
 
-Das Dropdown wird aus dem `modules.llm`-Array in `system.json5` befüllt. Jeder Eintrag in diesem Array ist ein Dateipfad; das Dropdown zeigt den Dateinamen-Teil (z.B. `azure_azmin.json5`).
+Das Dropdown wird aus dem `modules.llm`-Array in `config.json5` befüllt. Jeder Eintrag in diesem Array ist ein Dateipfad; das Dropdown zeigt den Dateinamen-Teil (z.B. `azure_azmin.json5`).
 
 Nach der Auswahl eines Moduls lädt der Editor seinen Dateiinhalt automatisch.
 
@@ -119,7 +119,7 @@ Das LLM-Modul übernimmt neue Konfiguration beim nächsten Systemstart oder Modu
 
 Der Pfad-Kettenprozess für ein LLM-Modul:
 
-1. `config/system.json5` hat `modules.llm: ["config/llm/azure_azmin.json5"]`
+1. `config/config.json5` hat `modules.llm: ["config/llm/azure_azmin.json5"]`
 2. Beim Start liest das System diesen Pfad und lädt `azure_azmin.json5`
 3. Das Modul wird als LLM-Service instanziiert und als `llm:azure_azmin` auf dem Bus registriert
 4. Eine Routing-Regel in Event Routing sendet `llm_request`-Events an `llm:azure_azmin`
@@ -127,7 +127,7 @@ Der Pfad-Kettenprozess für ein LLM-Modul:
 
 Neues LLM-Modul hinzufügen:
 1. Konfigurationsdatei erstellen (z.B. `config/llm/neuer_provider.json5`)
-2. Pfad zu `modules.llm` in `system.json5` hinzufügen
+2. Pfad zu `modules.llm` in `config.json5` hinzufügen
 3. Routing-Regel hinzufügen, die `llm_request` an `llm:neuer_provider` leitet
 4. System neu starten
 
@@ -300,7 +300,7 @@ OpenForexAI unterstützt mehrere gleichzeitig laufende LLM-Module.
 
 ### Konfiguration
 
-In `system.json5`:
+In `config.json5`:
 ```json5
 {
   modules: {

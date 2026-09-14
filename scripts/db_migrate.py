@@ -2,7 +2,7 @@
 """CLI: run database migrations.
 
 Usage:
-    python scripts/db_migrate.py [--config config/system.json5]
+    python scripts/db_migrate.py [--config config/config.json5]
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run DB migrations.")
-    parser.add_argument("--config", default="config/system.json5")
+    parser.add_argument("--config", default="config/config.json5")
     return parser.parse_args()
 
 

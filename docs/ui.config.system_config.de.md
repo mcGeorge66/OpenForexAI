@@ -2,9 +2,9 @@
 
 # System Config
 
-System Config ist ein direkter Editor für die zentrale Konfigurationsdatei `config/system.json5`. Diese Datei steuert das globale Laufzeitverhalten des gesamten Systems — Log-Level, Broker-Zeitzonen-Offset, Management-API-Einstellungen, LLM-Modul-Referenzen, Broker-Modul-Referenzen, Snapshot-Profile, Decision-Prompt-Profile, Agenten und Event-Composer.
+System Config ist ein direkter Editor für die zentrale Konfigurationsdatei `config/config.json5`. Diese Datei steuert das globale Laufzeitverhalten des gesamten Systems — Log-Level, Broker-Zeitzonen-Offset, Management-API-Einstellungen, LLM-Modul-Referenzen, Broker-Modul-Referenzen, Snapshot-Profile, Decision-Prompt-Profile, Agenten und Event-Composer.
 
-> **Achtung:** Dies ist die einflussreichste Konfigurationsseite. Fehler in der `system.json5` können das System am Start hindern oder gleichzeitig falsches Verhalten bei allen Agenten verursachen. Die spezialisierten Wizard-Seiten (Agent Config, Entity Config) für agentenspezifische Änderungen verwenden und System Config für globale Einstellungen reservieren, die keine dedizierte UI haben.
+> **Achtung:** Dies ist die einflussreichste Konfigurationsseite. Fehler in der `config.json5` können das System am Start hindern oder gleichzeitig falsches Verhalten bei allen Agenten verursachen. Die spezialisierten Wizard-Seiten (Agent Config, Entity Config) für agentenspezifische Änderungen verwenden und System Config für globale Einstellungen reservieren, die keine dedizierte UI haben.
 
 ---
 
@@ -13,7 +13,7 @@ System Config ist ein direkter Editor für die zentrale Konfigurationsdatei `con
 1. [Oberfläche](#oberfläche)
 2. [Speicherverhalten und Validierung](#speicherverhalten-und-validierung)
 3. [JSON5-Syntax-Grundlagen](#json5-syntax-grundlagen)
-4. [Wichtige Abschnitte der system.json5](#wichtige-abschnitte-der-systemjson5)
+4. [Wichtige Abschnitte der config.json5](#wichtige-abschnitte-der-systemjson5)
 5. [Der `system`-Abschnitt](#der-system-abschnitt)
 6. [broker_candle_utc_offset_hours — Kritische Einstellung](#broker_candle_utc_offset_hours--kritische-einstellung)
 7. [Der `modules`-Abschnitt](#der-modules-abschnitt)
@@ -23,7 +23,7 @@ System Config ist ein direkter Editor für die zentrale Konfigurationsdatei `con
 11. [Der `event_composers`-Abschnitt](#der-event_composers-abschnitt)
 12. [Typischer Ablauf](#typischer-ablauf)
 13. [Wann System Config vs. dedizierte Seiten verwenden](#wann-system-config-vs-dedizierte-seiten-verwenden)
-14. [Wiederherstellung nach einer defekten system.json5](#wiederherstellung-nach-einer-defekten-systemjson5)
+14. [Wiederherstellung nach einer defekten config.json5](#wiederherstellung-nach-einer-defekten-systemjson5)
 
 ---
 
@@ -35,7 +35,7 @@ Der System Config-Bildschirm besteht aus vier Elementen:
 
 | Element | Funktion |
 |---------|----------|
-| **Dateipfad** | Zeigt den vollständigen Pfad zu `config/system.json5` |
+| **Dateipfad** | Zeigt den vollständigen Pfad zu `config/config.json5` |
 | **Refresh** | Lädt die aktuelle Datei von der Festplatte neu und verwirft ungespeicherte Bearbeitungen |
 | **Save** | Validiert den JSON5-Inhalt und schreibt ihn auf die Festplatte |
 | **Position** | Zeigt die aktuelle Cursor-Position als Zeile:Spalte |
@@ -46,7 +46,7 @@ Links im Editor angezeigt, synchron mit dem Text scrollend. Position-Anzeige in 
 
 ### Editor-Textarea
 
-Freitextbearbeitungsbereich für `system.json5`. Syntax-Hervorhebung (nur visuelles Hilfsmittel — die Textarea bleibt vollständig bearbeitbar):
+Freitextbearbeitungsbereich für `config.json5`. Syntax-Hervorhebung (nur visuelles Hilfsmittel — die Textarea bleibt vollständig bearbeitbar):
 
 | Farbe | Angewendet auf |
 |-------|---------------|
@@ -74,13 +74,13 @@ Beim Klicken auf Save:
 3. Bei Parse-Fehler: Fehlermeldung mit Zeile/Spalte des Syntaxfehlers; Datei wird nicht geschrieben
 4. Bei Erfolg: Datei auf Festplatte geschrieben, „Saved." angezeigt
 
-**Wichtig**: Ein laufendes System liest `system.json5` nicht automatisch neu. Änderungen treten beim nächsten Systemstart oder beim Neuladen des betroffenen Moduls in Kraft. Wenn nur ein Modul-Referenzpfad geändert wird, System neu starten. Für Agenten-Konfigurationsänderungen bietet die dedizierte Agent Config-Seite Hot-Reload ohne vollständigen Neustart.
+**Wichtig**: Ein laufendes System liest `config.json5` nicht automatisch neu. Änderungen treten beim nächsten Systemstart oder beim Neuladen des betroffenen Moduls in Kraft. Wenn nur ein Modul-Referenzpfad geändert wird, System neu starten. Für Agenten-Konfigurationsänderungen bietet die dedizierte Agent Config-Seite Hot-Reload ohne vollständigen Neustart.
 
 ---
 
 ## JSON5-Syntax-Grundlagen
 
-`system.json5` verwendet das JSON5-Format, eine Obermenge von JSON mit Komfortverbesserungen:
+`config.json5` verwendet das JSON5-Format, eine Obermenge von JSON mit Komfortverbesserungen:
 
 ```json5
 {
@@ -104,7 +104,7 @@ Keys benötigen keine Anführungszeichen, außer sie enthalten Sonderzeichen. Ab
 
 ---
 
-## Wichtige Abschnitte der system.json5
+## Wichtige Abschnitte der config.json5
 
 | Abschnitt | Zweck |
 |-----------|-------|
@@ -252,7 +252,7 @@ Neues LLM oder Broker-Adapter hinzufügen: Konfigurationsdatei-Pfad zum entsprec
 
 ## Der `snapshot_profiles`-Abschnitt
 
-Snapshot-Profile können direkt in `system.json5` definiert oder per Pfad referenziert werden. In den meisten Installationen werden Profile direkt in `system.json5` für Einfachheit einer einzelnen Datei gespeichert. Die Snapshot Config UI-Seite liest aus diesen Definitionen und schreibt in sie.
+Snapshot-Profile können direkt in `config.json5` definiert oder per Pfad referenziert werden. In den meisten Installationen werden Profile direkt in `config.json5` für Einfachheit einer einzelnen Datei gespeichert. Die Snapshot Config UI-Seite liest aus diesen Definitionen und schreibt in sie.
 
 Die Profilstruktur ist vollständig in [Snapshot Config](ui.config.snapshot_config.de.md) dokumentiert.
 
@@ -322,9 +322,9 @@ Für Modul-Pfad-Änderungen:
 
 ---
 
-## Wiederherstellung nach einer defekten system.json5
+## Wiederherstellung nach einer defekten config.json5
 
-Wenn eine `system.json5` mit einem Syntaxfehler gespeichert wurde und das System nicht startet:
+Wenn eine `config.json5` mit einem Syntaxfehler gespeichert wurde und das System nicht startet:
 
 **Option 1 — Über UI reparieren** (wenn die UI noch lädt)
 1. System Config öffnen
@@ -333,14 +333,14 @@ Wenn eine `system.json5` mit einem Syntaxfehler gespeichert wurde und das System
 4. Erneut speichern
 
 **Option 2 — Über Datei-Editor reparieren**
-1. `config/system.json5` in einem Texteditor öffnen
+1. `config/config.json5` in einem Texteditor öffnen
 2. Syntaxfehler finden und reparieren
 3. System neu starten
 
 **Option 3 — Aus Backup wiederherstellen**
-Das System schreibt vor jedem Speichern ein Backup nach `config/system.json5.bak`. Wenn die aktuelle Datei beschädigt ist:
-1. `config/system.json5` umbenennen in `config/system.json5.broken`
-2. `config/system.json5.bak` umbenennen in `config/system.json5`
+Das System schreibt vor jedem Speichern ein Backup nach `config/config.json5.bak`. Wenn die aktuelle Datei beschädigt ist:
+1. `config/config.json5` umbenennen in `config/config.json5.broken`
+2. `config/config.json5.bak` umbenennen in `config/config.json5`
 3. Neu starten
 
 **Häufige Syntaxfehler:**

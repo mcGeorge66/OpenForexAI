@@ -370,7 +370,7 @@ export function ChartShotConfigEditor() {
       <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-700 bg-gray-900">
         <div>
           <h2 className="text-base font-semibold text-gray-100">Chartshot Config</h2>
-          <p className="text-xs text-white mt-0.5">config/system.json5 → chartshot</p>
+          <p className="text-xs text-white mt-0.5">config/config.json5 → chartshot</p>
         </div>
         <div className="flex items-center gap-2">
           {message && (
@@ -616,7 +616,7 @@ export function ChartShotConfigEditor() {
 
           {/* JSON preview */}
           <div>
-            <label className="block text-xs text-white mb-1.5">Preview (system.json5 entry)</label>
+            <label className="block text-xs text-white mb-1.5">Preview (config.json5 entry)</label>
             <pre className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-[11px] font-mono text-white overflow-x-auto whitespace-pre">
               {JSON.stringify({ [selected]: current }, null, 2)}
             </pre>

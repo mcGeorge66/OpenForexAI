@@ -62,7 +62,7 @@ bash scripts/setup_linux.sh
 The setup script will:
 - install backend and UI dependencies
 - discover broker/LLM adapters dynamically and create module files as `<adapter>.<name>.json5`
-- create `config/system.json5` with selected broker/LLM module references
+- create `config/config.json5` with selected broker/LLM module references
 - scan selected module config files for `${...}` placeholders
 - collect required environment values into `.env`
 - create startup scripts

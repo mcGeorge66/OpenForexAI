@@ -9,18 +9,19 @@ from typing import Any
 
 import json5
 
+from openforexai.config.json_loader import resolve_config_path
 from openforexai.tools.base import BaseTool, ToolContext
 
 _log = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_CONFIG_PATH = _PROJECT_ROOT / "config" / "system.json5"
+_CONFIG_PATH = resolve_config_path(_PROJECT_ROOT / "config")
 
 
 def _load_system_config() -> dict[str, Any]:
     try:
         return json5.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception as exc:
-        _log.warning("Could not load system.json5: %s", exc)
+        _log.warning("Could not load config.json5: %s", exc)
         return {}
 
 
@@ -75,7 +76,7 @@ class GetNewsTool(BaseTool):
         json_file = news_cfg.get("economic_calendar_file", "")
         if not json_file:
             raise RuntimeError(
-                "system.news.economic_calendar_file is not configured in system.json5"
+                "system.news.economic_calendar_file is not configured in config.json5"
             )
 
         output_dir = Path(

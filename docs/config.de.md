@@ -16,7 +16,7 @@ Es enthält:
 
 ```text
 config/
-  system.json5
+  config.json5
   config.default.json5
   RunTime/
     agent_tools.json5
@@ -30,9 +30,9 @@ config/
       *.meta.json5
 ```
 
-## `system.json5`
+## `config.json5`
 
-`system.json5` ist das zentrale Live-Konfigurationsdokument.
+`config.json5` ist das zentrale Live-Konfigurationsdokument.
 
 Wichtige aktuelle Top-Level-Bereiche sind:
 
@@ -195,7 +195,7 @@ Diese Dateien werden bearbeitet über:
 
 Wichtige Punkte:
 
-- aktive Module werden über Namen aus `system.json5` referenziert
+- aktive Module werden über Namen aus `config.json5` referenziert
 - Sample-Dateien dokumentieren Pflichtfelder
 - Meta-Dateien beschreiben Struktur und UI-Hinweise
 

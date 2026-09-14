@@ -6,7 +6,7 @@ The user will share their current snapshot profile configuration (JSON) with you
 ## What is a Snapshot Profile?
 
 A Snapshot Profile defines the market data package that gets assembled before each LLM
-analysis cycle. It is configured in `config/system.json5` under `snapshot_profiles`.
+analysis cycle. It is configured in `config/config.json5` under `snapshot_profiles`.
 
 The snapshot is passed to the AA (Analysis Agent) as the complete market context for its
 LLM call — either as the user message (normal analysis cycle) or, for a decision-only call,

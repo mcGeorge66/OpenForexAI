@@ -257,7 +257,7 @@ def beispiel():
 
 ## Siehe auch
 
-- [System Config](ui.config.system_config.de.md) — system.json5 direkt bearbeiten
+- [System Config](ui.config.system_config.de.md) — config.json5 direkt bearbeiten
 - [Agent Config](ui.config.agent_config.de.md) — Agenten-Definitionen und Einstellungen
 - [Decision Prompt](ui.config.decision_prompt.de.md) — LLM-System-Prompts
 - [Package Manager](ui.config.package_manager.de.md) — Konfigurationspakete exportieren und importieren

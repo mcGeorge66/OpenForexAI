@@ -16,7 +16,7 @@ The `Config` area is the main maintenance surface for profiles, routing, and mod
 | [Bridge Tools](ui.config.bridge_tools.en.md) | Tool exposure and bridge-style tool configurations |
 | [Event Routing](ui.config.event_routing.en.md) | Rules that determine which agents receive which events |
 | [AI-Assistant](ui.config.ai_assistant.en.md) | Context files for the embedded AI-Assistant chat found across the config editors |
-| [System Config](ui.config.system_config.en.md) | Central system.json5 global parameters |
+| [System Config](ui.config.system_config.en.md) | Central config.json5 global parameters |
 | [Helper Config](ui.config.helper_config.en.md) | Python helper functions for snapshot transform scripts |
 | [Package Manager](ui.config.package_manager.en.md) | Export and import selected configuration packages |
 | [Broker Modules](ui.config.broker_modules.en.md) | Broker adapter connections (MT5 / OANDA) |
@@ -210,9 +210,9 @@ Suggested screenshot:
 
 ## System Config
 
-Use `System Config` to edit the central `system.json5`.
+Use `System Config` to edit the central `config.json5`.
 
-This is the highest-impact config page and should be handled carefully because it affects global runtime behavior. The system.json5 file contains:
+This is the highest-impact config page and should be handled carefully because it affects global runtime behavior. The config.json5 file contains:
 
 - global runtime settings
 - agent definitions (or references to them)
@@ -221,7 +221,7 @@ This is the highest-impact config page and should be handled carefully because i
 - event routing rules
 - module references
 
-Editing system.json5 directly gives full control but requires careful JSON5 syntax. Validation errors here can prevent the system from starting.
+Editing config.json5 directly gives full control but requires careful JSON5 syntax. Validation errors here can prevent the system from starting.
 
 **Best practice**: use the dedicated Config pages (Agent Config, Snapshot Config, Decision Prompt, Event Routing) for routine changes. Use System Config only when you need to make changes that are not exposed through the individual pages, or when importing/exporting the full configuration.
 

@@ -174,7 +174,7 @@ Retrieve economic calendar events for the current pair from the MQL5 calendar.
 ### chartshot
 Render a candlestick chart as PNG. Returns a file path and image marker for LLM context injection.
 
-**Parameters:** `timeframe`* (M5|M15|M30|H1|H4|D1), `candles` (10–500, default 200), `pair` (override), `config` (named config from system.json5, default "default"), `filename` (auto-generated if omitted)
+**Parameters:** `timeframe`* (M5|M15|M30|H1|H4|D1), `candles` (10–500, default 200), `pair` (override), `config` (named config from config.json5, default "default"), `filename` (auto-generated if omitted)
 
 **Returns:**
 ```python

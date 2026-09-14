@@ -158,7 +158,7 @@ An agent can query a session-aware or news-aware agent to check for upcoming hig
 
 ---
 
-## Configuration in system.json5
+## Configuration in config.json5
 
 Bridge Tools are assigned to agents via the `allowed_tools` list and defined either inline in `tool_config` or as a top-level `bridge_tools` list.
 
@@ -414,7 +414,7 @@ A bridge tool definition alone does not activate the tool for any agent. It must
 
 Steps to activate a bridge tool for an agent:
 
-1. Define the bridge tool (in the Bridge Tools editor or directly in `system.json5`)
+1. Define the bridge tool (in the Bridge Tools editor or directly in `config.json5`)
 2. Open Agent Config for the target agent
 3. Add the bridge tool's `name` to the agent's `allowed_tools` list
 4. Save the agent config
@@ -482,6 +482,6 @@ Bridge Tools use **direct targeting** and do not pass through the routing rule s
 
 - [Agent Config](ui.config.agent_config.en.md) — Full agent configuration including allowed tools
 - [Event Routing](ui.config.event_routing.en.md) — Rule-based event routing (separate from bridge tool direct targeting)
-- [System Config](ui.config.system_config.en.md) — Editing system.json5 directly
+- [System Config](ui.config.system_config.en.md) — Editing config.json5 directly
 - [Snapshot Config](ui.config.snapshot_config.en.md) — How agent snapshots are assembled before the LLM is called
 - [Snapshot Helper Functions](snapshot-helper-functions.en.md) — Python helpers available in transform scripts

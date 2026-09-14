@@ -6,7 +6,7 @@ The **Chartshot Config** page manages named presets for the `chartshot` tool. Th
 
 **When is this worth it?** Pure numeric analysis (OHLC values, indicator numbers) is often enough for an LLM, but some patterns — a clean double bottom, a flag, a breakout from a recognizable channel — are awkward to describe in text, while a vision-capable LLM spots them instantly on an image. Chartshot pays off mainly when the prompt should reason about visual chart patterns, not for pure numeric evaluation (that's what `calculate_indicator`/`get_candles` are for).
 
-Stored under `config/system.json5` → `chartshot`.
+Stored under `config/config.json5` → `chartshot`.
 
 ---
 
@@ -41,7 +41,7 @@ The LLM adapter automatically recognizes these markers in the tool result and at
 
 ### 3.1 Header
 
-The `AI Assistant` button opens the embedded [AI-Assistant](ui.config.ai_assistant.en.md) chat with context about the preset currently being edited. `Reload` reloads from the server, `Save` writes the entire `chartshot` configuration back to `system.json5`. `Delete` removes the currently selected preset — except `default`.
+The `AI Assistant` button opens the embedded [AI-Assistant](ui.config.ai_assistant.en.md) chat with context about the preset currently being edited. `Reload` reloads from the server, `Save` writes the entire `chartshot` configuration back to `config.json5`. `Delete` removes the currently selected preset — except `default`.
 
 ### 3.2 Output mode
 
@@ -74,7 +74,7 @@ Same panel as Chart Analysis / Prompt Workbench.
 
 ### 3.7 Preview (JSON)
 
-At the bottom of the editor: a read-only preview of the exact `system.json5` entry that will be written for this preset on save — useful for a quick sanity check before saving, e.g. to catch an indicator accidentally added twice.
+At the bottom of the editor: a read-only preview of the exact `config.json5` entry that will be written for this preset on save — useful for a quick sanity check before saving, e.g. to catch an indicator accidentally added twice.
 
 ---
 

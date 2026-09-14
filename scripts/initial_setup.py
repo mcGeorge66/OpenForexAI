@@ -20,7 +20,7 @@ from rich.table import Table
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT / "config"
-SYSTEM_CFG = CONFIG_DIR / "system.json5"
+SYSTEM_CFG = CONFIG_DIR / "config.json5"
 ENV_FILE = ROOT / ".env"
 
 BROKER_MODULE_DIR = ROOT / "config" / "modules" / "broker"
@@ -245,7 +245,7 @@ def _ask_existing_actions(kind: str, existing: dict[str, str]) -> tuple[bool, bo
     if not existing:
         return False, True
     existing_list = ", ".join(sorted(existing.keys()))
-    console.print(f"\n[cyan]Found existing {kind} modules in system.json5:[/cyan] {existing_list}")
+    console.print(f"\n[cyan]Found existing {kind} modules in config.json5:[/cyan] {existing_list}")
     reconfigure = Confirm.ask(f"Reconfigure existing {kind} modules?", default=False)
     add_additional = Confirm.ask(f"Add additional {kind} modules?", default=not reconfigure)
     return reconfigure, add_additional
@@ -378,7 +378,7 @@ def _materialize_configs(
     return result, created_paths
 
 def _write_system_config(selected_llm: dict[str, str], selected_broker: dict[str, str]) -> None:
-    # NEVER blindly overwrite an existing system.json5: it also holds agents,
+    # NEVER blindly overwrite an existing config.json5: it also holds agents,
     # snapshot_profiles and event_composers. Merge the module selection into the
     # existing document and write the whole thing back, so only modules.llm /
     # modules.broker change. Only a truly fresh install gets a minimal stub.

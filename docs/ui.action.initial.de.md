@@ -113,7 +113,7 @@ Wenn ein LLM-Modul als **GETRENNT** angezeigt wird:
 
 **Maßnahmen bei getrenntem LLM:**
 1. Prüfen Sie die Netzwerkverbindung.
-2. Überprüfen Sie den API-Key in der Konfigurationsdatei (`system.json5`).
+2. Überprüfen Sie den API-Key in der Konfigurationsdatei (`config.json5`).
 3. Prüfen Sie den Status des LLM-Anbieters (Azure-Portal, OpenAI-Status-Seite, Anthropic-Status).
 4. Versuchen Sie einen **Restart Now**, um die Verbindung neu aufzubauen.
 5. Falls das Problem anhält: Prüfen Sie die Logs auf detaillierte Fehlermeldungen.
@@ -361,7 +361,7 @@ Wenn Sie Konfigurationsänderungen vornehmen möchten (neue Agents, andere LLM-P
 
 1. **Suspend klicken** — Alle Agent-Zyklen werden pausiert. Das orangefarbene SUSPENDED-Badge erscheint.
 2. **Warten**, bis alle laufenden Agents ihren aktuellen Zyklus abgeschlossen haben. Im Monitor: keine neuen RUNNING-Ereignisse.
-3. **Konfigurationsänderungen vornehmen** in `system.json5` oder über die Konfigurations-UI.
+3. **Konfigurationsänderungen vornehmen** in `config.json5` oder über die Konfigurations-UI.
 4. **Änderungen speichern.**
 5. **Restart Now klicken** — Damit die neuen Konfigurationen geladen werden.
 6. **Warten**, bis der Neustart abgeschlossen ist (alle Verbindungen wieder grün, Agents im IDLE-Status).
@@ -403,7 +403,7 @@ Maßnahmen:
 1. Prüfen Sie Ihre Internetverbindung.
 2. Prüfen Sie den Azure/OpenAI/Anthropic-Dienststatus.
 3. Versuchen Sie **Restart Now** — oft reicht das, um die Verbindung neu aufzubauen.
-4. Falls das Problem anhält: Prüfen Sie API-Key und Endpunkt in der Konfiguration (`system.json5`, Abschnitt `llm_modules`).
+4. Falls das Problem anhält: Prüfen Sie API-Key und Endpunkt in der Konfiguration (`config.json5`, Abschnitt `llm_modules`).
 5. Als temporäre Lösung: **Suspend** klicken, bis das LLM-Problem behoben ist, um endlose Fehler-Zyklen zu vermeiden.
 
 #### Broker-Verbindungsabbruch

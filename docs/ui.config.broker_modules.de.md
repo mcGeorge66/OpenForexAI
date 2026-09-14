@@ -60,7 +60,7 @@ Der Adapter veröffentlicht:
 
 | Element | Funktion |
 |---------|----------|
-| **Modul-Auswahl** | Dropdown mit allen Broker-Modulen aus `modules.broker` in `system.json5` |
+| **Modul-Auswahl** | Dropdown mit allen Broker-Modulen aus `modules.broker` in `config.json5` |
 | **Dateipfad** | Vollständiger Pfad zur Konfigurationsdatei des gewählten Moduls |
 | **Refresh** | Aktuelle Dateiversion von der Festplatte neu laden (nur aktiv wenn Modul gewählt) |
 | **Save** | Validieren und Datei schreiben (nur aktiv wenn Modul gewählt) |
@@ -68,7 +68,7 @@ Der Adapter veröffentlicht:
 
 ### Modul-Auswahl
 
-Das Dropdown wird aus dem `modules.broker`-Array in `system.json5` befüllt. Jeder Eintrag ist ein Dateipfad; das Dropdown zeigt den Dateinamen-Teil (z.B. `oxs_mt5.json5`). Nach der Auswahl lädt der Editor den Dateiinhalt.
+Das Dropdown wird aus dem `modules.broker`-Array in `config.json5` befüllt. Jeder Eintrag ist ein Dateipfad; das Dropdown zeigt den Dateinamen-Teil (z.B. `oxs_mt5.json5`). Nach der Auswahl lädt der Editor den Dateiinhalt.
 
 ### Editor-Textarea
 
@@ -96,7 +96,7 @@ Der Broker-Adapter übernimmt neue Konfiguration beim nächsten Systemstart oder
 
 Pfad-Kettenprozess für ein Broker-Modul:
 
-1. `config/system.json5` hat `modules.broker: ["config/broker/oxs_mt5.json5"]`
+1. `config/config.json5` hat `modules.broker: ["config/broker/oxs_mt5.json5"]`
 2. Beim Start liest das System diesen Pfad und lädt `oxs_mt5.json5`
 3. Der Adapter wird instanziiert und als `{short_name}-ALL___-BK-CONN` auf dem Bus registriert
 4. Das `short_name`-Feld in der Konfig bestimmt das Broker-Segment der Bus-ID
@@ -186,7 +186,7 @@ Der MT5-Adapter erfordert:
 
 ### MT5-Terminal-Zeit (Broker-Server-Zeit)
 
-MT5-Kerzen-Zeitstempel sind in der Broker-Server-Lokalzeit. Die `broker_candle_utc_offset_hours`-Einstellung in `system.json5` muss mit dem Broker-Server-UTC-Offset übereinstimmen damit die Session-Filterung korrekt funktioniert. Für eine vollständige Erklärung siehe [System Config](ui.config.system_config.de.md).
+MT5-Kerzen-Zeitstempel sind in der Broker-Server-Lokalzeit. Die `broker_candle_utc_offset_hours`-Einstellung in `config.json5` muss mit dem Broker-Server-UTC-Offset übereinstimmen damit die Session-Filterung korrekt funktioniert. Für eine vollständige Erklärung siehe [System Config](ui.config.system_config.de.md).
 
 ---
 
@@ -233,7 +233,7 @@ Der OANDA-Adapter verbindet sich mit OANDAs REST-v20-API. Kein lokales Handels-T
 
 ### OANDA-Zeitzonenhinweis
 
-Die OANDA-API gibt Kerzen-Zeitstempel in UTC zurück. Bei Verwendung des OANDA-Adapters `broker_candle_utc_offset_hours: 0` in `system.json5` setzen. Der Session-Filter vergleicht dann UTC-Kerzenzeiten mit UTC-Session-Grenzen ohne Offset.
+Die OANDA-API gibt Kerzen-Zeitstempel in UTC zurück. Bei Verwendung des OANDA-Adapters `broker_candle_utc_offset_hours: 0` in `config.json5` setzen. Der Session-Filter vergleicht dann UTC-Kerzenzeiten mit UTC-Session-Grenzen ohne Offset.
 
 ---
 
@@ -306,7 +306,7 @@ Bei der initialen Einrichtung oder nach einer langen Lücke müssen möglicherwe
 
 ## broker_candle_utc_offset_hours und das Broker-Modul
 
-Die Broker-Modul-Konfigurationsdatei enthält die UTC-Offset-Einstellung selbst nicht. Diese Einstellung liegt in `config/system.json5` unter `system.broker_candle_utc_offset_hours`.
+Die Broker-Modul-Konfigurationsdatei enthält die UTC-Offset-Einstellung selbst nicht. Diese Einstellung liegt in `config/config.json5` unter `system.broker_candle_utc_offset_hours`.
 
 Das Broker-Modul bestimmt jedoch welcher Offset-Wert korrekt ist:
 - MT5-Broker liefern Kerzen typischerweise in Broker-Lokalzeit (UTC+2 oder UTC+3 je nach Sommerzeit)
@@ -356,7 +356,7 @@ Das `pairs`-Array verwendet interne Namen. Die `symbol_map` wird nur beim Ausfü
 OpenForexAI unterstützt mehrere gleichzeitig laufende Broker-Adapter:
 
 ```json5
-// In system.json5:
+// In config.json5:
 modules: {
   broker: [
     "config/broker/oxs_mt5.json5",
@@ -403,7 +403,7 @@ Routing-Regeln mit Templates leiten automatisch zum richtigen Broker-Adapter bas
 
 1. Neue Konfigurationsdatei erstellen (z.B. `config/broker/neuer_broker.json5`)
 2. Geeignete `adapter`, `short_name`, `pairs` und Zugangsdaten setzen
-3. Pfad zu `modules.broker` in `system.json5` hinzufügen
+3. Pfad zu `modules.broker` in `config.json5` hinzufügen
 4. System neu starten
 5. Prüfen ob Adapter in System Monitor registriert
 6. Agenten für die Paare des neuen Brokers hinzufügen
@@ -436,7 +436,7 @@ Für OANDA:
 
 ### Symptom: Session-Filter feuert zu falschen Zeiten
 
-- `broker_candle_utc_offset_hours` in `system.json5` stimmt nicht mit Broker-Server-Zeitzone überein
+- `broker_candle_utc_offset_hours` in `config.json5` stimmt nicht mit Broker-Server-Zeitzone überein
 - Für MT5: Broker-Serverzeit im MT5-Terminal prüfen (in der Statusleiste angezeigt)
 - Für OANDA: sollte `0` sein (OANDA verwendet UTC)
 

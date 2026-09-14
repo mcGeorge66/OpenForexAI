@@ -99,7 +99,7 @@ When you click Suspend:
 - Broker connections remain open. LLM connections remain available. No market data or configuration is lost.
 
 **When to use Suspend:**
-- Before editing `system.json5` or any agent configuration file. Editing config while agents are cycling can cause partial reads or unexpected behavior.
+- Before editing `config.json5` or any agent configuration file. Editing config while agents are cycling can cause partial reads or unexpected behavior.
 - Before manually placing trades on the broker platform to avoid the agent attempting to open conflicting positions.
 - Before a planned period of inattention when you want the system to remain ready but not trade.
 - As the first step of the update sequence: Suspend → Update → Restart Now.
@@ -127,7 +127,7 @@ When you click Continue:
 
 **When NOT to use Continue:**
 - After applying an update. Use Restart Now instead — Continue resumes the old code. Only a restart picks up the new files.
-- After making changes to `system.json5`. Configuration is only re-read at startup; Continue resumes with the old configuration.
+- After making changes to `config.json5`. Configuration is only re-read at startup; Continue resumes with the old configuration.
 
 ### Restart Now Button
 
@@ -141,7 +141,7 @@ When you click Restart Now:
 5. The process manager (PM2 or equivalent supervisor) detects the exit and relaunches the runtime automatically.
 6. On startup, the system reconnects to all configured brokers and LLMs.
 7. All agents re-initialize and resume their scheduled cycles.
-8. Configuration is re-read from `system.json5` on startup.
+8. Configuration is re-read from `config.json5` on startup.
 
 **The full restart cycle typically takes 10–30 seconds** depending on how many broker and LLM connections need to be established and how quickly they respond.
 
@@ -149,7 +149,7 @@ When you click Restart Now:
 - After applying an update (Update → Restart Now).
 - When the Runtime Status shows a degraded or error state that Suspend/Continue cannot resolve.
 - When a broker or LLM shows disconnected and reconnection attempts have failed — a restart clears all connection state and reconnects fresh.
-- After making changes to `system.json5` — this is the only way for the new configuration to take effect.
+- After making changes to `config.json5` — this is the only way for the new configuration to take effect.
 - When memory usage has grown unexpectedly large after many days of continuous operation.
 
 **When NOT to use Restart Now:**
@@ -197,7 +197,7 @@ Shows the current operational state of the runtime process.
 
 ## 5. LLM Interfaces Section
 
-This section lists every LLM (Large Language Model) module configured in `system.json5`. Each row represents one configured LLM connection and shows its current connectivity state.
+This section lists every LLM (Large Language Model) module configured in `config.json5`. Each row represents one configured LLM connection and shows its current connectivity state.
 
 ### What is an LLM Interface?
 
@@ -227,7 +227,7 @@ A red **DISCONNECTED** badge means the system could not reach the LLM endpoint, 
 - The system will not automatically retry a disconnected LLM during a cycle — the failure is logged and the cycle terminates cleanly.
 
 **Common causes of LLM DISCONNECTED:**
-1. API key expired, revoked, or incorrectly configured in `system.json5`.
+1. API key expired, revoked, or incorrectly configured in `config.json5`.
 2. Provider endpoint is experiencing an outage (check provider status page).
 3. Network firewall or proxy blocking outbound HTTPS to the provider.
 4. Billing limit reached on the provider account (quota exhausted).
@@ -236,16 +236,16 @@ A red **DISCONNECTED** badge means the system could not reach the LLM endpoint, 
 
 **What to do when an LLM shows DISCONNECTED:**
 1. Check the provider's public status page (e.g., status.openai.com).
-2. Verify the API key in `system.json5` is correct and active.
+2. Verify the API key in `config.json5` is correct and active.
 3. Test the connection manually: if it is a local model, confirm the server is running on the configured port.
 4. If configuration was recently changed, use Restart Now to force a fresh connection attempt.
-5. If the provider is confirmed down and you have a backup LLM, edit `system.json5` to redirect affected agents to the backup module, then Restart Now.
+5. If the provider is confirmed down and you have a backup LLM, edit `config.json5` to redirect affected agents to the backup module, then Restart Now.
 
 ---
 
 ## 6. Broker Interfaces Section
 
-This section lists every broker module configured in `system.json5`. Each row represents one broker connection.
+This section lists every broker module configured in `config.json5`. Each row represents one broker connection.
 
 ### What is a Broker Interface?
 
@@ -284,7 +284,7 @@ A red **DISCONNECTED** badge means the broker connection is not functioning. Whe
 
 **What to do when a broker shows DISCONNECTED:**
 1. Log into the broker's web platform directly to confirm the account is active and accessible.
-2. Check if the API token has expired and regenerate if needed. Update `system.json5` and Restart Now.
+2. Check if the API token has expired and regenerate if needed. Update `config.json5` and Restart Now.
 3. Check broker status pages and maintenance announcements.
 4. If the broker's API is temporarily down, Suspend to stop BA agents from generating streams of failed order attempts in logs.
 5. When broker API recovers, Restart Now to force a fresh connection attempt.
@@ -300,7 +300,7 @@ The Configured Agents Table is the most information-dense section of the Initial
 
 #### Agent ID
 
-The unique identifier for the agent as defined in `system.json5`. This is a human-readable string that typically encodes the agent's purpose, pair, and role. Examples: `eurusd-aa-h1`, `gbpusd-ba-primary`, `global-monitor-1`.
+The unique identifier for the agent as defined in `config.json5`. This is a human-readable string that typically encodes the agent's purpose, pair, and role. Examples: `eurusd-aa-h1`, `gbpusd-ba-primary`, `global-monitor-1`.
 
 This ID is used throughout the system to reference the agent — in logs, in the Chat page's agent selector dropdown, in the Orderbook's trade records, and in system events. When reporting a bug or analyzing logs, always identify agents by their ID.
 
@@ -357,7 +357,7 @@ A human-readable description of what this agent does, pulled directly from the c
 - One or more agents with `ERROR` status — investigate via Chat Inspector
 - Agents where the LLM column points to a `DISCONNECTED` LLM — the AI reasoning steps are broken for those agents
 - Agents where the Broker column points to a `DISCONNECTED` broker — price data and order execution are broken for those agents
-- `DISABLED` entries that should be active — check `enabled` flag in `system.json5`
+- `DISABLED` entries that should be active — check `enabled` flag in `config.json5`
 
 ---
 
@@ -444,7 +444,7 @@ Typical time when everything is healthy: 60–90 seconds.
 
 ### Workflow 2: Safe Configuration Change Procedure
 
-When you need to edit `system.json5` or any agent configuration:
+When you need to edit `config.json5` or any agent configuration:
 
 1. Navigate to the Initial page.
 2. Click **Suspend** and wait for the Runtime Status to confirm suspension (all agent timers are now frozen).
@@ -455,7 +455,7 @@ When you need to edit `system.json5` or any agent configuration:
 7. Verify the Configured Agents Table reflects your changes (new agents appear, removed agents are gone, modified descriptions are updated).
 8. The system resumes automatically after a restart — there is no need to click Continue.
 
-**Critical:** Never click Continue after a configuration change expecting the new config to take effect. Continue resumes using the already-loaded configuration. Only Restart Now triggers a fresh read of `system.json5`.
+**Critical:** Never click Continue after a configuration change expecting the new config to take effect. Continue resumes using the already-loaded configuration. Only Restart Now triggers a fresh read of `config.json5`.
 
 ### Workflow 3: Applying an Update Safely
 
@@ -467,14 +467,14 @@ When you need to edit `system.json5` or any agent configuration:
    - The Local Version matches the Internet Version.
    - All LLM and Broker interfaces show `CONNECTED`.
    - The Configured Agents Table looks as expected.
-6. If something is broken after the update, check the release notes for breaking changes in the `system.json5` schema before making changes.
+6. If something is broken after the update, check the release notes for breaking changes in the `config.json5` schema before making changes.
 
 ### Workflow 4: Responding to a Disconnected LLM
 
 1. On the Initial page, note which LLM module shows `DISCONNECTED` (e.g., `openai-primary`).
 2. In the Configured Agents Table, identify all agents where the LLM column shows `openai-primary` — those agents are affected and will fail their reasoning steps.
 3. Check the provider's status page to determine if it is a provider-side outage.
-4. Verify the API key in `system.json5` is correct and has not expired or hit a billing limit.
+4. Verify the API key in `config.json5` is correct and has not expired or hit a billing limit.
 5. If configuration was not recently changed and the provider appears healthy, click **Restart Now** to force a fresh connection attempt.
 6. If the provider is confirmed down, click **Suspend** to stop error-spam in logs while you wait for recovery.
 7. When the provider recovers, click **Restart Now** to reconnect. The CONNECTED badge should appear within 30 seconds of startup.
@@ -485,7 +485,7 @@ When you need to edit `system.json5` or any agent configuration:
 2. In the Configured Agents Table, note which agents use that broker — they are the affected set.
 3. Log into the broker's web platform directly to verify the account is active and the API is accessible.
 4. Check for scheduled maintenance announcements on the broker's status page.
-5. If credentials are confirmed invalid, update `system.json5` (after Suspend) and Restart Now.
+5. If credentials are confirmed invalid, update `config.json5` (after Suspend) and Restart Now.
 6. If the broker API is temporarily down, Suspend to prevent repeated failed connection attempts being logged.
 7. When the API recovers, Restart Now. After reconnection, verify the Orderbook page shows current open positions correctly — this confirms the sync was successful.
 
@@ -499,7 +499,7 @@ When you need to edit `system.json5` or any agent configuration:
 6. Read the **Tools** inspector tab — if the error occurred during a tool call (e.g., price data fetch), you will see which tool failed and with what arguments.
 7. Based on the error, determine whether the fix is:
    - A broker/LLM connectivity issue (fix the interface, Restart Now)
-   - A configuration issue in the agent's prompt or parameters (fix `system.json5`, Restart Now)
+   - A configuration issue in the agent's prompt or parameters (fix `config.json5`, Restart Now)
    - A transient error that resolved itself (re-run Execute to confirm)
 
 ---
@@ -525,7 +525,7 @@ When you need to edit `system.json5` or any agent configuration:
 1. Check the LLM column in the Configured Agents Table.
 2. Agents using `openai-primary` are broken for reasoning.
 3. Agents using `anthropic-backup` are fully functional.
-4. You have two options: wait for `openai-primary` to recover and Restart Now, or temporarily redirect affected agents to `anthropic-backup` in `system.json5`, then Suspend → save → Restart Now.
+4. You have two options: wait for `openai-primary` to recover and Restart Now, or temporarily redirect affected agents to `anthropic-backup` in `config.json5`, then Suspend → save → Restart Now.
 
 ### Scenario C: Runtime Shows ERROR After Long Uptime
 
@@ -548,13 +548,13 @@ This is a Node.js memory accumulation issue common to long-running processes. Cl
 
 ### Scenario E: Update Applied But Agents Table Shows Wrong Configuration
 
-**Symptom:** After updating and restarting, the Configured Agents Table shows agents that no longer exist in `system.json5`, or new agents are missing.
+**Symptom:** After updating and restarting, the Configured Agents Table shows agents that no longer exist in `config.json5`, or new agents are missing.
 
 **Investigation:**
-1. The update may have introduced a new `system.json5` schema version.
+1. The update may have introduced a new `config.json5` schema version.
 2. Check the release notes for migration instructions.
-3. Open `system.json5` in a text editor and verify the structure matches the new expected format.
-4. Apply any required schema migrations to `system.json5`, then Suspend → save → Restart Now.
+3. Open `config.json5` in a text editor and verify the structure matches the new expected format.
+4. Apply any required schema migrations to `config.json5`, then Suspend → save → Restart Now.
 5. After the second restart, verify the table reflects the correct agent configuration.
 
 ### Scenario F: System Shows Degraded After Market Holiday

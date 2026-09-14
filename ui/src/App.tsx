@@ -53,7 +53,7 @@ type ConfigViewEntry = {
 }
 
 function buildConfigViews(root: string): Record<string, ConfigViewEntry> {
-  const systemPath = root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'
+  const systemPath = root ? joinPath(root, 'config', 'config.json5') : 'config/config.json5'
   const routingPath = root ? joinPath(root, 'config', 'RunTime', 'event_routing.json5') : 'config/RunTime/event_routing.json5'
   return {
     system: {

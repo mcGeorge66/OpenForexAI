@@ -3,7 +3,8 @@
 Supports ${VAR_NAME} and ${VAR_NAME:-default} patterns in string values.
 
 For system config loading:
-- If the requested file is ``system.json5`` and a sibling
+- If the requested file is the personal config (``config.json5``, or the
+  legacy ``system.json5``) and a sibling
   ``config.default.json5`` exists, loader behavior is:
   1) load default
   2) load system/custom
@@ -18,12 +19,41 @@ Merge rules:
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
 
 import json5
+
+_log = logging.getLogger(__name__)
+
+# The personal configuration. It was called system.json5 until 2026-09-14;
+# the old name is still accepted so an installation that has not been renamed
+# keeps starting instead of silently coming up with defaults only — which on a
+# trading system means no agents, no brokers and no visible error.
+CONFIG_FILENAME = "config.json5"
+LEGACY_CONFIG_FILENAME = "system.json5"
+
+
+def resolve_config_path(config_dir: str | Path) -> Path:
+    """Return the personal config file to use, preferring the current name."""
+    directory = Path(config_dir)
+    current = directory / CONFIG_FILENAME
+    if current.exists():
+        return current
+    legacy = directory / LEGACY_CONFIG_FILENAME
+    if legacy.exists():
+        _log.warning(
+            "Using legacy config file %s — rename it to %s; the old name will "
+            "stop being accepted once every installation has moved.",
+            legacy, CONFIG_FILENAME,
+        )
+        return legacy
+    # Neither exists: return the current name so the resulting error names the
+    # file that should be created, not the one being phased out.
+    return current
 
 _ENV_RE = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
 
@@ -142,10 +172,11 @@ def load_json_config(path: str | Path) -> dict[str, Any]:
     """Load a JSON5 config file with env-var substitution.
 
     Keys starting with ``_`` are stripped from the result.
-    For ``system.json5`` with sibling ``config.default.json5`` available,
-    the returned config is merged default+custom.
+    For the personal config (``config.json5``, or the legacy ``system.json5``)
+    with sibling ``config.default.json5`` available, the returned config is
+    merged default+custom.
     """
     p = Path(path)
-    if p.name == "system.json5":
+    if p.name in (CONFIG_FILENAME, LEGACY_CONFIG_FILENAME):
         return _load_system_with_defaults(p)
     return _load_single(p)

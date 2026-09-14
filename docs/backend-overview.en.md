@@ -75,7 +75,7 @@ Local UTC request timestamps remain useful as provisional process timestamps.
 
 The important configuration layers are:
 
-- central runtime configuration in `config/system.json5`
+- central runtime configuration in `config/config.json5`
 - broker module configs in `config/modules/broker/`
 - LLM module configs in `config/modules/llm/`
 - event routing rules

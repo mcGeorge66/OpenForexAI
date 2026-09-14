@@ -100,7 +100,7 @@ Ein Event-Condition-Handler wird zwischen den M5-Trigger und den AA-Agenten gesc
 Im Snapshot-Profil des AA-Agenten wird ein Stop-Switch konfiguriert. Der Snapshot-Builder prüft die Bedingung vor dem LLM-Aufruf und bricht ab wenn sie nicht erfüllt ist — ohne dass ein LLM-Token verbraucht wird.
 
 ```json5
-// config/system.json5 → snapshot_profiles
+// config/config.json5 → snapshot_profiles
 "aa_regime_filtered_v1": {
   "stop_conditions": [
     {
@@ -174,7 +174,7 @@ Der GA-Agent kann denselben Mechanismus für längerfristige Performance-Metrike
 **In OpenForexAI:** Das Snapshot-Profil wird um eine `performance_context`-Sektion erweitert. Die Daten kommen aus `account_status` und `order_book` (beide bereits in der DB).
 
 ```json5
-// config/system.json5 → snapshot_profiles
+// config/config.json5 → snapshot_profiles
 "aa_default_v2": {
   "performance_context": {
     "enabled": true,
@@ -217,7 +217,7 @@ VTX nennt es „Review Model" — einen zweiten LLM-Aufruf der jede Trade-Entsch
 **Konfiguration in OpenForexAI:**
 
 ```json5
-// config/system.json5 → agents
+// config/config.json5 → agents
 "OANDA_EURUSD_AA_REVW": {
   "type": "AA",
   "llm": "anthropic_fast",          // günstigeres/schnelleres Modell für Kritik

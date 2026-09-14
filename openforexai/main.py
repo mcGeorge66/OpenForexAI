@@ -10,7 +10,7 @@ from typing import Any
 from openforexai.agents.agent import Agent
 from openforexai.bootstrap import bootstrap
 from openforexai.composers.composer import EventComposer
-from openforexai.config.json_loader import load_json_config
+from openforexai.config.json_loader import load_json_config, resolve_config_path
 from openforexai.management.server import ManagementServer
 from openforexai.models.monitoring import MonitoringEvent, MonitoringEventType
 from openforexai.monitoring.agent_health import stale_watch_loop
@@ -18,7 +18,7 @@ from openforexai.monitoring.bus import MonitoringBus
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.utils.logging import configure_logging, get_logger, normalize_log_level
 
-_CONFIG_PATH = Path(__file__).parent.parent / "config" / "system.json5"
+_CONFIG_PATH = resolve_config_path(Path(__file__).parent.parent / "config")
 _log = get_logger("main")
 
 class StartupConfigurationError(RuntimeError):

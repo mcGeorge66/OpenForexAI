@@ -1,7 +1,7 @@
 # API Endpoint Referenz — OpenForexAI
 
 Alle Endpoints werden vom Management-Server (`openforexai/management/api.py`) bereitgestellt.  
-Base-URL: `http://<host>:<port>` (Standard-Port konfigurierbar in system.json5).
+Base-URL: `http://<host>:<port>` (Standard-Port konfigurierbar in config.json5).
 
 ---
 
@@ -14,7 +14,7 @@ Systemzustand prüfen.
 ---
 
 ### `GET /version`
-Applikationsversion aus system.json5 lesen.  
+Applikationsversion aus config.json5 lesen.  
 **Response:** `{ version: string }`
 
 ---
@@ -349,25 +349,25 @@ Debug-Nachricht vom Frontend in `logs/frontend_debug.log` schreiben.
 ## Config — System
 
 ### `GET /config/view`
-system.json5 mit maskierten Sensitivfeldern (api_key, password, …) zurückgeben.  
+config.json5 mit maskierten Sensitivfeldern (api_key, password, …) zurückgeben.  
 **Response:** Config-Dict mit `"***"` für sensitive Werte.
 
 ---
 
 ### `GET /config/system`
-Rohe system.json5 für den Editor zurückgeben.  
+Rohe config.json5 für den Editor zurückgeben.  
 **Response:** Config-Dict (ungemaskert).
 
 ---
 
 ### `GET /config/system/text`
-Roher system.json5-Text mit Kommentaren (für Text-Editor).  
+Roher config.json5-Text mit Kommentaren (für Text-Editor).  
 **Response:** `{ text: string, file: string }`
 
 ---
 
 ### `PUT /config/system`
-system.json5 speichern und sofort anwenden.  
+config.json5 speichern und sofort anwenden.  
 **Body:** Config-Dict oder JSON5-String  
 **Effekt (Hot-Reload):**
 - ConfigService in-memory aktualisiert
@@ -610,7 +610,7 @@ Validiertes Package importieren und live anwenden.
   "import_system_config": false
 }
 ```
-**Effekt:** Schreibt system.json5 / event_routing.json5 / agent_tools.json5, wendet alle Hot-Reload-Mechanismen an.  
+**Effekt:** Schreibt config.json5 / event_routing.json5 / agent_tools.json5, wendet alle Hot-Reload-Mechanismen an.  
 **Response:** `{ status: "imported"|"invalid", runtime_apply, composer_apply, validation }`
 
 ---

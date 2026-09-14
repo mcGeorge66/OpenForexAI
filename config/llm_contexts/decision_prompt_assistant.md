@@ -11,7 +11,7 @@ agent, via `Agent._run_with_tools`) uses instead of its own base `system_prompt`
 holds a **selector script** plus a **list of candidate prompt entries**, and the script
 picks which entry applies for this particular snapshot.
 
-Decision Prompt profiles are configured in `config/system.json5` under
+Decision Prompt profiles are configured in `config/config.json5` under
 **`decision_prompt_profiles`** (not `decision_prompts`). An agent references one via its own
 `decision_prompt_profile` field (a name lookup, like `snapshot_profile`).
 

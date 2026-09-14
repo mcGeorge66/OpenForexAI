@@ -42,7 +42,7 @@ Jeder Eintrag in `prompts` enthält:
 | `prompt` | Instruktionstext an das LLM; darf `{Platzhalter}`-Tokens enthalten |
 | `use_placeholders` | Wenn aktiviert, werden `{key}`-Tokens im Prompt durch Werte aus `placeholders` ersetzt |
 
-Alle Profile werden in `system.json5` unter dem Schlüssel `decision_prompt_profiles` gespeichert.
+Alle Profile werden in `config.json5` unter dem Schlüssel `decision_prompt_profiles` gespeichert.
 
 ---
 
@@ -415,7 +415,7 @@ Der geladene Snapshot wird beim Öffnen des Testfensters vorausgefüllt.
 
 - **Update** — überschreibt das aktuell gewählte Profil
 - **Save as New** — erstellt ein neues Profil unter dem im Feld `name` eingetragenen Namen
-- **Delete** — entfernt das gewählte Profil aus `system.json5`
+- **Delete** — entfernt das gewählte Profil aus `config.json5`
 
 Umbenennen: `name` ändern und auf **Update** klicken. Der alte Eintrag wird ersetzt. Agenten, die den alten Namen referenziert haben, müssen in `Agent Config` aktualisiert werden.
 
@@ -455,7 +455,7 @@ Das Snapshot-JSON kann bearbeitet und das Script wiederholt ausgeführt werden, 
 
 ## Laufzeit-Override
 
-Die Funktion `Agent Chat → Execute` unterstützt den Parameter `decision_prompt_profile_override`. Damit kann ein geändertes Profil für einen einzelnen Lauf getestet werden, ohne es in `system.json5` zu speichern. Der Override gilt nur für diesen Lauf und hat keine Auswirkung auf andere Agenten oder über den Lauf hinaus.
+Die Funktion `Agent Chat → Execute` unterstützt den Parameter `decision_prompt_profile_override`. Damit kann ein geändertes Profil für einen einzelnen Lauf getestet werden, ohne es in `config.json5` zu speichern. Der Override gilt nur für diesen Lauf und hat keine Auswirkung auf andere Agenten oder über den Lauf hinaus.
 
 ---
 

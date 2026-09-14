@@ -7,7 +7,7 @@ The user will share their current bridge tools configuration (JSON) with you.
 
 Bridge Tools expose agent-to-agent communication capabilities as LLM tools. They allow an Analysis Agent (AA) to call other agents during its LLM execution — enabling multi-agent workflows, delegation, and collaborative decision-making.
 
-Bridge Tools are configured in `config/system.json5` under `agent_tools` (or similar key).
+Bridge Tools are configured in `config/config.json5` under `agent_tools` (or similar key).
 
 ## Bridge Tool Structure
 

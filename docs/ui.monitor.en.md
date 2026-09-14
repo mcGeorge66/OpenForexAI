@@ -103,9 +103,9 @@ A configured filter can be saved under a name:
 | **Update** | Overwrites the currently loaded saved filter with the current state. |
 | **Delete** | Deletes the currently loaded saved filter. |
 
-Saved filters are stored centrally in `system.json5` (`system.ui.monitor.saved_filters`) — meaning they're **visible to everyone using the system**, not just locally in your own browser. Every saved filter automatically appears as an entry in the Monitor section's **left sidebar**; clicking it loads its rules into the Filter Builder. With no saved filters, the sidebar shows "No saved filters".
+Saved filters are stored centrally in `config.json5` (`system.ui.monitor.saved_filters`) — meaning they're **visible to everyone using the system**, not just locally in your own browser. Every saved filter automatically appears as an entry in the Monitor section's **left sidebar**; clicking it loads its rules into the Filter Builder. With no saved filters, the sidebar shows "No saved filters".
 
-**Recommendation:** create a saved filter for every agent you watch regularly (e.g. "EURUSD AA" with the rule `Source contains OXS_T-EURUSD-AA`). Since these filters are visible to everyone, colleagues benefit immediately too — no need to re-explain how to filter down to a specific pair each time. Because the filters live in `system.json5`, check before deleting an unfamiliar saved filter someone else created — it might be actively in use.
+**Recommendation:** create a saved filter for every agent you watch regularly (e.g. "EURUSD AA" with the rule `Source contains OXS_T-EURUSD-AA`). Since these filters are visible to everyone, colleagues benefit immediately too — no need to re-explain how to filter down to a specific pair each time. Because the filters live in `config.json5`, check before deleting an unfamiliar saved filter someone else created — it might be actively in use.
 
 ---
 

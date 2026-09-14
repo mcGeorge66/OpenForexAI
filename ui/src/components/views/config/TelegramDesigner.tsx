@@ -303,7 +303,7 @@ export function TelegramDesigner() {
         <span className="text-sm text-gray-300 font-medium">Telegram Designer</span>
         <div className="flex items-center gap-3">
           <span className="text-xs text-white">
-            {root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} → notifications
+            {root ? joinPath(root, 'config', 'config.json5') : 'config/config.json5'} → notifications
           </span>
           <button onClick={() => void load()} disabled={loading || saving}
             className="flex items-center gap-1 text-xs text-white hover:text-gray-200 disabled:opacity-40">

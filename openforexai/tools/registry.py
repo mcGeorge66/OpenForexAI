@@ -1,7 +1,7 @@
 """ToolRegistry — plug-and-play tool registration.
 
 Analogous to ``IndicatorRegistry``: add a tool in one line and it becomes
-available to all agents that have it in their ``config/system.json5``
+available to all agents that have it in their ``config/config.json5``
 ``tool_config.allowed_tools`` list.
 
 Usage::

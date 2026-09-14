@@ -199,7 +199,7 @@ from openforexai.tools.market.my_tool import MyNewTool
 DEFAULT_REGISTRY.register(MyNewTool())
 ```
 
-3. Add to an agent's `allowed_tools` in `config/system.json5`.
+3. Add to an agent's `allowed_tools` in `config/config.json5`.
 
 The tool will automatically appear in the LLM's tool manifest for that agent.
 

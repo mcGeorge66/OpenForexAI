@@ -1,8 +1,8 @@
-"""Bootstrap — wires all system components from system.json5.
+"""Bootstrap — wires all system components from config.json5.
 
 Flow
 ----
-1. Load config/system.json5 (with env-var substitution)
+1. Load config/config.json5 (with env-var substitution)
 2. Import adapter packages → self-registration in PluginRegistry
 3. Create database repository
 4. Create LLM instances from modules config, register in RuntimeRegistry
@@ -10,7 +10,7 @@ Flow
 6. Build EventBus + RoutingTable
 7. Create DataContainer (shared market data cache)
 8. Create ConfigService (answers AGENT_CONFIG_REQUESTED events)
-9. Create one Agent per entry in system.json5["agents"]
+9. Create one Agent per entry in config.json5["agents"]
 10. Start broker background tasks (M5 streaming, account poll)
 11. Return (agents, config_service, bus, management_server)
 """
@@ -55,7 +55,7 @@ async def bootstrap(
 ) -> tuple[list[Agent], list[EventComposer], RepositoryService, ConfigService, EventBus]:
     """Wire all components from *system_config* and return (agents, config_service, bus).
 
-    Pass the result of ``load_json_config('config/system.json5')``.
+    Pass the result of ``load_json_config('config/config.json5')``.
     Optionally pass a *monitoring_bus* so broker tasks and agents can emit events.
     """
     # ── Trigger adapter self-registration ────────────────────────────────────
@@ -143,7 +143,7 @@ async def bootstrap(
                 return default
         return default
 
-    # Central setting from system.json5 — propagated into every broker module config.
+    # Central setting from config.json5 — propagated into every broker module config.
     _global_broker_offset = int(
         system_config.get("system", {}).get("broker_candle_utc_offset_hours", 3)
     )

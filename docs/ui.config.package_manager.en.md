@@ -25,7 +25,7 @@ Checkboxes for each supported configuration area:
 | **Include Decision Prompt Profiles** | Decision prompt profiles |
 | **Include Bridge Tools** | Bridge tool definitions |
 | **Include Event Routing** | Event routing rules |
-| **Include System Config** | Global `system.json5` (default: disabled) |
+| **Include System Config** | Global `config.json5` (default: disabled) |
 | **Strict agent dependencies** | Fails if referenced LLM/broker modules are not present |
 
 ### Agent selection
@@ -84,7 +84,7 @@ broker_demo=broker_paper
 | **Import decision prompt profiles** | Import decision prompt profiles |
 | **Import bridge tools** | Import bridge tools |
 | **Import event routing** | Import routing rules |
-| **Import system config** | Import `system.json5` (default: disabled) |
+| **Import system config** | Import `config.json5` (default: disabled) |
 
 ### Validate
 

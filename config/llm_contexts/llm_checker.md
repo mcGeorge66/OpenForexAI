@@ -15,7 +15,7 @@ OpenForexAI is an autonomous multi-agent forex trading system (Python, async).
 **Key architecture facts:**
 - All inter-agent communication via typed EventBus events (no direct calls).
 - Market data primary timeframe: M5, resampled on-demand to M15–D1.
-- Config is driven entirely by `config/system.json5` — adding an agent = zero code changes.
+- Config is driven entirely by `config/config.json5` — adding an agent = zero code changes.
 - LLM providers: Anthropic (Claude), OpenAI (GPT-4o), Azure OpenAI, LM Studio, Ollama.
 - Brokers: OANDA REST v20, MetaTrader 5.
 

@@ -47,7 +47,7 @@ openforexai/
 └── adapters/brokers/               # OANDA, MetaTrader 5
 
 config/
-├── system.json5                    # EINZIGE Konfigurationsquelle
+├── config.json5                    # EINZIGE Konfigurationsquelle
 └── RunTime/
     ├── event_routing.json5         # Routing-Regeln (hot-reloadbar)
     └── agent_tools.json5           # Tool-Freigaben per Agent
@@ -62,7 +62,7 @@ ui/src/                             # React-Frontend
 **Agent-ID Format:** `[BROKER(5)]_[PAIR(6)]_[TYPE(2)]_[NAME(1-5)]`
 Beispiel: `OXS_T-EURUSD-AA-ANLYS`, `OXS_T-ALL___-BA-ANLYS`
 
-**Einen neuen Agent hinzufügen = nur Eintrag in `config/system.json5` — kein Code.**
+**Einen neuen Agent hinzufügen = nur Eintrag in `config/config.json5` — kein Code.**
 
 **Wichtige Agent-Felder:**
 ```json5

@@ -340,7 +340,7 @@ Wirtschaftliche Veröffentlichungen (NFP, CPI, Zinsentscheidungen) verursachen s
 Auch mit allen Sicherheitsmaßnahmen können automatisierte Systeme bei ungewöhnlichen Marktbedingungen unerwartet reagieren. Beobachte den Monitor-Event-Stream täglich in der ersten Woche des Live-Betriebs. Prüfe, ob Signale vernünftig sind, kein einzelnes Paar eine übermäßige Anzahl an Trades erzeugt und das P&L den Erwartungen entspricht.
 
 **Broker-API-Zugangsdaten sicher aufbewahren.**
-Die Broker-Modul-Konfiguration enthält API-Schlüssel und Konto-Zugangsdaten. Niemals system.json5 oder Broker-Config-Dateien teilen. Umgebungsvariablen für sensible Werte verwenden, statt sie in Konfigurationsdateien hardzucodieren.
+Die Broker-Modul-Konfiguration enthält API-Schlüssel und Konto-Zugangsdaten. Niemals config.json5 oder Broker-Config-Dateien teilen. Umgebungsvariablen für sensible Werte verwenden, statt sie in Konfigurationsdateien hardzucodieren.
 
 ### Notfall-Stop
 
@@ -350,7 +350,7 @@ Wenn sich das System unerwartet verhält:
 2. Direkt beim Broker einloggen und alle offenen Positionen prüfen
 3. Positionen schließen, die nicht verstanden werden
 4. Das Event-Log (Monitor) prüfen, um zu verstehen, was passiert ist
-5. system.json5 und Agent Config auf Fehlkonfiguration prüfen, bevor neu gestartet wird
+5. config.json5 und Agent Config auf Fehlkonfiguration prüfen, bevor neu gestartet wird
 
 ---
 

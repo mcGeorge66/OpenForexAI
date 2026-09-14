@@ -42,7 +42,7 @@ Each entry in `prompts` has:
 | `prompt` | The instruction text sent to the LLM; may contain `{placeholder}` tokens |
 | `use_placeholders` | When checked, `{key}` tokens in the prompt are resolved from `placeholders` |
 
-All profiles are stored in `system.json5` under the key `decision_prompt_profiles`.
+All profiles are stored in `config.json5` under the key `decision_prompt_profiles`.
 
 ---
 
@@ -415,7 +415,7 @@ The loaded snapshot is pre-filled into the test window when you open it.
 
 - **Update** — overwrites the currently selected profile
 - **Save as New** — creates a new profile under the name in the `name` field
-- **Delete** — removes the selected profile from `system.json5`
+- **Delete** — removes the selected profile from `config.json5`
 
 Renaming: change `name` and click **Update**. The old entry is replaced. Any agent referencing the old name must be updated in `Agent Config`.
 
@@ -455,7 +455,7 @@ Edit the snapshot JSON and click **Run** again to test different scenarios.
 
 ## Runtime Override
 
-The `Agent Chat → Execute` function supports a `decision_prompt_profile_override` parameter. This lets you test a modified prompt for a single run without saving it to `system.json5`. The override applies only to that run and does not affect other agents or persist afterward.
+The `Agent Chat → Execute` function supports a `decision_prompt_profile_override` parameter. This lets you test a modified prompt for a single run without saving it to `config.json5`. The override applies only to that run and does not affect other agents or persist afterward.
 
 ---
 

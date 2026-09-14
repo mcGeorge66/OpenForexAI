@@ -79,7 +79,7 @@ Der tool-fähige Pfad:
 ## Snapshot- und Decision-Profile
 
 Der aktuelle Agenten-Workflow unterstützt zwei Profiltypen, die in
-`config/system.json5` aufgelöst werden.
+`config/config.json5` aufgelöst werden.
 
 ### `snapshot_profile`
 

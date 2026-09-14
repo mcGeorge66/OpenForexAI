@@ -83,7 +83,7 @@ The tool-enabled path:
 ## Snapshot and Decision Profiles
 
 The current agent workflow supports two profile types resolved from top-level
-config sections in `config/system.json5`.
+config sections in `config/config.json5`.
 
 ### `snapshot_profile`
 

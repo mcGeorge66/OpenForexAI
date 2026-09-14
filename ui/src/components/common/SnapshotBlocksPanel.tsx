@@ -10,7 +10,7 @@
  * Deliberately excludes the Snapshot Designer's profile save/load CRUD and
  * History — those are out of scope here, the Workbench has its own
  * "load from snapshot profile" mechanism and doesn't persist back to
- * system.json5.
+ * config.json5.
  */
 import { useEffect, useState } from 'react'
 import { ChevronRight, Trash2 } from 'lucide-react'

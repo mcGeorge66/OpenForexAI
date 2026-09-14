@@ -169,7 +169,7 @@ Editor für den System-Prompt des Agenten.
 
 | Element | Funktion |
 |---------|---------|
-| **„— load from agent —"-Dropdown + Load** | Übernimmt System-Prompt (und LLM, falls gesetzt) eines existierenden Agenten aus `system.json5`. |
+| **„— load from agent —"-Dropdown + Load** | Übernimmt System-Prompt (und LLM, falls gesetzt) eines existierenden Agenten aus `config.json5`. |
 | **LLM-Dropdown** | Welches LLM-Modul für Chat/Step/Run verwendet wird. `— auto —` nimmt das erste verfügbare Modul. |
 | **Editor** | Reiner Text-Editor (Monaco, plaintext). |
 
@@ -181,7 +181,7 @@ Editor für den System-Prompt des Agenten.
 4. Wirkt die Antwort besser/schlechter als vorher? Nächste Änderung.
 5. Sobald zufriedenstellend: Preset speichern (Abschnitt 2).
 
-**Achtung — Änderungen hier werden NICHT automatisch live:** Der Prompt-Editor der Workbench ist vollständig getrennt vom System-Prompt des echten Agenten in `system.json5`. Eine Verbesserung, die hier erarbeitet wurde, muss **manuell** in die Agent-Konfiguration (Config → Agent Config) übertragen werden, damit sie im Live-Betrieb wirkt. Es gibt keinen „Übernehmen"-Knopf, der das automatisch erledigt.
+**Achtung — Änderungen hier werden NICHT automatisch live:** Der Prompt-Editor der Workbench ist vollständig getrennt vom System-Prompt des echten Agenten in `config.json5`. Eine Verbesserung, die hier erarbeitet wurde, muss **manuell** in die Agent-Konfiguration (Config → Agent Config) übertragen werden, damit sie im Live-Betrieb wirkt. Es gibt keinen „Übernehmen"-Knopf, der das automatisch erledigt.
 
 ---
 

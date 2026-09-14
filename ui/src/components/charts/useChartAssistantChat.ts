@@ -9,7 +9,7 @@
  *
  * Also gets full (unrestricted) access to the semantic memory (semantic_memory —
  * remember/recall/update/forget) — unlike the trading agents (AA/BA/EA), which are
- * each scoped to specific tables via their own system.json5 forced_arguments, this
+ * each scoped to specific tables via their own config.json5 forced_arguments, this
  * is a human-supervised, ad-hoc chat session, so the backend (management/api.py's
  * /prompt-workbench/chat) grants it "*" for both read and write. That means the user
  * can freely discuss, query, add to, correct, or delete anything in memory through

@@ -340,7 +340,7 @@ Economic releases (NFP, CPI, interest rate decisions) cause rapid price movement
 Even with all safety measures in place, automated systems can behave unexpectedly in unusual market conditions. Watch the Monitor event stream daily during the first week of live operation. Check that signals are reasonable, that no single pair is generating an excessive number of trades, and that P&L is in line with expectations.
 
 **Keep broker API credentials secure.**
-The Broker Module configuration contains API keys and account credentials. Never share your system.json5 or broker config files. Use environment variables for sensitive values rather than hardcoding them in config files.
+The Broker Module configuration contains API keys and account credentials. Never share your config.json5 or broker config files. Use environment variables for sensitive values rather than hardcoding them in config files.
 
 ### Emergency Stop
 
@@ -350,7 +350,7 @@ If the system is behaving unexpectedly:
 2. Log into your broker directly and review all open positions
 3. Close any positions you do not understand
 4. Review the event log (Monitor) to understand what happened
-5. Check system.json5 and Agent Config for misconfiguration before restarting
+5. Check config.json5 and Agent Config for misconfiguration before restarting
 
 ---
 

@@ -11,7 +11,7 @@ Bootstrap sequence
 4. Agent initialises LLM, broker, tools and prompt from the received config.
 5. Agent enters its run loop (timer and/or event-triggered).
 
-Config keys (from system.json5 ``agents.<agent_id>``)
+Config keys (from config.json5 ``agents.<agent_id>``)
 -----------------------------------------------------
 llm              str                 LLM module name (RuntimeRegistry key)
 broker           str | None          Broker module name — omit for GA agents

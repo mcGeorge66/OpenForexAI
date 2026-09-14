@@ -77,12 +77,12 @@ def _load_module_config(name: str) -> dict:
 
 
 def _get_test_pair(name: str, cfg: dict, pair_override: str | None = None) -> str:
-    """Pick a test pair: CLI override, then system.json5 fallback."""
+    """Pick a test pair: CLI override, then config.json5 fallback."""
     if pair_override:
         return pair_override.strip().upper()
     try:
         from openforexai.config.json_loader import load_json_config
-        sys_cfg = load_json_config(_ROOT / "config" / "system.json5")
+        sys_cfg = load_json_config(resolve_config_path(_ROOT / "config"))
         for agent_cfg in sys_cfg.get("agents", {}).values():
             if agent_cfg.get("broker") == name and agent_cfg.get("pair"):
                 return agent_cfg["pair"]

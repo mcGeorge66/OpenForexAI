@@ -191,5 +191,5 @@ class MyLLMProvider(AbstractLLMProvider):
 PluginRegistry.register_llm_provider("myprovider", MyLLMProvider)
 ```
 
-3. Create `config/modules/llm/myprovider.json5` and reference in `config/system.json5`.
+3. Create `config/modules/llm/myprovider.json5` and reference in `config/config.json5`.
 

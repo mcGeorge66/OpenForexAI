@@ -990,7 +990,7 @@ export function AgentConfigWizard() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Agent Config Wizard</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (agents)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'config.json5') : 'config/config.json5'} (agents)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}

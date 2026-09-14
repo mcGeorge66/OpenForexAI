@@ -17,7 +17,7 @@ Collect this information first:
 - One test pair (for example `EURUSD`) for connectivity checks.
 
 Minimum startup requirement:
-- At least one entry in `modules.llm` and one entry in `modules.broker` in `config/system.json5`.
+- At least one entry in `modules.llm` and one entry in `modules.broker` in `config/config.json5`.
 
 ---
 
@@ -64,7 +64,7 @@ The script performs these steps (interactive terminal wizard via rich + question
 6. For each selected adapter, asks for a config name and creates module config from sample:
    - source: `config/modules/<kind>/<adapter>.sample.json5`
    - target: `config/modules/<kind>/<adapter>.<config_name>.json5`
-7. Writes selected module references into `config/system.json5` under:
+7. Writes selected module references into `config/config.json5` under:
    - `modules.llm`
    - `modules.broker`
 8. Scans selected module config files for `${...}` placeholders.
@@ -84,7 +84,7 @@ Start command:
 - Linux: `./start_openforexai.sh`
 
 If startup is blocked, verify:
-- `config/system.json5` contains at least one broker and one LLM module reference.
+- `config/config.json5` contains at least one broker and one LLM module reference.
 - `.env` contains all required credentials for selected modules.
 
 ---
@@ -122,11 +122,11 @@ Examples:
 - `config/modules/broker/mt5.sample.json5` -> `config/modules/broker/mt5.oxs_t.json5`
 - `config/modules/llm/openai.sample.json5` -> `config/modules/llm/openai.main.json5` (also used for Azure AI Foundry — set `base_url` to `https://<resource>.services.ai.azure.com/openai/v1` and `model` to your deployment name; no separate Azure adapter/api-version needed)
 
-### 4. Create custom config `config/system.json5`
+### 4. Create custom config `config/config.json5`
 
 Do **not** modify `config/config.default.json5`.
 
-Create `config/system.json5` and reference your created module files:
+Create `config/config.json5` and reference your created module files:
 
 ```json5
 {
@@ -174,7 +174,7 @@ or platform script:
 ## Troubleshooting
 
 ### Startup says broker/LLM missing
-- Check `config/system.json5` -> `modules.llm` and `modules.broker` are both non-empty.
+- Check `config/config.json5` -> `modules.llm` and `modules.broker` are both non-empty.
 
 ### Adapter not shown in setup
 - Verify adapter is registered in:

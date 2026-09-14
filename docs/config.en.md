@@ -16,7 +16,7 @@ It contains:
 
 ```text
 config/
-  system.json5
+  config.json5
   config.default.json5
   RunTime/
     agent_tools.json5
@@ -30,9 +30,9 @@ config/
       *.meta.json5
 ```
 
-## `system.json5`
+## `config.json5`
 
-`system.json5` is the central live configuration document.
+`config.json5` is the central live configuration document.
 
 Important current top-level sections include:
 
@@ -195,7 +195,7 @@ These files are edited from:
 
 Important points:
 
-- active modules are referenced by name from `system.json5`
+- active modules are referenced by name from `config.json5`
 - sample files document required fields
 - meta files describe module structure and UI hints
 

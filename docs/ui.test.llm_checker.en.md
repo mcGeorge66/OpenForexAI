@@ -167,7 +167,7 @@ This means:
 
 ### LLM Module Selector
 
-Dropdown showing all LLM modules defined in `config/system.json5` under `modules.llm`. **Required field** — no message can be sent without selecting an LLM.
+Dropdown showing all LLM modules defined in `config/config.json5` under `modules.llm`. **Required field** — no message can be sent without selecting an LLM.
 
 When you select an LLM module, the Temperature and Max Tokens fields are automatically pre-filled with the module's configured defaults. You can override these values for this test session without modifying the module's base configuration.
 

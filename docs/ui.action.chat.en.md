@@ -55,7 +55,7 @@ For BA agents, the right panel shows only the Inspector tabs without a chart.
 
 ### Agent Selector Dropdown
 
-Located at the top of the left panel. Lists every agent defined in `system.json5`. Selecting an agent sets the target for all subsequent actions — both Send and Execute operate on the currently selected agent.
+Located at the top of the left panel. Lists every agent defined in `config.json5`. Selecting an agent sets the target for all subsequent actions — both Send and Execute operate on the currently selected agent.
 
 When you change the selected agent:
 - The chat history displayed clears and loads the history for the newly selected agent.
@@ -82,7 +82,7 @@ A numeric input field that controls how long the system waits for the LLM to res
 - When debugging and you want failures to surface quickly rather than waiting the full default.
 - When testing with a fast, lightweight model and responses arrive in under 10 seconds consistently.
 
-The timeout applies to both Send and Execute operations. It does not affect scheduled background cycles — those use the timeout configured in `system.json5`.
+The timeout applies to both Send and Execute operations. It does not affect scheduled background cycles — those use the timeout configured in `config.json5`.
 
 ### Instruction Textarea
 
@@ -299,7 +299,7 @@ The exact fields present depend on which snapshot blocks are enabled in the agen
 
 **Verifying indicator values:** If an agent produced an unexpected decision, check the `indicators` block. Are the EMA, RSI, and other values what you expected given the current price action? If the values look wrong, the issue may be in the indicator configuration or the timeframe mismatch.
 
-**Verifying swing levels:** Check `swing_levels.resistance` and `swing_levels.support`. Are the levels relevant? Are there too many or too few? If levels look wrong, investigate the swing level configuration in `system.json5`.
+**Verifying swing levels:** Check `swing_levels.resistance` and `swing_levels.support`. Are the levels relevant? Are there too many or too few? If levels look wrong, investigate the swing level configuration in `config.json5`.
 
 **Verifying account state:** For BA agents, check `account_state.open_positions`. If the agent is aware of existing positions, does it make sense that it chose not to add another trade given the risk already open?
 
@@ -397,7 +397,7 @@ Depending on the agent's configuration, tools may include:
 
 **Failed tool calls:** A `Status: FAILED` entry means the tool returned an error. The Result field shows the error message. Common causes: broker disconnected, invalid instrument name, insufficient data for the requested period.
 
-**Missing tool calls:** If you expected a tool to be called (based on the LLM tab showing a tool request) but it is not in the Tools tab, there may be a tool registration issue. Check `system.json5` for the agent's tool configuration.
+**Missing tool calls:** If you expected a tool to be called (based on the LLM tab showing a tool request) but it is not in the Tools tab, there may be a tool registration issue. Check `config.json5` for the agent's tool configuration.
 
 ---
 
@@ -563,7 +563,7 @@ and volatility are elevated. Prioritize H1 structure over M15 noise.
 
 ### Instructions vs. System Prompt
 
-The system prompt (defined in `system.json5`) is the agent's permanent character and behavioral framework. You do not change it frequently.
+The system prompt (defined in `config.json5`) is the agent's permanent character and behavioral framework. You do not change it frequently.
 
 The Instruction is your session-level context addition — it is for situational information that is true right now but would not belong in the permanent system prompt. After the context is no longer relevant, delete the instruction and save a blank one to clear it.
 

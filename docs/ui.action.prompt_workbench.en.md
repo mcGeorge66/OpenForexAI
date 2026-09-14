@@ -169,7 +169,7 @@ Editor for the agent's system prompt.
 
 | Element | Function |
 |---------|---------|
-| **"— load from agent —" dropdown + Load** | Pulls in an existing agent's system prompt (and LLM, if set) from `system.json5`. |
+| **"— load from agent —" dropdown + Load** | Pulls in an existing agent's system prompt (and LLM, if set) from `config.json5`. |
 | **LLM dropdown** | Which LLM module Chat/Step/Run use. `— auto —` uses the first available module. |
 | **Editor** | Plain-text editor (Monaco, plaintext mode). |
 
@@ -181,7 +181,7 @@ Editor for the agent's system prompt.
 4. Better or worse than before? Make the next change.
 5. Once satisfied: save a preset (Section 2).
 
-**Warning — changes here do NOT go live automatically:** the Workbench prompt editor is completely separate from the real agent's system prompt in `system.json5`. An improvement developed here must be **manually** copied into the agent's configuration (Config → Agent Config) to take effect in live trading. There is no "apply" button that does this automatically.
+**Warning — changes here do NOT go live automatically:** the Workbench prompt editor is completely separate from the real agent's system prompt in `config.json5`. An improvement developed here must be **manually** copied into the agent's configuration (Config → Agent Config) to take effect in live trading. There is no "apply" button that does this automatically.
 
 ---
 

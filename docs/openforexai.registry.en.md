@@ -80,12 +80,12 @@ bootstrap.py:
     2. import adapters.brokers  → PluginRegistry gets OANDABroker, MT5Broker
     3. import adapters.database → PluginRegistry gets SQLiteRepository
 
-    4. For each LLM module in system.json5:
+    4. For each LLM module in config.json5:
           klass = PluginRegistry.get_llm_provider("openai")
           instance = klass.from_config(llm_cfg)
           RuntimeRegistry.set_llm("openai_main", instance)
 
-    5. For each broker module in system.json5:
+    5. For each broker module in config.json5:
           klass = PluginRegistry.get_broker("oanda")
           instance = klass.from_config(broker_cfg)
           RuntimeRegistry.set_broker("oanda", instance)
@@ -124,7 +124,7 @@ bootstrap.py:
    {"adapter": "myprovider", "api_key": "${MY_API_KEY}", "model": "my-model"}
    ```
 
-4. Reference in `config/system.json5`:
+4. Reference in `config/config.json5`:
    ```json
    "modules": {"llm": {"myprovider": "config/modules/llm/myprovider.json5"}}
    ```

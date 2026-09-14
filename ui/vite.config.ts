@@ -26,7 +26,7 @@ function loadRuntimeConfig(): GenericObject {
   const repoRoot = path.resolve(__dirname, '..')
   const configDir = path.join(repoRoot, 'config')
   const defaultPath = path.join(configDir, 'config.default.json5')
-  const systemPath = path.join(configDir, 'system.json5')
+  const systemPath = path.join(configDir, 'config.json5')
   const defaultCfg = fs.existsSync(defaultPath)
     ? JSON5.parse(fs.readFileSync(defaultPath, 'utf8')) as GenericObject
     : {}

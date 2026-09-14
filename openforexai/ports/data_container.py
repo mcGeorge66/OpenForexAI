@@ -36,7 +36,7 @@ class AbstractDataContainer(AbstractRepository):
 
         PluginRegistry.register_data_container("sqlite", SQLiteDataContainer)
 
-    Bootstrap selects the implementation via system.json5 ``database.backend``.
+    Bootstrap selects the implementation via config.json5 ``database.backend``.
     """
 
     # ── Agent decision memory ──────────────────────────────────────────────────

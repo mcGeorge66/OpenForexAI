@@ -19,8 +19,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
     parser.add_argument(
         "--config",
-        default="config/system.json5",
-        help="Path to config JSON5 (default: config/system.json5)",
+        default="config/config.json5",
+        help="Path to config JSON5 (default: config/config.json5)",
     )
     return parser.parse_args()
 

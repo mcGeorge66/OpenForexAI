@@ -127,7 +127,7 @@ auch paketartigen Export/Import.
 |---|---|---|
 | `GET` | `/config/view` | Maskierte strukturierte Systemansicht |
 | `GET` | `/config/system` | Editierbare strukturierte Systemkonfiguration |
-| `GET` | `/config/system/text` | Roher `system.json5`-Text |
+| `GET` | `/config/system/text` | Roher `config.json5`-Text |
 | `PUT` | `/config/system` | Strukturierte Systemkonfiguration speichern |
 | `GET` | `/config/files/{name}` | Strukturierte Runtime-Datei laden |
 | `GET` | `/config/files/{name}/text` | Roher Runtime-Dateitext |

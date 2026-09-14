@@ -4,7 +4,7 @@ Endpoints
 ---------
 GET  /health                  System health (agents alive, queue depths, uptime)
 GET  /metrics                 Key counters (messages dispatched, tool calls, â€¦)
-GET  /version                 Application version from system.json5
+GET  /version                 Application version from config.json5
 GET  /runtime/status          Live runtime state (agents, routing rules)
 GET  /agents                  List registered agents + queue depths
 GET  /agents/{id}             Single agent info
@@ -17,9 +17,9 @@ GET  /monitoring/events       Recent events from ring buffer (polling)
 WS   /ws/monitoring           WebSocket live monitoring stream
 GET  /tools                   List registered tools
 POST /tools/execute           Execute a registered tool directly (for testing)
-GET  /config/view             system.json5 with sensitive fields masked
-GET  /config/system           Raw system.json5 (editable)
-PUT  /config/system           Save raw system.json5
+GET  /config/view             config.json5 with sensitive fields masked
+GET  /config/system           Raw config.json5 (editable)
+PUT  /config/system           Save raw config.json5
 GET  /config/files/{name}     Raw config file (agent_tools or event_routing)
 PUT  /config/files/{name}     Save raw config file
 GET  /config/modules/{type}   List configured module names for llm | broker
@@ -76,7 +76,7 @@ from openforexai.agents.analysis_snapshot import (
     preview_snapshot_tool_block,
     preview_calculation_block,
 )
-from openforexai.config.json_loader import load_json_config
+from openforexai.config.json_loader import load_json_config, resolve_config_path
 from openforexai.management.package_io import (
     apply_import_package,
     build_export_package,
@@ -1216,11 +1216,20 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _system_config_path() -> Path:
+    """The personal config file — config.json5, or the legacy config.json5.
+
+    One resolver for every read and write, so a half-finished rename cannot
+    leave the API reading one file while the running system uses the other.
+    """
+    return resolve_config_path(_project_root() / "config")
+
+
 async def _read_json5_file(path: Path) -> Any:
     """Read+parse a JSON5 file off the event loop.
 
     ``json5.loads`` is a pure-Python parser — for a file the size of
-    ``config/system.json5`` (hundreds of KB once every agent prompt/schema is
+    ``config/config.json5`` (hundreds of KB once every agent prompt/schema is
     in there) this routinely takes multiple seconds. Called synchronously
     inside an ``async def`` handler, that blocks the *entire* process for the
     whole parse — every other in-flight request, LLM response future, and
@@ -1774,7 +1783,7 @@ async def get_chartshot_image(filename: str):  # type: ignore[return]
         raise HTTPException(status_code=400, detail="Invalid chartshot filename")
     root = _project_root()
     try:
-        _cs_cfg = await _read_json5_file(root / "config" / "system.json5")
+        _cs_cfg = await _read_json5_file(resolve_config_path(root / "config"))
         output_dir = str((_cs_cfg.get("chartshot") or {}).get("output_dir") or "data/chartshots")
     except Exception:
         output_dir = "data/chartshots"
@@ -1795,7 +1804,7 @@ async def delete_chartshot_image(filename: str):
         raise HTTPException(status_code=400, detail="Invalid chartshot filename")
     root = _project_root()
     try:
-        _cs_cfg = await _read_json5_file(root / "config" / "system.json5")
+        _cs_cfg = await _read_json5_file(resolve_config_path(root / "config"))
         output_dir = str((_cs_cfg.get("chartshot") or {}).get("output_dir") or "data/chartshots")
     except Exception:
         output_dir = "data/chartshots"
@@ -1843,7 +1852,7 @@ async def put_doc_file(filename: str, request: Request) -> dict[str, str]:
 
 @router.get("/version")
 async def get_version() -> dict:
-    """Return the application version from system.json5."""
+    """Return the application version from config.json5."""
     version = _system_config.get("system", {}).get("version", "unknown")
     return {"version": version}
 
@@ -2148,7 +2157,7 @@ async def preview_snapshot(req: SnapshotPreviewRequest) -> SnapshotPreviewRespon
     )
     requested_name = str(req.profile_name or "").strip()
     if requested_name:
-        cfg_path = _project_root() / "config" / "system.json5"
+        cfg_path = _system_config_path()
         try:
             raw_cfg = await _read_json5_file(cfg_path)
         except Exception:
@@ -2988,7 +2997,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
                 "allow_trade_delete": req.allow_trade_delete,
                 # semantic_memory reads its table grants exclusively from here (never from
                 # the LLM's tool-call arguments) — this ad-hoc chat session isn't a persistent
-                # system.json5 agent with its own scoped forced_arguments, so it gets full,
+                # config.json5 agent with its own scoped forced_arguments, so it gets full,
                 # unrestricted access instead: whoever calls this endpoint already decided
                 # (via req.allowed_tools) whether semantic_memory is offered at all.
                 "agent_config": {
@@ -4676,7 +4685,7 @@ async def llm_checker(req: LLMCheckerRequest) -> LLMCheckerResponse:
     )
 @router.get("/config/view")
 async def config_view() -> dict:
-    """Return system.json5 with sensitive fields (api_key, password, â€¦) masked.
+    """Return config.json5 with sensitive fields (api_key, password, â€¦) masked.
 
     All keys whose name matches a known sensitive pattern are replaced with
     ``"***"`` recursively.  Environment variable values are already substituted
@@ -4687,10 +4696,10 @@ async def config_view() -> dict:
 
 @router.get("/config/system")
 async def get_system_config_raw() -> dict:
-    """Return raw system.json5 from disk for editing."""
-    cfg_path = _project_root() / "config" / "system.json5"
+    """Return raw config.json5 from disk for editing."""
+    cfg_path = _system_config_path()
     if not cfg_path.exists():
-        raise HTTPException(status_code=404, detail="system.json5 not found")
+        raise HTTPException(status_code=404, detail=f"{cfg_path.name} not found")
     try:
         return await _read_json5_file(cfg_path)
     except ValueError as exc:
@@ -4703,8 +4712,8 @@ async def get_system_config_raw() -> dict:
 
 @router.get("/config/system/text")
 async def get_system_config_text() -> dict[str, str]:
-    """Return raw system.json5 text for editing (comments preserved)."""
-    cfg_path = _project_root() / "config" / "system.json5"
+    """Return raw config.json5 text for editing (comments preserved)."""
+    cfg_path = _system_config_path()
     return {"text": _read_text_file(cfg_path), "file": str(cfg_path)}
 
 
@@ -4804,7 +4813,7 @@ async def import_agent_package(req: PackageImportRequest) -> dict[str, Any]:
         agent_tools_path=project_root / "config" / "RunTime" / "agent_tools.json5",
     )
 
-    _write_json_file(project_root / "config" / "system.json5", next_system)
+    _write_json_file(resolve_config_path(project_root / "config"), next_system)
     if req.import_event_routing:
         _write_json_file(project_root / "config" / "RunTime" / "event_routing.json5", next_routing)
     if req.import_bridge_tools:
@@ -4875,7 +4884,7 @@ async def _trigger_ec_config_refresh() -> dict[str, int]:
     """Ask ConfigService to resend config for all running enabled EventComposers.
 
     Without this, a running EC keeps executing its OLD script/config after a
-    system.json5 save reports "saved" — violating the project's no-restart
+    config.json5 save reports "saved" — violating the project's no-restart
     hot-reload rule (agents already get this refresh via
     _trigger_agent_config_refresh; ECs did not).
     """
@@ -5174,8 +5183,8 @@ async def _apply_runtime_agent_changes(previous_system_config: dict[str, Any]) -
 
 @router.put("/config/system")
 async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
-    """Persist raw system.json5, refresh memory, and trigger runtime apply."""
-    cfg_path = _project_root() / "config" / "system.json5"
+    """Persist raw config.json5, refresh memory, and trigger runtime apply."""
+    cfg_path = _system_config_path()
     _write_json_file(cfg_path, content)
     global _system_config
     previous_system_config = copy.deepcopy(_system_config)
@@ -5191,7 +5200,7 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
     composer_apply = await _apply_runtime_composer_changes(previous_system_config)
     return {
         "status": "saved",
-        "file": "config/system.json5",
+        "file": f"config/{_system_config_path().name}",
         "llm_module_apply": llm_module_apply,
         "runtime_apply": runtime_apply,
         "composer_apply": composer_apply,
@@ -5199,7 +5208,7 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
 
 # ── Notifications (Telegram designer) ─────────────────────────────────────────
 #
-# The rules live in config/system.json5 under "notifications". They are the
+# The rules live in config/config.json5 under "notifications". They are the
 # single source for both halves of a warning: what gets said, and — derived
 # from them — the routing entry that makes the event reach the service at all.
 # Saving here therefore re-syncs the routing store too, so the two can never
@@ -5209,7 +5218,7 @@ _NOTIFY_SEVERITIES = ("info", "warning", "critical")
 
 
 def _notifications_config_path() -> Path:
-    return _project_root() / "config" / "system.json5"
+    return _system_config_path()
 
 
 def _redact_token(block: dict[str, Any]) -> dict[str, Any]:
@@ -5287,7 +5296,7 @@ async def save_notifications_config(req: NotificationsSaveRequest) -> dict[str, 
     try:
         on_disk = await _read_json5_file(cfg_path)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"system.json5 unlesbar: {exc}")
+        raise HTTPException(status_code=500, detail=f"Personliche Config unlesbar: {exc}")
     previous = on_disk.get("notifications") if isinstance(on_disk.get("notifications"), dict) else {}
     prev_token = (previous.get("telegram") or {}).get("bot_token") if isinstance(previous.get("telegram"), dict) else None
     telegram = incoming.setdefault("telegram", {})
@@ -5329,7 +5338,7 @@ async def save_notifications_config(req: NotificationsSaveRequest) -> dict[str, 
 
     return {
         "status": "saved",
-        "file": "config/system.json5",
+        "file": f"config/{_system_config_path().name}",
         "applied_without_restart": applied,
         "derived_routing_rules": derived,
         "notifications": _redact_token(effective if isinstance(effective, dict) else {}),
@@ -5797,7 +5806,7 @@ async def list_module_configs(module_type: str) -> dict:
 async def get_module_config(module_type: str, name: str) -> dict:
     """Return a single module config file with secrets masked.
 
-    The path is resolved from ``system.json5`` under ``modules.<type>.<name>``,
+    The path is resolved from ``config.json5`` under ``modules.<type>.<name>``,
     relative to the project root.  Sensitive fields are replaced with ``"***"``
     via *_deep_mask*.
     """
@@ -6171,7 +6180,7 @@ _ASSISTANT_DEFAULT_REASONING_EFFORT = "low"
 def _resolve_assistant_llm(llm_name_override: str | None = None):
     """Return (llm_instance, call_kwargs) for the assistant.
 
-    Reads system.json5 -> llm_assistant for provider selection and optional
+    Reads config.json5 -> llm_assistant for provider selection and optional
     parameter overrides (temperature, reasoning_effort, max_tokens).
     llm_name_override (a per-request llm_name from the caller) takes precedence
     over the configured provider — used for the "on the fly" model picker in
@@ -6509,7 +6518,7 @@ def build_app(
         async def _serve_spa(full_path: str) -> _FileResponse:  # type: ignore[return]
             # This route carries no auth dependency (it must serve the SPA shell
             # before login), so it must contain the resolved path to _ui_dist
-            # itself — otherwise "../../config/system.json5" (or any file on the
+            # itself — otherwise "../../config/config.json5" (or any file on the
             # filesystem) would be served to an unauthenticated client.
             target = (_ui_dist / full_path).resolve()
             try:

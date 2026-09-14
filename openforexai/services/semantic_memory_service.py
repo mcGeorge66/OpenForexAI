@@ -107,7 +107,7 @@ def _is_valid_table_name(name: str) -> bool:
 
 # ── Absolute-price-quote guard ──────────────────────────────────────────────
 #
-# The Examiner agent's own system prompt (config/system.json5, agent id
+# The Examiner agent's own system prompt (config/config.json5, agent id
 # OXS_T-ALL___-EA-EXAM) already instructs it, with a worked example, to
 # describe prices/levels RELATIVELY (pips/ATR distance, position within a
 # range, relative to a level) and never as absolute price quotes — an

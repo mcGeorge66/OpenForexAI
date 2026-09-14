@@ -16,7 +16,7 @@ Der Bereich `Config` ist die Hauptoberfläche für Profile, Routing und Modul-De
 | [Bridge Tools](ui.config.bridge_tools.de.md) | Tool-Freigaben und Bridge-artige Tool-Konfigurationen |
 | [Event Routing](ui.config.event_routing.de.md) | Regeln, die bestimmen, welche Agenten welche Events empfangen |
 | [AI-Assistant](ui.config.ai_assistant.de.md) | Kontext-Dateien für den eingebetteten AI-Assistant-Chat in den Config-Editoren |
-| [System Config](ui.config.system_config.de.md) | Zentrale system.json5 globale Parameter |
+| [System Config](ui.config.system_config.de.md) | Zentrale config.json5 globale Parameter |
 | [Helper Config](ui.config.helper_config.de.md) | Python-Hilfsfunktionen für Snapshot-Transform-Scripts |
 | [Package Manager](ui.config.package_manager.de.md) | Konfigurationspakete exportieren und importieren |
 | [Broker Modules](ui.config.broker_modules.de.md) | Broker-Adapter-Verbindungen (MT5 / OANDA) |
@@ -210,9 +210,9 @@ Vorgesehener Screenshot:
 
 ## System Config
 
-`System Config` dient zur Bearbeitung der zentralen `system.json5`.
+`System Config` dient zur Bearbeitung der zentralen `config.json5`.
 
-Das ist die Konfigurationsseite mit der größten Auswirkung, weil sie globales Laufzeitverhalten beeinflusst. Die Datei system.json5 enthält:
+Das ist die Konfigurationsseite mit der größten Auswirkung, weil sie globales Laufzeitverhalten beeinflusst. Die Datei config.json5 enthält:
 
 - globale Runtime-Einstellungen
 - Agenten-Definitionen (oder Verweise auf diese)
@@ -221,7 +221,7 @@ Das ist die Konfigurationsseite mit der größten Auswirkung, weil sie globales 
 - Event-Routing-Regeln
 - Modul-Referenzen
 
-Die direkte Bearbeitung von system.json5 ermöglicht vollständige Kontrolle, erfordert aber sorgfältige JSON5-Syntax. Validierungsfehler hier können verhindern, dass das System startet.
+Die direkte Bearbeitung von config.json5 ermöglicht vollständige Kontrolle, erfordert aber sorgfältige JSON5-Syntax. Validierungsfehler hier können verhindern, dass das System startet.
 
 **Empfehlung**: Die dedizierten Config-Seiten (Agent Config, Snapshot Config, Decision Prompt, Event Routing) für Routineänderungen verwenden. System Config nur einsetzen, wenn Änderungen nötig sind, die über die einzelnen Seiten nicht zugänglich sind, oder beim Importieren/Exportieren der vollständigen Konfiguration.
 

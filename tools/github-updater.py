@@ -128,7 +128,7 @@ def get_remote_version() -> str | None:
 
 def _is_preserved(rel: Path) -> bool:
     rel_posix = rel.as_posix()
-    if rel_posix == "config/system.json5":
+    if rel_posix in ("config/config.json5", "config/config.json5"):
         return True
     if rel_posix.startswith("config/modules/"):
         return True

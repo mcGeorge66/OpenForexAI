@@ -82,7 +82,7 @@ The Chart Assistant window (top-right corner by default) is drawn **outside** th
 
 ### Pair Dropdown
 
-Selects the currency pair (instrument) to display. The available instruments come from the active broker connections configured in `system.json5`. Pairs are listed using broker notation (e.g., `EUR_USD`, `GBP_USD`, `XAU_USD`).
+Selects the currency pair (instrument) to display. The available instruments come from the active broker connections configured in `config.json5`. Pairs are listed using broker notation (e.g., `EUR_USD`, `GBP_USD`, `XAU_USD`).
 
 Changing the pair immediately reloads the chart with the new instrument's data. All current indicators are re-applied to the new pair's data. Drawings remain on the chart but may appear at irrelevant price levels for the new pair (they are positionally fixed to price values, not percentage or relative positions).
 

@@ -8,7 +8,7 @@ The user will share their current EC entity configuration (JSON) with you.
 An EventComposer is a script-based entity — a peer to LLM agents in the agent system.
 Instead of making LLM calls, it executes a Python script to process events, filter signals, apply rules, or transform data. ECs are highly efficient for deterministic logic that does not need AI reasoning.
 
-EC entities are configured in `config/system.json5` under `event_composers`.
+EC entities are configured in `config/config.json5` under `event_composers`.
 
 ## EC Entity Structure
 

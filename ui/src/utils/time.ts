@@ -3,7 +3,7 @@
  *
  * Every timestamp shown in the UI passes through these helpers so the entire
  * application uses one consistent timezone — the one configured in
- * system.json5 as `ui_utc` (default UTC+3, the broker's timezone).
+ * config.json5 as `ui_utc` (default UTC+3, the broker's timezone).
  *
  * Stored timestamps in the database carry their original timezone (broker
  * candles are UTC+3, locally-set timestamps are UTC). The formatters here

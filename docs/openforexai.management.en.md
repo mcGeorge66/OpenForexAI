@@ -127,7 +127,7 @@ export/import.
 |---|---|---|
 | `GET` | `/config/view` | Masked structured system view |
 | `GET` | `/config/system` | Editable structured system config |
-| `GET` | `/config/system/text` | Raw `system.json5` text |
+| `GET` | `/config/system/text` | Raw `config.json5` text |
 | `PUT` | `/config/system` | Save structured system config |
 | `GET` | `/config/files/{name}` | Structured runtime file view |
 | `GET` | `/config/files/{name}/text` | Raw runtime file text |

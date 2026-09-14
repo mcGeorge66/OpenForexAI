@@ -2,11 +2,11 @@
 
 The ConfigService registers as agent ``SYSTM-ALL___-GA-CFGSV`` on the EventBus.
 When an agent starts and sends an AGENT_CONFIG_REQUESTED message, the service
-looks up the agent's config in system.json5 and replies with AGENT_CONFIG_RESPONSE
+looks up the agent's config in config.json5 and replies with AGENT_CONFIG_RESPONSE
 (directed directly to the requesting agent via target_agent_id).
 
 The response payload contains:
-    config   — the full agent config dict from system.json5
+    config   — the full agent config dict from config.json5
     modules  — resolved module configs (llm, broker) for this agent
 
 Usage::

@@ -172,5 +172,5 @@ class MyBroker(BrokerBase):
 PluginRegistry.register_broker("mybroker", MyBroker)
 ```
 
-3. Create `config/modules/broker/mybroker.json5` and reference in `config/system.json5`.
+3. Create `config/modules/broker/mybroker.json5` and reference in `config/config.json5`.
 

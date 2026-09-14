@@ -103,9 +103,9 @@ Ein konfigurierter Filter kann unter einem Namen gespeichert werden:
 | **Update** | Überschreibt den aktuell geladenen gespeicherten Filter mit dem aktuellen Stand. |
 | **Delete** | Löscht den aktuell geladenen gespeicherten Filter. |
 
-Gespeicherte Filter werden zentral in `system.json5` (`system.ui.monitor.saved_filters`) abgelegt — sie sind also **für alle Nutzer des Systems sichtbar**, nicht nur lokal im eigenen Browser. Jeder gespeicherte Filter erscheint automatisch als Eintrag in der **linken Seitenleiste** des Monitor-Bereichs; ein Klick darauf lädt seine Regeln in den Filter Builder. Ohne gespeicherte Filter zeigt die Seitenleiste „No saved filters".
+Gespeicherte Filter werden zentral in `config.json5` (`system.ui.monitor.saved_filters`) abgelegt — sie sind also **für alle Nutzer des Systems sichtbar**, nicht nur lokal im eigenen Browser. Jeder gespeicherte Filter erscheint automatisch als Eintrag in der **linken Seitenleiste** des Monitor-Bereichs; ein Klick darauf lädt seine Regeln in den Filter Builder. Ohne gespeicherte Filter zeigt die Seitenleiste „No saved filters".
 
-**Empfehlung:** Für jeden Agenten, den man regelmäßig beobachtet, einen eigenen gespeicherten Filter anlegen (z. B. „EURUSD AA" mit der Regel `Source contains OXS_T-EURUSD-AA`). Da diese Filter für alle Nutzer sichtbar sind, profitieren auch Kollegen sofort davon — man muss sich nicht gegenseitig erklären, wie man auf ein bestimmtes Pair filtert. Weil die Filter in `system.json5` liegen, sollte man vor dem Löschen eines fremden, unbekannten Filters kurz nachfragen — er könnte für jemand anderen aktiv im Gebrauch sein.
+**Empfehlung:** Für jeden Agenten, den man regelmäßig beobachtet, einen eigenen gespeicherten Filter anlegen (z. B. „EURUSD AA" mit der Regel `Source contains OXS_T-EURUSD-AA`). Da diese Filter für alle Nutzer sichtbar sind, profitieren auch Kollegen sofort davon — man muss sich nicht gegenseitig erklären, wie man auf ein bestimmtes Pair filtert. Weil die Filter in `config.json5` liegen, sollte man vor dem Löschen eines fremden, unbekannten Filters kurz nachfragen — er könnte für jemand anderen aktiv im Gebrauch sein.
 
 ---
 

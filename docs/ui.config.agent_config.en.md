@@ -2,7 +2,7 @@
 
 # Agent Config
 
-`Agent Config` is the central tool for creating, configuring, and managing individual agents. All settings are saved directly to `config/system.json5`. Changes take effect when the agent process is restarted or the agent is reloaded via trigger.
+`Agent Config` is the central tool for creating, configuring, and managing individual agents. All settings are saved directly to `config/config.json5`. Changes take effect when the agent process is restarted or the agent is reloaded via trigger.
 
 ---
 
@@ -120,7 +120,7 @@ The type affects which fields are active (e.g. *Pair* only for AA) and how routi
 
 ### LLM
 
-The LLM module this agent should use. Options come from the `modules.llm` section of `system.json5`.
+The LLM module this agent should use. Options come from the `modules.llm` section of `config.json5`.
 
 Each LLM module has its own model provider, context limit, and default settings. Required field — agents cannot be saved without an LLM selection.
 
@@ -128,7 +128,7 @@ Each LLM module has its own model provider, context limit, and default settings.
 
 ### Broker
 
-The broker module this agent is assigned to. Options come from the `modules.broker` section of `system.json5`.
+The broker module this agent is assigned to. Options come from the `modules.broker` section of `config.json5`.
 
 Determines which broker adapter the agent receives account data, prices, and order execution from. Required field.
 
@@ -325,7 +325,7 @@ Affects both cost and possible output length. Increase for detailed analyses or 
 
 ### Live Summary
 
-Shows the current configuration as a text preview — as it would be saved in `system.json5`. Useful for a quick check before saving.
+Shows the current configuration as a text preview — as it would be saved in `config.json5`. Useful for a quick check before saving.
 
 ### Validation
 
@@ -359,7 +359,7 @@ If no errors are present, `No validation issues detected.` appears in green.
 
 When you click **Update** or **Save As New**, the UI:
 1. Validates the complete configuration
-2. Writes the updated agent entry to `config/system.json5`
+2. Writes the updated agent entry to `config/config.json5`
 3. Sends an `agent_config_requested` event on the event bus
 
 The `agent_config_requested` event triggers a hot reload of agent configurations — the agent is reloaded with the new settings **without requiring a full system restart**. Changes to the system prompt, tool list, session filter, and most other fields take effect immediately on the next agent cycle.
@@ -491,7 +491,7 @@ System-wide agents that operate across all pairs and brokers. Examples:
 
 The session filter restricts when an agent processes triggers. An agent configured with a session filter will only run when at least one of its configured sessions is active at the time of the trigger.
 
-**Important:** Session times are compared against the **candle timestamp**, not the server's system clock. The `broker_candle_utc_offset_hours` value in `system.json5` defines the UTC offset of the candle timestamps from the broker's data feed.
+**Important:** Session times are compared against the **candle timestamp**, not the server's system clock. The `broker_candle_utc_offset_hours` value in `config.json5` defines the UTC offset of the candle timestamps from the broker's data feed.
 
 ### Session Windows (Standard UTC Times)
 

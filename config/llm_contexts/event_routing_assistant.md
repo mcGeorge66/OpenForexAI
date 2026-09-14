@@ -7,7 +7,7 @@ The user will share their current event routing configuration (JSON) with you.
 
 Event Routing defines how messages/events flow between agents in the system. Rules determine which events get forwarded from one agent to another, enabling complex multi-agent workflows and event-driven coordination.
 
-Event routing rules are configured in `config/system.json5` under `event_routing`.
+Event routing rules are configured in `config/config.json5` under `event_routing`.
 
 ## Event Routing Rule Structure
 

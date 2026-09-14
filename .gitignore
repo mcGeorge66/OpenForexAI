@@ -52,6 +52,7 @@ AGENTS.md
 *.drawio
 *.cmd
 CLAUDE.md
+config/config.json5
 config/system.json5
 
 # Runtime audit exports

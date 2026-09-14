@@ -25,13 +25,14 @@ _OSCILLATOR_NAMES = {"RSI", "ATR", "SLOPE_E", "SLOPE_S"}
 
 
 def _load_chartshot_cfg(config_name: str) -> tuple[str, str, dict[str, Any]]:
-    """Return (output_dir, output_mode, named_config) from system.json5 chartshot block."""
-    path = Path(__file__).parents[3] / "config" / "system.json5"
+    """Return (output_dir, output_mode, named_config) from config.json5 chartshot block."""
+    from openforexai.config.json_loader import resolve_config_path
+    path = resolve_config_path(Path(__file__).parents[3] / "config")
     try:
         import json5
         data = json5.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        _log.warning("chartshot: could not load system.json5: %s", exc)
+        _log.warning("chartshot: could not load config.json5: %s", exc)
         data = {}
 
     cs = data.get("chartshot", {}) if isinstance(data, dict) else {}
@@ -333,7 +334,7 @@ class ChartShotTool(BaseTool):
             },
             "config": {
                 "type": "string",
-                "description": "Named chartshot config from system.json5 chartshot.configs. Default: 'default'.",
+                "description": "Named chartshot config from config.json5 chartshot.configs. Default: 'default'.",
             },
         },
         "required": ["timeframe"],
@@ -362,7 +363,7 @@ class ChartShotTool(BaseTool):
                 f"Invalid timeframe {timeframe!r}. Must be one of: {', '.join(sorted(_VALID_TIMEFRAMES))}"
             )
 
-        # Load named config from system.json5
+        # Load named config from config.json5
         output_dir, output_mode, named_cfg = _load_chartshot_cfg(config_name)
         style       = str(named_cfg.get("style", "dark"))
         description = str(

@@ -5,7 +5,7 @@ The user will share their current agent configuration (JSON) with you.
 
 ## What is an Agent Config?
 
-Agent configs are defined in `config/system.json5` under `agents`. Each entry defines one trading agent instance — its role, LLM, broker, pair, snapshot profile, triggers, and tools.
+Agent configs are defined in `config/config.json5` under `agents`. Each entry defines one trading agent instance — its role, LLM, broker, pair, snapshot profile, triggers, and tools.
 
 ## Agent Config Fields (verified against the actual wizard form)
 

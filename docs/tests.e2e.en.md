@@ -31,7 +31,7 @@ pytest tests/e2e/ -v -s   # with stdout output (useful to see the full cycle)
    └── Create MockBroker, MockLLM, MockRepository
    └── Create DataContainer
    └── Create ManagementServer (on random free port)
-   └── Create Agent(s) from system.json5 definitions
+   └── Create Agent(s) from config.json5 definitions
    └── Start all tasks in asyncio.TaskGroup
 
 2. Inject M5 Candle
@@ -64,12 +64,12 @@ pytest tests/e2e/ -v -s   # with stdout output (useful to see the full cycle)
 
 ## Test Configuration
 
-The E2E test uses the real `system.json5` with mock adapters injected at bootstrap time:
+The E2E test uses the real `config.json5` with mock adapters injected at bootstrap time:
 
 ```python
 @pytest.fixture
 async def full_system():
-    config = load_json_config(Path("config/system.json5"))
+    config = load_json_config(Path("config/config.json5"))
     mock_llm = MockLLMProvider(...)
     mock_broker = MockBroker(short_name="OAPR1")
     mock_repo = MockRepository()

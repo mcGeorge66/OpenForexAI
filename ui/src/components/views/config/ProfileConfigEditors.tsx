@@ -477,7 +477,7 @@ export function SnapshotConfigEditor() {
       const availableAgents = agents
         .map(agent => agent.agent_id)
         .sort()
-      // Chartshot config names from system.json5
+      // Chartshot config names from config.json5
       const csSection = (next as Record<string, unknown>).chartshot
       const csConfigs = csSection && typeof csSection === 'object'
         ? Object.keys(((csSection as Record<string, unknown>).configs as Record<string, unknown>) ?? {}).sort()
@@ -829,7 +829,7 @@ export function SnapshotConfigEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Snapshot Config</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (snapshot_profiles)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'config.json5') : 'config/config.json5'} (snapshot_profiles)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}
@@ -2147,7 +2147,7 @@ export function DecisionPromptConfigEditor() {
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-sm text-gray-300 font-medium">Decision Prompt</span>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'system.json5') : 'config/system.json5'} (decision_prompt_profiles)</span>
+          <span className="text-xs text-white">{root ? joinPath(root, 'config', 'config.json5') : 'config/config.json5'} (decision_prompt_profiles)</span>
           <button
             onClick={() => void load()}
             disabled={loading || saving}

@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Backfill missing closed-trade result fields from the broker history."
     )
-    parser.add_argument("--config", default="config/system.json5", help="Path to system config.")
+    parser.add_argument("--config", default="config/config.json5", help="Path to system config.")
     parser.add_argument(
         "--broker",
         default=None,

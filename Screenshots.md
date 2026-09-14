@@ -12,6 +12,6 @@
     
 - **Monitor**: Real-time observability view of system activity. It shows categorized events (LLM, tools, bus, data, broker, errors) for debugging and runtime transparency.![ALT-TEXT](image/monitor.jpg)
     
-- **System Config**: Central configuration editor for config/system.json5. It defines modules, agents, and core runtime settings used by the backend.![ALT-TEXT](image/systemconfig.jpg)
+- **System Config**: Central configuration editor for config/config.json5. It defines modules, agents, and core runtime settings used by the backend.![ALT-TEXT](image/systemconfig.jpg)
     
 - **Tool Executor**: Manual tool testing interface. It lets you run registered tools directly with chosen context/arguments to verify behavior independent of full agent cycles. ![ALT-TEXT](image/toolexecutor.jpg)

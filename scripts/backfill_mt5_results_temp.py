@@ -35,7 +35,7 @@ def _load_env(path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Temporary MT5-only orderbook result backfill.")
-    parser.add_argument("--config", default="config/system.json5")
+    parser.add_argument("--config", default="config/config.json5")
     parser.add_argument("--broker-module", default="mt5_oxs_t")
     parser.add_argument("--pair", default=None)
     parser.add_argument("--limit", type=int, default=5000)

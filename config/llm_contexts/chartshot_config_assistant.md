@@ -7,7 +7,7 @@ The user will share their current chartshot configuration (JSON) with you.
 
 Chartshot is a chart screenshot tool integrated into OpenForexAI. It generates candlestick chart images with optional technical indicators, which can be included in the LLM snapshot for visual analysis.
 
-Chartshot config is defined in `config/system.json5` under `chartshot`.
+Chartshot config is defined in `config/config.json5` under `chartshot`.
 
 ## Chartshot Config Structure
 

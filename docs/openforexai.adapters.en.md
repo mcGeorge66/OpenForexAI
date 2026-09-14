@@ -104,7 +104,7 @@ All adapters accept tools in the internal **Anthropic-style** `input_schema` for
 1. Create `adapters/llm/<name>.py` implementing `AbstractLLMProvider`
 2. Register in `adapters/llm/__init__.py`
 3. Create `config/modules/llm/<name>.json5` with `"adapter": "<name>"`
-4. Reference in `config/system.json5` under `modules.llm`
+4. Reference in `config/config.json5` under `modules.llm`
 
 ---
 
@@ -149,7 +149,7 @@ Windows-only adapter using the `MetaTrader5` Python package. Provides equivalent
 1. Create `adapters/brokers/<name>.py` subclassing `BrokerBase`
 2. Register in `adapters/brokers/__init__.py`
 3. Create `config/modules/broker/<name>.json5`
-4. Reference in `config/system.json5` under `modules.broker`
+4. Reference in `config/config.json5` under `modules.broker`
 
 ---
 

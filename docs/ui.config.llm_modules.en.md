@@ -69,7 +69,7 @@ Each agent specifies which LLM module to use via the `llm` field in its Agent Co
 
 | Element | Function |
 |---------|----------|
-| **Module selector** | Dropdown listing all LLM modules registered in `modules.llm` of `system.json5` |
+| **Module selector** | Dropdown listing all LLM modules registered in `modules.llm` of `config.json5` |
 | **File path** | Full path to the selected module's config file |
 | **Refresh** | Reload the current file version from disk (only active when a module is selected) |
 | **Save** | Validate and write the file (only active when a module is selected) |
@@ -77,7 +77,7 @@ Each agent specifies which LLM module to use via the `llm` field in its Agent Co
 
 ### Module Selector
 
-The dropdown is populated from the `modules.llm` array in `system.json5`. Each entry in that array is a file path; the dropdown shows the filename portion (e.g. `azure_azmin.json5`).
+The dropdown is populated from the `modules.llm` array in `config.json5`. Each entry in that array is a file path; the dropdown shows the filename portion (e.g. `azure_azmin.json5`).
 
 After selecting a module, the editor loads its file content automatically.
 
@@ -119,7 +119,7 @@ The LLM module picks up new configuration at the next system start or module rel
 
 The path chain for an LLM module:
 
-1. `config/system.json5` has `modules.llm: ["config/llm/azure_azmin.json5"]`
+1. `config/config.json5` has `modules.llm: ["config/llm/azure_azmin.json5"]`
 2. On startup, the system reads this path and loads `azure_azmin.json5`
 3. The module is instantiated as an LLM service and registered on the bus as `llm:azure_azmin`
 4. A routing rule in Event Routing sends `llm_request` events to `llm:azure_azmin`
@@ -127,7 +127,7 @@ The path chain for an LLM module:
 
 To add a new LLM module:
 1. Create the config file (e.g. `config/llm/new_provider.json5`)
-2. Add its path to `modules.llm` in `system.json5`
+2. Add its path to `modules.llm` in `config.json5`
 3. Add a routing rule that routes `llm_request` to `llm:new_provider` (or specific agents to this LLM)
 4. Restart the system
 
@@ -304,7 +304,7 @@ OpenForexAI supports multiple LLM modules running simultaneously. Each module ha
 
 ### Configuration
 
-In `system.json5`:
+In `config.json5`:
 ```json5
 {
   modules: {

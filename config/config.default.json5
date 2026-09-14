@@ -5,13 +5,13 @@
 // It contains nothing personal — no broker accounts, no chat ids, no local
 // paths, no tuned thresholds.
 //
-// Your own values go in config/system.json5, which is merged over this file
+// Your own values go in config/config.json5, which is merged over this file
 // and wins on every key it sets. Empty objects below are deliberate: they
 // mark "this branch exists, fill it in your own config".
 {
   // Controls merge semantics for selected paths when loading default + custom.
   // Listed paths are replaced wholesale instead of merged, so an entry removed
-  // from system.json5 really disappears rather than reappearing from here.
+  // from config.json5 really disappears rather than reappearing from here.
   "ImportRules": {
     "Replace": [
       "agents",
@@ -57,7 +57,7 @@
   },
   // Outbound notifications (Telegram today, further channels later).
   // Off until a bot token and at least one chat id are configured — set those
-  // in your own config/system.json5, with the token coming from an environment
+  // in your own config/config.json5, with the token coming from an environment
   // variable like the broker credentials, never written into a config file.
   "notifications": {
     "enable": false,
@@ -123,7 +123,7 @@
     }
   },
   // Rendered chart images for agents and the UI. Named configs are personal;
-  // define yours in config/system.json5 or via the Chartshot editor.
+  // define yours in config/config.json5 or via the Chartshot editor.
   "chartshot": {
     "output_dir": "data/chartshots",
     "configs": {}

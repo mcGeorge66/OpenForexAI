@@ -6,7 +6,7 @@ Die Seite **Chartshot Config** verwaltet benannte Vorlagen für das `chartshot`-
 
 **Wann lohnt sich das?** Reine Zahlenanalyse (OHLC-Werte, Indikator-Zahlen) ist für ein LLM oft ausreichend, aber manche Muster — z. B. ein sauberer Doppel-Boden, eine Flagge, ein Ausbruch aus einem erkennbaren Kanal — lassen sich in Textform nur umständlich beschreiben, während ein Vision-fähiges LLM sie auf einem Bild sofort erkennt. Chartshot lohnt sich also vor allem dann, wenn der Prompt explizit visuelle Chartmuster ansprechen soll, nicht für reine Kennzahlen-Auswertung (dafür reichen `calculate_indicator`/`get_candles`).
 
-Gespeichert unter `config/system.json5` → `chartshot`.
+Gespeichert unter `config/config.json5` → `chartshot`.
 
 ---
 
@@ -41,7 +41,7 @@ Der LLM-Adapter erkennt diese Marker automatisch im Tool-Ergebnis und hängt das
 
 ### 3.1 Kopfzeile
 
-`AI Assistant`-Button öffnet den eingebetteten [AI-Assistant](ui.config.ai_assistant.de.md)-Chat mit Kontext zur aktuell bearbeiteten Vorlage. `Reload` lädt neu vom Server, `Save` schreibt die gesamte `chartshot`-Konfiguration zurück nach `system.json5`. `Delete` entfernt die aktuell gewählte Vorlage — außer `default`.
+`AI Assistant`-Button öffnet den eingebetteten [AI-Assistant](ui.config.ai_assistant.de.md)-Chat mit Kontext zur aktuell bearbeiteten Vorlage. `Reload` lädt neu vom Server, `Save` schreibt die gesamte `chartshot`-Konfiguration zurück nach `config.json5`. `Delete` entfernt die aktuell gewählte Vorlage — außer `default`.
 
 ### 3.2 Output mode
 
@@ -74,7 +74,7 @@ Gleiches Panel wie in Chart Analysis / Prompt Workbench.
 
 ### 3.7 Preview (JSON)
 
-Am Ende des Editors: schreibgeschützte Vorschau des exakten `system.json5`-Eintrags, der beim Speichern für diese Vorlage geschrieben wird — nützlich, um vor dem Speichern kurz zu prüfen, ob z. B. ein Indikator versehentlich doppelt eingetragen wurde.
+Am Ende des Editors: schreibgeschützte Vorschau des exakten `config.json5`-Eintrags, der beim Speichern für diese Vorlage geschrieben wird — nützlich, um vor dem Speichern kurz zu prüfen, ob z. B. ein Indikator versehentlich doppelt eingetragen wurde.
 
 ---
 

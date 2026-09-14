@@ -141,7 +141,7 @@ On each startup:
 
 ```bash
 python scripts/db_migrate.py
-python scripts/db_migrate.py --config config/system.json5
+python scripts/db_migrate.py --config config/config.json5
 ```
 
 ### Adding a New Migration

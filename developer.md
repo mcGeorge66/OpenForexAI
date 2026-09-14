@@ -30,7 +30,7 @@ OpenForexAI/
 ├── AGENTS.md                         # Project-specific coding/agent guidance
 ├── pyproject.toml                    # Build metadata and dependencies
 ├── config/
-│   ├── system.json5                  # Central runtime config
+│   ├── config.json5                  # Central runtime config
 │   ├── config.md                     # Config information document shown in UI
 │   ├── modules/
 │   │   ├── llm/                      # Per-LLM module configs

@@ -32,7 +32,7 @@ Agent.start()
        └── routing rule "config_request_to_service" → ConfigService inbox
 
 ConfigService._handle_request()
-    2. looks up agents["OAPR1_EURUSD_AA_ANLYS"] in system.json5
+    2. looks up agents["OAPR1_EURUSD_AA_ANLYS"] in config.json5
     3. resolves LLM and broker module configs
     4. publishes: AGENT_CONFIG_RESPONSE (direct → requesting agent)
        payload: {config: {...}, modules: {llm: {...}, broker: {...}}}

@@ -2,7 +2,7 @@
  * Pure helpers/types/hook for SnapshotBlocksPanel.tsx's tool_blocks/calculation_blocks
  * editor — split into its own file so that component file only exports components
  * (Fast Refresh requirement), while these stay importable independently (used for
- * (de)serializing blocks to/from system.json5 outside the panel UI too).
+ * (de)serializing blocks to/from config.json5 outside the panel UI too).
  */
 import { useEffect, useState } from 'react'
 import { api, type CalculationBlock, type ToolInfo } from '@/api/client'

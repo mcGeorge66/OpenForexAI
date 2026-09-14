@@ -167,7 +167,7 @@ Das bedeutet:
 
 ### LLM-Modul-Selektor
 
-Dropdown mit allen LLM-Modulen, die in `config/system.json5` unter `modules.llm` definiert sind. **Pflichtfeld** — ohne Auswahl kann keine Nachricht gesendet werden.
+Dropdown mit allen LLM-Modulen, die in `config/config.json5` unter `modules.llm` definiert sind. **Pflichtfeld** — ohne Auswahl kann keine Nachricht gesendet werden.
 
 Nach Auswahl eines LLM-Moduls werden Temperature und Max Tokens automatisch mit den konfigurierten Standard-Werten des Moduls vorbelegt. Diese Werte können für diese Test-Session überschrieben werden, ohne die Basis-Konfiguration des Moduls zu ändern.
 

@@ -2,7 +2,7 @@
 
 # Agent Config
 
-`Agent Config` ist das zentrale Werkzeug, um einzelne Agenten anzulegen, zu konfigurieren und zu verwalten. Alle Einstellungen werden direkt in der Datei `config/system.json5` gespeichert. Änderungen werden erst wirksam, wenn der Agentenprozess neu gestartet oder der Agent per Trigger neu geladen wird.
+`Agent Config` ist das zentrale Werkzeug, um einzelne Agenten anzulegen, zu konfigurieren und zu verwalten. Alle Einstellungen werden direkt in der Datei `config/config.json5` gespeichert. Änderungen werden erst wirksam, wenn der Agentenprozess neu gestartet oder der Agent per Trigger neu geladen wird.
 
 ---
 
@@ -120,7 +120,7 @@ Der Type beeinflusst, welche Felder aktiv sind (z. B. *Pair* nur bei AA) und wie
 
 ### LLM
 
-Das LLM-Modul, das dieser Agent verwenden soll. Die Auswahlmöglichkeiten kommen aus dem Abschnitt `modules.llm` der `system.json5`.
+Das LLM-Modul, das dieser Agent verwenden soll. Die Auswahlmöglichkeiten kommen aus dem Abschnitt `modules.llm` der `config.json5`.
 
 Jedes LLM-Modul hat seinen eigenen Modell-Provider, Kontext-Limit und ggf. eigene Default-Einstellungen. Pflichtfeld — ohne LLM-Auswahl kann der Agent nicht gespeichert werden.
 
@@ -128,7 +128,7 @@ Jedes LLM-Modul hat seinen eigenen Modell-Provider, Kontext-Limit und ggf. eigen
 
 ### Broker
 
-Das Broker-Modul, dem dieser Agent zugeordnet ist. Die Auswahlmöglichkeiten kommen aus dem Abschnitt `modules.broker` der `system.json5`.
+Das Broker-Modul, dem dieser Agent zugeordnet ist. Die Auswahlmöglichkeiten kommen aus dem Abschnitt `modules.broker` der `config.json5`.
 
 Bestimmt, über welchen Broker-Adapter der Agent Kontodaten, Kurse und Order-Ausführung erhält. Pflichtfeld.
 
@@ -325,7 +325,7 @@ Beeinflusst sowohl die Kosten als auch die mögliche Ausgabelänge. Für ausfüh
 
 ### Live Summary
 
-Zeigt die aktuelle Konfiguration als Text-Vorschau — so wie sie in der `system.json5` gespeichert werden würde. Hilfreich zur schnellen Kontrolle vor dem Speichern.
+Zeigt die aktuelle Konfiguration als Text-Vorschau — so wie sie in der `config.json5` gespeichert werden würde. Hilfreich zur schnellen Kontrolle vor dem Speichern.
 
 ### Validierung
 
@@ -359,7 +359,7 @@ Sind keine Fehler vorhanden, erscheint `No validation issues detected.` in Grün
 
 Beim Klick auf **Update** oder **Save As New** führt die UI folgende Schritte aus:
 1. Vollständige Konfigurationsvalidierung
-2. Aktualisierter Agent-Eintrag wird in `config/system.json5` geschrieben
+2. Aktualisierter Agent-Eintrag wird in `config/config.json5` geschrieben
 3. Ein `agent_config_requested`-Ereignis wird auf dem Event-Bus gesendet
 
 Das `agent_config_requested`-Ereignis löst einen Hot Reload der Agenten-Konfigurationen aus — der Agent wird mit den neuen Einstellungen **ohne vollständigen Systemneustart** neu geladen.
@@ -486,7 +486,7 @@ Systemweite Agenten die über alle Paare und Broker hinweg operieren. Beispiele:
 
 Der Session Filter schränkt ein wann ein Agent Trigger verarbeitet. Ein Agent mit Session Filter läuft nur wenn mindestens eine seiner konfigurierten Sessions zum Zeitpunkt des Triggers aktiv ist.
 
-**Wichtig:** Session-Zeiten werden gegen den **Kerzen-Zeitstempel** verglichen, nicht gegen die Systemuhr des Servers. Der Wert `broker_candle_utc_offset_hours` in `system.json5` definiert den UTC-Offset der Kerzen-Zeitstempel vom Broker-Datenfeed.
+**Wichtig:** Session-Zeiten werden gegen den **Kerzen-Zeitstempel** verglichen, nicht gegen die Systemuhr des Servers. Der Wert `broker_candle_utc_offset_hours` in `config.json5` definiert den UTC-Offset der Kerzen-Zeitstempel vom Broker-Datenfeed.
 
 ### Session-Fenster (Standard UTC-Zeiten)
 

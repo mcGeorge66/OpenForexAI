@@ -77,7 +77,7 @@ Prozesszeitpunkte erhalten.
 
 Wichtige Konfigurationsebenen sind:
 
-- zentrale Runtime-Konfiguration in `config/system.json5`
+- zentrale Runtime-Konfiguration in `config/config.json5`
 - Broker-Modulkonfigurationen in `config/modules/broker/`
 - LLM-Modulkonfigurationen in `config/modules/llm/`
 - Event-Routing-Regeln
