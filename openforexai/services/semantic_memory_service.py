@@ -507,17 +507,35 @@ class SemanticMemoryService:
         """Escape a value for embedding in a LanceDB/DataFusion SQL string filter."""
         return value.replace("'", "''")
 
-    def _find_by_pattern_sync(self, table: str, pattern_key: str) -> dict[str, Any] | None:
+    def _find_by_pattern_sync(
+        self, table: str, pattern_key: str, limit: int = 1
+    ) -> list[dict[str, Any]]:
+        """All entries for *pattern_key*, newest first, capped at *limit*.
+
+        Sorted here rather than in the query: ``limit(1)`` without an order by
+        returned insertion order, i.e. the *oldest* observation. With 63 of 77
+        pattern keys holding more than one entry, that meant an agent kept
+        being shown its first encounter with a setup while everything learned
+        since stayed invisible.
+
+        The tables hold a few hundred rows, so fetching the matches and
+        ordering them in Python costs nothing and does not depend on the
+        store's ordering support.
+        """
         if table not in self._list_table_names():
-            return None
+            return []
         tbl = self._db.open_table(table)
         escaped = self._escape_filter_value(pattern_key)
-        rows = tbl.search().where(f"pattern_key = '{escaped}'").limit(1).to_list()
-        if not rows:
-            return None
-        row = rows[0]
-        row["_table"] = table
-        return row
+        rows = tbl.search().where(f"pattern_key = '{escaped}'").limit(200).to_list()
+        for row in rows:
+            row["_table"] = table
+        # created_at is whole seconds, so two notes written in the same second
+        # would tie; created_at_iso carries microseconds and breaks the tie.
+        rows.sort(
+            key=lambda r: (r.get("created_at") or 0, r.get("created_at_iso") or ""),
+            reverse=True,
+        )
+        return rows[:max(1, limit)]
 
     # ── Public operations ─────────────────────────────────────────────────────
 
@@ -635,11 +653,29 @@ class SemanticMemoryService:
         if not pattern_key:
             raise ValueError("'pattern_key' is required.")
 
+        limit = max(1, min(int(args.get("limit", 1) or 1), 20))
         for table in tables:
-            row = await self._run_blocking(self._find_by_pattern_sync, table, pattern_key)
-            if row is not None:
+            rows = await self._run_blocking(self._find_by_pattern_sync, table, pattern_key, limit)
+            if rows:
+                row = rows[0]
+                # "matches" carries every observation, newest first; the flat
+                # fields mirror the newest one so existing callers that read
+                # them keep working unchanged.
+                matches = [
+                    {
+                        "id": r.get("id", ""),
+                        "text": r.get("text", ""),
+                        "tags": list(r.get("tags") or []),
+                        "importance": float(r.get("importance", 0.5)),
+                        "created_at_iso": r.get("created_at_iso", ""),
+                        "table": r.get("_table", table),
+                    }
+                    for r in rows
+                ]
                 return {
                     "found": True,
+                    "match_count": len(matches),
+                    "matches": matches,
                     "table": row["_table"],
                     "id": row.get("id", ""),
                     "text": row.get("text", ""),

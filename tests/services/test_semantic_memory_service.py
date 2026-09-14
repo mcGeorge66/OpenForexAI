@@ -328,3 +328,56 @@ async def test_concurrent_remember_to_new_table_does_not_crash(service):
     ])
     result = await service.recall({"tables": [table], "query": "note"})
     assert len(result["results"]) == 5
+
+
+# ── find_pattern: the newest observations, not the first one found ────────────
+
+@pytest.mark.asyncio
+async def test_find_pattern_returns_the_newest_observations_first(service):
+    """limit(1) without an order by returned insertion order — the *oldest*
+    note. With 63 of 77 pattern keys holding more than one entry, an agent
+    kept being shown its first encounter while everything learned since
+    stayed invisible."""
+    for n in range(1, 5):
+        await service.remember({
+            "table": "mem_agent_test", "agent_id": "a", "pair": "USDJPY",
+            "pattern_key": "USDJPY_TEST1", "text": f"Beobachtung {n}",
+        })
+    out = await service.find_pattern({
+        "tables": ["mem_agent_test"], "pattern_key": "USDJPY_TEST1", "limit": 3,
+    })
+    assert out["found"] is True
+    assert out["match_count"] == 3
+    texts = [m["text"] for m in out["matches"]]
+    assert texts[0] == "Beobachtung 4", texts
+    assert "Beobachtung 1" not in texts, "die älteste muss wegfallen, nicht eine beliebige"
+
+
+@pytest.mark.asyncio
+async def test_find_pattern_still_answers_the_old_way(service):
+    """The flat fields mirror the newest match so existing callers keep working."""
+    await service.remember({
+        "table": "mem_agent_test", "agent_id": "a", "pair": "EURUSD",
+        "pattern_key": "EURUSD_TEST2", "text": "nur eine",
+    })
+    out = await service.find_pattern({"tables": ["mem_agent_test"], "pattern_key": "EURUSD_TEST2"})
+    assert out["found"] is True and out["text"] == "nur eine"
+    assert out["match_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_find_pattern_defaults_to_one(service):
+    """Without an explicit limit nothing changes for callers that want one."""
+    for n in range(3):
+        await service.remember({
+            "table": "mem_agent_test", "agent_id": "a", "pair": "EURUSD",
+            "pattern_key": "EURUSD_TEST3", "text": f"n{n}",
+        })
+    out = await service.find_pattern({"tables": ["mem_agent_test"], "pattern_key": "EURUSD_TEST3"})
+    assert out["match_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_find_pattern_reports_nothing_for_an_unknown_key(service):
+    out = await service.find_pattern({"tables": ["mem_agent_test"], "pattern_key": "GIBTSNICHT"})
+    assert out.get("found") is False

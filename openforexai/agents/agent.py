@@ -74,6 +74,13 @@ _QUERY_BASE_SYSTEM_PROMPT = (
 )
 
 
+# How many observations of the same FOMAK the agent is shown. Three by
+# decision: enough to see whether a setup repeated well or badly, bounded
+# enough to keep the decision input readable. Beyond three, the Examiner is
+# meant to consolidate rather than the list to grow.
+_EXPERIENCE_MAX_OBSERVATIONS = 3
+
+
 class Agent:
     """Single parameterised agent — AA, BA, or GA.
 
@@ -1652,9 +1659,18 @@ class Agent:
             fomak_code = self._extract_fomak_code(decision_snapshot) or self._extract_fomak_code_from_payload(trigger_payload)
             if fomak_code and pair:
                 pattern_key = f"{pair}_{fomak_code}"
-                found = await memory_request(mem_context, "find_pattern", {"tables": tables, "pattern_key": pattern_key})
+                # The last few observations, not just one. Four notes on the same
+                # FOMAK can say different things — one winner and three losers
+                # is exactly the information that matters, and showing a single
+                # one of them is showing a coin flip. Capped so the decision
+                # input stays bounded.
+                found = await memory_request(mem_context, "find_pattern", {
+                    "tables": tables, "pattern_key": pattern_key,
+                    "limit": _EXPERIENCE_MAX_OBSERVATIONS,
+                })
                 if isinstance(found, dict) and found.get("found"):
-                    entries = [found]
+                    matches = found.get("matches")
+                    entries = list(matches) if isinstance(matches, list) and matches else [found]
                     exact_match = True
 
             if not entries:
@@ -1681,7 +1697,12 @@ class Agent:
                     continue
                 tags = entry.get("tags") or []
                 tag_suffix = f" [{', '.join(str(t) for t in tags)}]" if tags else ""
-                lines.append(f"- {text}{tag_suffix}")
+                # Newest first, each with its date: several observations on the
+                # same FOMAK can contradict each other, and without a date the
+                # agent cannot tell last week's note from this morning's.
+                when = self._format_observation_date(entry.get("created_at_iso"))
+                prefix = f"{when}: " if when else ""
+                lines.append(f"- {prefix}{text}{tag_suffix}")
             return "\n".join(lines) if len(lines) > 1 else ""
         except Exception as exc:
             self._logger.warning(
@@ -1690,6 +1711,19 @@ class Agent:
                 error=str(exc),
             )
             return ""
+
+    @staticmethod
+    def _format_observation_date(raw: Any) -> str:
+        """'2026-09-12T14:23:07.412Z' -> '2026-09-12 14:23'. Anything unparseable
+        yields an empty string so the observation is still shown, just undated."""
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        text = raw.strip().replace("Z", "+00:00")
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(text).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return raw.strip()[:16].replace("T", " ")
 
     @staticmethod
     def _extract_fomak_code(decision_snapshot: dict[str, Any] | None) -> str | None:
