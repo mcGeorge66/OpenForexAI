@@ -28,6 +28,29 @@ def pips(price_delta: Decimal, pair: str) -> float:
     return float(abs(price_delta) / pip_size(pair))
 
 
+def pnl_in_pips(
+    pair: str,
+    direction: str,
+    entry_price: Decimal | None,
+    exit_price: Decimal | None,
+) -> Decimal | None:
+    """Realised result in pips, signed: negative means a loss.
+
+    Deliberately not built on :func:`pips`, which takes the absolute value —
+    for a result the sign is the whole point. A short earns when the exit is
+    below the entry, so the raw difference is inverted for SELL.
+
+    Returns None when a price is missing rather than guessing, so a trade
+    without a recorded fill stays empty instead of showing a wrong number.
+    """
+    if entry_price is None or exit_price is None:
+        return None
+    delta = Decimal(str(exit_price)) - Decimal(str(entry_price))
+    if str(direction).upper() == "SELL":
+        delta = -delta
+    return (delta / pip_size(pair)).quantize(Decimal("0.1"))
+
+
 def price_from_pips(pips_count: float, pair: str) -> Decimal:
     return Decimal(str(pips_count)) * pip_size(pair)
 

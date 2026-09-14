@@ -61,6 +61,11 @@ function formatResult(value?: number | null): string {
   return value.toFixed(2) + ' $'
 }
 
+function formatPips(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)} Pips`
+}
+
 function formatPrice(value?: number | null): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '-'
   return value.toFixed(5)
@@ -360,6 +365,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
         <h2>Result</h2>
         <div class="row"><div class="label">Stake</div><div class="value">${formatMoney(selectedEntry.stake_estimate)}</div></div>
         <div class="row"><div class="label">PnL</div><div class="value">${formatMoney(selectedEntry.pnl_account_currency)}</div></div>
+        <div class="row"><div class="label">PnL (Pips)</div><div class="value">${formatPips(selectedEntry.pnl_pips)}</div></div>
         <div class="row"><div class="label">Decision</div><div class="value">${selectedEntry.decision_context?.decision ?? '-'}</div></div>
         <div class="row"><div class="label">Confidence</div><div class="value">${selectedEntry.signal_confidence.toFixed(2)}</div></div>
       </div>
@@ -441,6 +447,7 @@ ${chartImage ? `\n## Chart\n<img src="${chartImage}" style="width:100%" />\n` : 
 |---|---|
 | Stake | ${formatMoney(selectedEntry.stake_estimate)} |
 | PnL | ${formatMoney(selectedEntry.pnl_account_currency)} |
+| PnL (Pips) | ${formatPips(selectedEntry.pnl_pips)} |
 | Decision | ${selectedEntry.decision_context?.decision ?? '–'} |
 | Confidence | ${selectedEntry.signal_confidence.toFixed(2)} |
 
@@ -611,7 +618,8 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                       'px-3 py-2 text-right',
                       (entry.pnl_account_currency ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300',
                     ].join(' ')}>
-                      {formatResult(entry.pnl_account_currency)}
+                      <div>{formatResult(entry.pnl_account_currency)}</div>
+                      <div className="text-xs text-gray-500 tabular-nums">{formatPips(entry.pnl_pips)}</div>
                     </td>
                     <td className="px-3 py-2 text-gray-300">
                       <div>{getCloseDisplay(entry)}</div>

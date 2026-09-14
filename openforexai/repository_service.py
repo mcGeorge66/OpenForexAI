@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from openforexai.messaging.bus import EventBus
@@ -145,6 +146,51 @@ class RepositoryService:
                     pass
         return args
 
+    async def _with_pnl_pips(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Fill in pnl_pips when an entry is being closed.
+
+        The field existed in the model, the schema and the API serializer, but
+        nothing ever wrote it — all 987 closed trades had it empty while the
+        Examiner agent was reasoning about results. The broker reports the
+        money amount; pips have to be derived from the two prices, and this is
+        the one point every close passes through, whichever call site
+        triggered it.
+
+        Never overwrites a value a caller supplied, and leaves the field empty
+        when a price is missing — a wrong number is worse than none.
+        """
+        updates = args.get("updates")
+        if not isinstance(updates, dict):
+            return args
+        if str(updates.get("status", "")).upper() != OrderStatus.CLOSED.value:
+            return args
+        if updates.get("pnl_pips") is not None:
+            return args
+
+        entry_id = args.get("entry_id")
+        if not entry_id:
+            return args
+        try:
+            entry = await self._repository.get_order_book_entry(entry_id)
+        except Exception as exc:
+            _log.warning("pnl_pips: could not load entry %s: %s", entry_id, exc)
+            return args
+        if entry is None:
+            return args
+
+        from openforexai.data.normalizer import pnl_in_pips
+
+        close_price = updates.get("close_price", getattr(entry, "close_price", None))
+        value = pnl_in_pips(
+            getattr(entry, "pair", "") or "",
+            str(getattr(entry, "direction", "")),
+            getattr(entry, "fill_price", None),
+            Decimal(str(close_price)) if close_price is not None else None,
+        )
+        if value is None:
+            return args
+        return {**args, "updates": {**updates, "pnl_pips": str(value)}}
+
     async def _publish_position_closed(self, entry_id: str | None) -> None:
         """Broadcast POSITION_CLOSED with the full closed order as payload.
 
@@ -193,6 +239,8 @@ class RepositoryService:
             method = getattr(self._repository, operation, None)
             if method is None:
                 raise AttributeError(f"Repository has no method '{operation}'")
+            if operation == "update_order_book_entry":
+                args = await self._with_pnl_pips(args)
             result = await method(**args)
             if operation == "update_order_book_entry":
                 updated_status = str(args.get("updates", {}).get("status", "")).upper()
