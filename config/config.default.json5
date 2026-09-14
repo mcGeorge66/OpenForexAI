@@ -1,5 +1,17 @@
+// OpenForexAI — base configuration.
+//
+// This file is the base tree: every configurable area appears here so it is
+// discoverable, with the values that are the same for most installations.
+// It contains nothing personal — no broker accounts, no chat ids, no local
+// paths, no tuned thresholds.
+//
+// Your own values go in config/system.json5, which is merged over this file
+// and wins on every key it sets. Empty objects below are deliberate: they
+// mark "this branch exists, fill it in your own config".
 {
   // Controls merge semantics for selected paths when loading default + custom.
+  // Listed paths are replaced wholesale instead of merged, so an entry removed
+  // from system.json5 really disappears rather than reappearing from here.
   "ImportRules": {
     "Replace": [
       "agents",
@@ -10,7 +22,19 @@
   },
   "system": {
     "version": "0.9.1",
+    // INFO keeps the event log readable; DEBUG adds per-trigger diagnostics.
     "log_level": "INFO",
+    // Hour offset of the broker's candle timestamps against UTC. Broker
+    // specific — check yours before trusting the default.
+    "broker_candle_utc_offset_hours": 3,
+    // Hour offset the UI renders timestamps in. 0 = show UTC.
+    "ui_utc": 0,
+    // Economic calendar import. Both paths are machine specific; set them in
+    // your own config or leave empty to switch the import off.
+    "news": {
+      "economic_calendar_file": "",
+      "output_dir": "./data/news"
+    },
     "management_api": {
       "host": "127.0.0.1",
       "port": 8765
@@ -19,6 +43,10 @@
       "dev_server": {
         "host": "127.0.0.1",
         "port": 5173
+      },
+      "monitor": {
+        // Saved monitor filters are written here by the UI itself.
+        "saved_filters": []
       }
     }
   },
@@ -55,8 +83,8 @@
       }
     },
     // Turn bus events into messages — adding a warning is config, not code.
-    // The event must also be routed here in config/RunTime/event_routing.json5
-    // (target SYSTM-ALL___-GA-NOTIFY), otherwise it never reaches this service.
+    // Edit these in the UI under Config → Telegram; the matching routing entry
+    // is derived automatically and must not be written by hand.
     //
     //   only_if   per field: a literal (equality), {"regex": "..."},
     //             {"contains": "..."}, {"ne": ...} or {"lt"/"lte"/"gt"/"gte": n}
@@ -65,9 +93,8 @@
     //             {event}, {source}, {instrument}. Missing fields render empty.
     //   dedup_by  fields that make the suppression key distinct, so e.g. EURUSD
     //             and USDJPY do not silence each other.
-    // Deliberately empty: rules are personal configuration and belong in
-    // config/system.json5, where the Telegram designer writes them.
-    // This file carries only what the system needs in order to start.
+    //
+    // Empty on purpose: which warnings you want is personal configuration.
     "rules": {}
   },
   "data": {
@@ -78,11 +105,44 @@
     "indicator_cache_ttl_seconds": 30,
     "resample_bucket_offset_hours": 0
   },
+  // Long-term, semantically searchable agent memory (LanceDB + BGE-M3).
+  // Off by default because the embedding model is a large download.
+  "semantic_memory": {
+    "enable": false,
+    "lancedb_path": "./data/semantic_memory",
+    "embedding": {
+      // "auto" picks CUDA when available, otherwise CPU.
+      "device": "auto",
+      "use_fp16": true
+    },
+    "search": {
+      // Dense ANN hits fetched before sparse/ColBERT reranking.
+      "dense_candidate_pool": 50,
+      "default_top_k": 5,
+      "max_top_k": 20
+    }
+  },
+  // Rendered chart images for agents and the UI. Named configs are personal;
+  // define yours in config/system.json5 or via the Chartshot editor.
+  "chartshot": {
+    "output_dir": "data/chartshots",
+    "configs": {}
+  },
+  // LLM behind the in-UI assistants (routing, scripts, prompts).
+  "llm_assistant": {
+    // Empty = use the first configured LLM module.
+    "provider": "",
+    // Optional per-call overrides; omit to use the module's own settings.
+    // "temperature": 0.2,
+    // "max_tokens": 16384,
+    "reasoning_effort": "low"
+  },
   "modules": {
     "llm": {},
     "broker": {}
   },
   "snapshot_profiles": {},
   "decision_prompt_profiles": {},
+  "event_composers": {},
   "agents": {}
 }
