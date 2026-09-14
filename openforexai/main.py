@@ -203,7 +203,7 @@ async def main() -> None:
             name="agent-health-watch",
         )
         tg.create_task(
-            alert_bridge_loop(monitoring_bus, bus),
+            alert_bridge_loop(monitoring_bus, bus, notification_service),
             name="alert-bridge",
         )
         tg.create_task(mgmt_server.serve(), name="mgmt-api")

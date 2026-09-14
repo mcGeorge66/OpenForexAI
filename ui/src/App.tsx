@@ -147,6 +147,8 @@ function normaliseSavedMonitorFilters(value: unknown): SavedMonitorFilter[] {
           || (item.options as Record<string, unknown>).includeResponses !== false,
         showOrphans: !(item.options && typeof item.options === 'object')
           || (item.options as Record<string, unknown>).showOrphans !== false,
+        notify: !!(item.options && typeof item.options === 'object')
+          && (item.options as Record<string, unknown>).notify === true,
       },
     }))
 }

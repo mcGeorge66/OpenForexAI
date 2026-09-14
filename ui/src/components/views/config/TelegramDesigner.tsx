@@ -420,6 +420,14 @@ export function TelegramDesigner() {
                             {Object.keys(rules[name].only_if ?? {}).length} Filter
                           </span>
                         )}
+                        {rules[name].origin === 'monitor_filter' && (
+                          <span
+                            title={`Aus dem Monitor-Filter "${rules[name].source_filter ?? ''}" erzeugt`}
+                            className="ml-1 rounded px-1.5 py-0.5 text-[10px] bg-sky-900/60 text-sky-200 border border-sky-600/40"
+                          >
+                            Monitor
+                          </span>
+                        )}
                       </button>
                     </li>
                   ))}
@@ -456,7 +464,15 @@ export function TelegramDesigner() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {selected && rules[selected]?.origin === 'monitor_filter' && (
+                  <div className="rounded border border-sky-600/40 bg-sky-950/30 px-3 py-2 text-xs text-sky-200">
+                    Aus dem Monitor-Filter <span className="font-mono">{rules[selected]?.source_filter}</span> erzeugt.
+                    Die Bedingungen stammen aus dem Filter und werden beim nächsten Speichern dort überschrieben —
+                    Titel, Text und Schweregrad kannst du hier frei ändern, die bleiben erhalten.
+                  </div>
+                )}
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="text-xs text-gray-300">
                     Event-Typ
                     <input list="ofai-event-types" className={inputCls} value={draft.event}

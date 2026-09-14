@@ -127,3 +127,22 @@ def test_event_view_exposes_envelope_and_payload():
 def test_payload_wins_over_envelope_on_name_clash():
     view = event_view("order_result", "src", "EURUSD", {"instrument": "USDJPY"})
     assert view["instrument"] == "USDJPY"
+
+
+# ── exists ───────────────────────────────────────────────────────────────────
+
+def test_exists_matches_any_present_value():
+    """Mirrors the monitor console's operator so a saved filter can be
+    translated into a rule without losing one of its conditions."""
+    assert matches({"exists": True}, "irgendwas") is True
+    assert matches({"exists": True}, 0) is True
+    assert matches({"exists": True}, "") is True
+
+
+def test_exists_false_demands_absence():
+    assert matches({"exists": False}, None) is True
+    assert matches({"exists": False}, "da") is False
+
+
+def test_exists_true_rejects_a_missing_field():
+    assert matches({"exists": True}, None) is False

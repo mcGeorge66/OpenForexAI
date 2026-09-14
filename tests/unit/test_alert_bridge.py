@@ -125,3 +125,52 @@ async def test_an_auto_pinned_error_arrives_on_the_bus():
     assert msg.event_type == EventType.SYSTEM_ALERT
     assert msg.payload["alert_type"] == "ec_run_failed"
     assert msg.payload["message"] == "kaputt"
+
+
+# ── Which kinds are forwarded is configuration, not code ─────────────────────
+
+class _Svc:
+    """Minimal stand-in exposing the two members the bridge reads."""
+
+    def __init__(self, rules):
+        self.rules = rules
+
+    @staticmethod
+    def rule_event(name, rule):
+        declared = rule.get("event")
+        return declared.strip() if isinstance(declared, str) and declared.strip() else name
+
+
+def test_a_rule_can_request_a_kind_that_is_not_an_error():
+    """Of 60 monitoring kinds only a handful are errors. Alerting on a full
+    agent queue must be a rule, not a code change."""
+    from openforexai.monitoring.alert_bridge import requested_alert_types
+    svc = _Svc({"queue": {"event": "system_alert", "only_if": {"alert_type": "agent_queue_full"}}})
+    assert requested_alert_types(svc) == {"agent_queue_full"}
+    assert should_bridge(_event(MonitoringEventType.AGENT_QUEUE_FULL), {"agent_queue_full"}) is True
+
+
+def test_without_such_a_rule_a_routine_kind_stays_off_the_bus():
+    """Forwarding everything would double the event log for no one's benefit."""
+    from openforexai.monitoring.alert_bridge import requested_alert_types
+    assert requested_alert_types(_Svc({})) == set()
+    assert should_bridge(_event(MonitoringEventType.AGENT_QUEUE_FULL)) is False
+
+
+def test_rules_for_other_events_are_ignored():
+    from openforexai.monitoring.alert_bridge import requested_alert_types
+    svc = _Svc({"orders": {"event": "order_result", "only_if": {"alert_type": "nonsense"}}})
+    assert requested_alert_types(svc) == set()
+
+
+def test_a_pattern_condition_cannot_be_enumerated_and_is_not_guessed():
+    """contains/regex could match kinds nobody can list up front; the bridge
+    must not silently widen to everything."""
+    from openforexai.monitoring.alert_bridge import requested_alert_types
+    svc = _Svc({"x": {"event": "system_alert", "only_if": {"alert_type": {"contains": "queue"}}}})
+    assert requested_alert_types(svc) == set()
+
+
+def test_the_error_floor_holds_without_any_rule():
+    """A deleted rule must never switch off the broker-disconnect alert."""
+    assert should_bridge(_event(MonitoringEventType.BROKER_DISCONNECTED)) is True

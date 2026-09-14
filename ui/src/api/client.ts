@@ -91,11 +91,18 @@ export type NotificationCondition =
   | { lt: number } | { lte: number } | { gt: number } | { gte: number }
 
 export type NotificationRule = {
+  /** Which bus event this reacts to. Absent means the rule's key is the
+   *  event type — how every rule was written before names were free. */
+  event?: string
   severity?: string
   title?: string
   template?: string
   only_if?: Record<string, NotificationCondition>
   dedup_by?: string[]
+  /** Set when the rule was generated rather than hand-written, e.g.
+   *  "monitor_filter" for one translated from a saved console filter. */
+  origin?: string
+  source_filter?: string
 }
 
 export type NotificationsBlock = {

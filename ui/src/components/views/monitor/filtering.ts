@@ -40,6 +40,10 @@ export type SavedMonitorFilter = {
   options: {
     includeResponses: boolean
     showOrphans: boolean
+    /** Send matching events to Telegram, so the filter keeps working when
+     *  nobody has the console open. Translated into a notification rule on
+     *  save — see compileFilterForNotification. */
+    notify?: boolean
   }
 }
 
@@ -196,4 +200,109 @@ function normaliseValue(value: unknown): string {
 
 function makeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+// ── Forwarding a filter to Telegram ──────────────────────────────────────────
+//
+// A saved filter can be marked "send matches to Telegram". Rather than teaching
+// the backend a second filter language, the filter is *translated* here into
+// the condition format the notification rules already use — so there is one
+// evaluator, in Python, and nothing to drift.
+//
+// The monitoring events reach the bus through the alert bridge, which flattens
+// them into a payload carrying alert_type / source / broker / pair plus the
+// original fields. Those are the names a translated condition refers to.
+
+/** Field name in the console → key in the bridged system_alert payload. */
+const FIELD_TO_PAYLOAD_KEY: Partial<Record<MonitorFilterField, string>> = {
+  event_type: 'alert_type',
+  source: 'source',
+  broker: 'broker',
+  pair: 'pair',
+  sender: 'sender',
+  target: 'target',
+  message_id: 'message_id',
+  correlation_id: 'correlation_id',
+}
+
+export type CompiledFilter =
+  | { ok: true; onlyIf: Record<string, unknown>; alertTypes: string[] }
+  | { ok: false; reason: string }
+
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function conditionFor(rule: MonitorFilterRule, negated: boolean): unknown | null {
+  const value = rule.value.trim()
+  if (rule.operator === 'exists') return { exists: !negated }
+  if (!value) return null
+  if (negated) {
+    // Only equality has a direct negation in the rule engine; the others
+    // would need a "not contains" that does not exist, and inventing one
+    // silently would change what the filter means.
+    return rule.operator === 'equals' ? { ne: value } : null
+  }
+  if (rule.operator === 'equals') return value
+  if (rule.operator === 'contains') return { contains: value }
+  if (rule.operator === 'starts_with') return { regex: `^${escapeForRegex(value)}` }
+  if (rule.operator === 'ends_with') return { regex: `${escapeForRegex(value)}$` }
+  return null
+}
+
+/** Translate a saved filter into notification-rule conditions. */
+export function compileFilterForNotification(group: MonitorFilterGroup): CompiledFilter {
+  if (group.rules.length === 0) {
+    return { ok: false, reason: 'Der Filter ist leer — er würde jedes Ereignis melden.' }
+  }
+
+  const onlyIf: Record<string, unknown> = {}
+  const alertTypes: string[] = []
+
+  for (let i = 0; i < group.rules.length; i++) {
+    const rule = group.rules[i]
+    const join = i === 0 ? 'START' : (rule.join ?? 'AND')
+    if (join === 'OR' || join === 'OR_NOT') {
+      return {
+        ok: false,
+        reason: 'ODER-Verknüpfungen lassen sich nicht übersetzen — '
+          + 'Benachrichtigungsregeln verknüpfen ausschließlich mit UND. '
+          + 'Lege dafür zwei Filter an.',
+      }
+    }
+
+    const key = rule.field === 'payload'
+      ? (rule.path ?? '').trim()
+      : FIELD_TO_PAYLOAD_KEY[rule.field]
+    if (!key) {
+      return { ok: false, reason: `Das Feld "${rule.field}" hat keine Entsprechung in der Nachricht.` }
+    }
+
+    const condition = conditionFor(rule, join === 'AND_NOT')
+    if (condition === null) {
+      return {
+        ok: false,
+        reason: join === 'AND_NOT'
+          ? `"${rule.operator}" lässt sich nicht verneinen — nur "ist gleich" kann negiert werden.`
+          : `Die Bedingung für "${rule.field}" ist unvollständig.`,
+      }
+    }
+    if (key in onlyIf) {
+      return {
+        ok: false,
+        reason: `Zwei Bedingungen auf "${key}" — eine Regel kann je Feld nur eine prüfen.`,
+      }
+    }
+    onlyIf[key] = condition
+    if (key === 'alert_type' && typeof condition === 'string') alertTypes.push(condition)
+  }
+
+  if (alertTypes.length === 0) {
+    return {
+      ok: false,
+      reason: 'Ohne "Event Type ist gleich …" weiß die Brücke nicht, welche '
+        + 'Monitoring-Ereignisse sie weiterleiten soll.',
+    }
+  }
+  return { ok: true, onlyIf, alertTypes }
 }

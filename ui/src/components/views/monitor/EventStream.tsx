@@ -27,6 +27,7 @@ import {
   type MonitorFilterJoin,
   type MonitorFilterOperator,
   type SavedMonitorFilter,
+  compileFilterForNotification,
 } from './filtering'
 
 // ── Event-type colour mapping (mirrors tools/monitor.py _TYPE_COLOUR) ─────────
@@ -676,6 +677,8 @@ export function EventStream({
   const [loadedFilterId, setLoadedFilterId] = useState<string | null>(null)
   const [includeResponses, setIncludeResponses] = useState(true)
   const [showOrphans, setShowOrphans] = useState(true)
+  const [notifyToTelegram, setNotifyToTelegram] = useState(false)
+  const [notifyProblem, setNotifyProblem] = useState<string | null>(null)
   const [pinnedEvents, setPinnedEvents] = useState<PinnedMonitoringEvent[]>([])
   const [pinnedExpanded, setPinnedExpanded] = useState(true)
   const topRef = useRef<HTMLDivElement>(null)
@@ -722,6 +725,8 @@ export function EventStream({
     setLoadedFilterId(selected.id)
     setIncludeResponses(selected.options.includeResponses)
     setShowOrphans(selected.options.showOrphans)
+    setNotifyToTelegram(selected.options.notify === true)
+    setNotifyProblem(null)
   }, [activeQuickFilterId, savedQuickFilters])
 
   const matchingPrimaryEvents = useMemo(() => (
@@ -823,6 +828,50 @@ export function EventStream({
     onQuickFilterActivated(null)
   }
 
+  /** Keep the notification rule in step with this filter.
+   *
+   *  The filter is translated into the conditions the rule engine already
+   *  understands rather than taught to a second evaluator — one language,
+   *  evaluated in Python, nothing to drift. A filter that cannot be
+   *  translated is reported instead of half-applied.
+   */
+  const syncNotificationRule = async (name: string, enabled: boolean) => {
+    setNotifyProblem(null)
+    const ruleName = `monitor_${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`
+    try {
+      const cfg = await api.getNotificationsConfig()
+      const rules = { ...(cfg.notifications.rules ?? {}) }
+
+      if (!enabled) {
+        if (!(ruleName in rules)) return
+        delete rules[ruleName]
+        await api.saveNotificationsConfig({ ...cfg.notifications, rules })
+        return
+      }
+
+      const compiled = compileFilterForNotification(filterGroup)
+      if (!compiled.ok) {
+        setNotifyProblem(compiled.reason)
+        setNotifyToTelegram(false)
+        return
+      }
+      rules[ruleName] = {
+        ...(rules[ruleName] ?? {}),
+        event: 'system_alert',
+        severity: rules[ruleName]?.severity ?? 'warning',
+        title: rules[ruleName]?.title ?? `Monitor: ${name}`,
+        template: rules[ruleName]?.template ?? '{alert_type}\n{source}\n{message}',
+        only_if: compiled.onlyIf,
+        origin: 'monitor_filter',
+        source_filter: name,
+      } as never
+      await api.saveNotificationsConfig({ ...cfg.notifications, rules })
+    } catch (err) {
+      setNotifyProblem(String(err))
+      setNotifyToTelegram(false)
+    }
+  }
+
   const saveNewFilter = () => {
     const name = filterName.trim()
     if (!name) return
@@ -833,8 +882,10 @@ export function EventStream({
       options: {
         includeResponses,
         showOrphans,
+        notify: notifyToTelegram,
       },
     }
+    void syncNotificationRule(name, notifyToTelegram)
     onSavedQuickFiltersChange([...savedQuickFilters, next])
     setLoadedFilterId(next.id)
     onQuickFilterActivated(next.id)
@@ -846,7 +897,7 @@ export function EventStream({
     if (!name) return
     const next = savedQuickFilters.map(filter => (
       filter.id === loadedFilterId
-        ? { ...filter, name, definition: cloneFilterGroup(filterGroup), options: { includeResponses, showOrphans } }
+        ? { ...filter, name, definition: cloneFilterGroup(filterGroup), options: { includeResponses, showOrphans, notify: notifyToTelegram } }
         : filter
     ))
     onSavedQuickFiltersChange(next)
@@ -925,6 +976,20 @@ export function EventStream({
             <input type="checkbox" checked={showOrphans} onChange={event => setShowOrphans(event.target.checked)} />
             Show orphans
           </label>
+          <label
+            className="inline-flex items-center gap-2 text-xs text-sky-200"
+            title="Treffer dieses Filters auch dann melden, wenn die Konsole nicht offen ist. Wird beim Speichern als Telegram-Regel angelegt."
+          >
+            <input
+              type="checkbox"
+              checked={notifyToTelegram}
+              onChange={event => { setNotifyToTelegram(event.target.checked); setNotifyProblem(null) }}
+            />
+            An Telegram senden
+          </label>
+          {notifyProblem && (
+            <span className="text-xs text-amber-300 max-w-[420px]">{notifyProblem}</span>
+          )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
           <input

@@ -167,6 +167,42 @@ class NotificationService:
     def rules(self) -> dict[str, Any]:
         return dict(self._rules)
 
+    # ── Rules ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def rule_event(name: str, rule: dict[str, Any]) -> str:
+        """Which bus event a rule reacts to.
+
+        Rules are keyed by a free name so several can react to the same event —
+        a rejected order and a filled one deserve different messages, and a
+        monitoring filter forwarded from the console needs its own entry
+        alongside any other on ``system_alert``.
+
+        Older configurations keyed rules by the event type itself and carry no
+        ``event`` field; for those the key *is* the event, so they keep working
+        untouched.
+        """
+        declared = rule.get("event")
+        if isinstance(declared, str) and declared.strip():
+            return declared.strip()
+        return name
+
+    def rules_for(self, event_type: str) -> list[tuple[str, dict[str, Any]]]:
+        """Every rule reacting to *event_type*, in a stable order."""
+        return [
+            (name, rule)
+            for name, rule in sorted(self._rules.items())
+            if isinstance(rule, dict) and self.rule_event(name, rule) == event_type
+        ]
+
+    def rule_event_types(self) -> set[str]:
+        """The distinct bus events any rule listens to."""
+        return {
+            self.rule_event(name, rule)
+            for name, rule in self._rules.items()
+            if isinstance(rule, dict)
+        }
+
     # ── Derived routing ───────────────────────────────────────────────────────
 
     ROUTING_OWNER = "telegram"
@@ -192,7 +228,7 @@ class NotificationService:
                 priority=50,
                 owner=self.ROUTING_OWNER,
             )
-            for event_type in sorted(self._rules)
+            for event_type in sorted(self.rule_event_types())
         ]
         return await store.replace_owner(self.ROUTING_OWNER, derived)
 
@@ -331,26 +367,28 @@ class NotificationService:
     async def _handle_routed_event(self, msg: AgentMessage) -> None:
         """Apply the configured rules to a plain bus event. Never answers."""
         event_type = str(getattr(msg.event_type, "value", msg.event_type))
-        rule = self._rules.get(event_type)
-        if not isinstance(rule, dict):
+        matching = self.rules_for(event_type)
+        if not matching:
             return
 
         data = event_view(event_type, msg.source_agent_id, msg.instrument, msg.payload)
-        try:
-            if not rule_applies(rule, data):
-                return
-            args = {
-                "severity": rule.get("severity", "warning"),
-                "title": render(str(rule.get("title") or event_type), data),
-                "message": render(str(rule.get("template") or ""), data),
-                "dedup_key": dedup_key_for(event_type, rule, data),
-            }
-        except Exception as exc:
-            # A malformed rule must not silence the channel for everything else.
-            _log.error("Notification rule failed", event=event_type, error=str(exc))
-            return
-
-        await self.notify(args)
+        for name, rule in matching:
+            try:
+                if not rule_applies(rule, data):
+                    continue
+                args = {
+                    "severity": rule.get("severity", "warning"),
+                    "title": render(str(rule.get("title") or event_type), data),
+                    "message": render(str(rule.get("template") or ""), data),
+                    # Keyed by rule name, not event type: two rules on the same
+                    # event must not suppress each other through a shared key.
+                    "dedup_key": dedup_key_for(name, rule, data),
+                }
+            except Exception as exc:
+                # A malformed rule must not silence the others on the same event.
+                _log.error("Notification rule failed", rule=name, event=event_type, error=str(exc))
+                continue
+            await self.notify(args)
 
     async def _handle(self, msg: AgentMessage) -> None:
         try:

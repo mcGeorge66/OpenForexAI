@@ -12,6 +12,11 @@ bridge rather than a bus publish at each emit site: there are a dozen such
 sites, a new one is easy to forget, and anything added to ``_AUTO_PIN_TYPES``
 later is covered here without touching code elsewhere.
 
+Beyond that floor of errors, *which* monitoring kinds get forwarded is read
+from the rules themselves (``only_if.alert_type``). Of the 60 monitoring kinds
+only a handful are errors; alerting on one of the rest — a full agent queue,
+say — is therefore a rule in the designer rather than a change here.
+
 One event type for all of them. The payloads differ per source (``agent_id``
 vs ``ec_id`` vs ``broker_name``), so separate bus types would mean a new enum
 member, a new schema entry and a new notification rule for every kind of
@@ -73,21 +78,66 @@ def alert_payload(event: Any) -> dict[str, Any]:
     return payload
 
 
-def should_bridge(event: Any) -> bool:
+def requested_alert_types(notification_service: Any) -> set[str]:
+    """Monitoring kinds the configured rules ask for, beyond the error floor.
+
+    A rule on ``system_alert`` names the kind it wants in
+    ``only_if.alert_type``. Reading it here means the bridge no longer holds a
+    hard-coded list: forwarding a new kind is a rule in the Telegram designer,
+    not a code change — the same shape as the routing entries derived from
+    these rules.
+
+    Only literal values can be enumerated. A ``contains`` or ``regex``
+    condition could match kinds nobody can list in advance, so such a rule
+    sees only what is already forwarded; that is logged rather than left
+    silent, because a rule that can never fire looks like a broken channel.
+    """
+    requested: set[str] = set()
+    rules = getattr(notification_service, "rules", None)
+    if not isinstance(rules, dict):
+        return requested
+    for name, rule in rules.items():
+        if not isinstance(rule, dict):
+            continue
+        if notification_service.rule_event(name, rule) != EventType.SYSTEM_ALERT.value:
+            continue
+        condition = (rule.get("only_if") or {}).get("alert_type")
+        if isinstance(condition, str) and condition.strip():
+            requested.add(condition.strip())
+        elif condition is not None:
+            _log.warning(
+                "Alert rule cannot be resolved to a monitoring kind — it only "
+                "sees kinds already forwarded",
+                rule=name, condition=str(condition),
+            )
+    return requested
+
+
+def should_bridge(event: Any, extra_types: frozenset[str] | set[str] = frozenset()) -> bool:
     event_type = str(getattr(event, "event_type", ""))
-    if event_type not in _ALERT_TYPES:
+    if event_type not in _ALERT_TYPES and event_type not in extra_types:
         return False
     return event_type not in _ALREADY_ON_THE_BUS
 
 
-async def alert_bridge_loop(monitoring_bus: Any, bus: Any) -> None:
-    """Forward auto-pinned monitoring errors to the EventBus until cancelled."""
+async def alert_bridge_loop(
+    monitoring_bus: Any,
+    bus: Any,
+    notification_service: Any = None,
+) -> None:
+    """Forward alert-worthy monitoring events to the EventBus until cancelled.
+
+    The rules are read per event rather than cached, so a rule added in the
+    designer takes effect immediately — the project rule is that configuration
+    works without a restart.
+    """
     queue = monitoring_bus.subscribe()
     _log.info("Alert bridge started", member_id=ALERT_BRIDGE_ID)
     try:
         while True:
             event = await queue.get()
-            if not should_bridge(event):
+            extra = requested_alert_types(notification_service) if notification_service else set()
+            if not should_bridge(event, extra):
                 continue
             try:
                 await bus.publish(AgentMessage(

@@ -76,6 +76,12 @@ def matches(condition: Any, value: Any) -> bool:
         elif op == "ne":
             if value == expected:
                 return False
+        elif op == "exists":
+            # Mirrors the monitor console's "exists": the field is there at
+            # all, whatever it holds. Needed so a console filter can be
+            # translated into a rule without losing one of its operators.
+            if bool(expected) != (value is not None):
+                return False
         elif op in _NUMERIC_OPS:
             try:
                 if not _NUMERIC_OPS[op](float(value), float(expected)):
