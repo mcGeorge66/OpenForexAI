@@ -65,41 +65,10 @@
     //             {event}, {source}, {instrument}. Missing fields render empty.
     //   dedup_by  fields that make the suppression key distinct, so e.g. EURUSD
     //             and USDJPY do not silence each other.
-    "rules": {
-      "order_result": {
-        "severity": "critical",
-        "title": "{instrument}: Order abgelehnt",
-        "template": "{error}",
-        "only_if": { "success": false },
-        "dedup_by": ["instrument"]
-      },
-      "system_error": {
-        "severity": "critical",
-        "title": "Zyklus fehlgeschlagen: {agent_id}",
-        "template": "{message}",
-        "dedup_by": ["agent_id"]
-      },
-      "agent_stale": {
-        "severity": "warning",
-        "title": "Agent reagiert nicht: {agent_id}",
-        "template": "{reason}",
-        "dedup_by": ["agent_id"]
-      },
-      "risk_breach": {
-        "severity": "critical",
-        "title": "Risikolimit überschritten",
-        "template": "{reason}"
-      },
-      // Only genuinely slow round-trips; the service already warns in the log
-      // at 5s, but not everything at 5s is worth a phone notification.
-      "slow_response": {
-        "severity": "warning",
-        "title": "Langsame Verarbeitung: {event}",
-        "template": "{elapsed_ms} ms (Schwelle {threshold_ms} ms), Absender {sender}",
-        "only_if": { "elapsed_ms": { "gte": 60000 } },
-        "dedup_by": ["event"]
-      }
-    }
+    // Deliberately empty: rules are personal configuration and belong in
+    // config/system.json5, where the Telegram designer writes them.
+    // This file carries only what the system needs in order to start.
+    "rules": {}
   },
   "data": {
     "rolling_weeks": 4,
