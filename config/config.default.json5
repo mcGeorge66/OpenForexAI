@@ -24,6 +24,34 @@
     "sqlite_path": "./data/openforexai.db",
     "pool_size": 5
   },
+  // Outbound notifications (Telegram today, further channels later).
+  // Off until a bot token and at least one chat id are configured — set those
+  // in your own config/system.json5, with the token coming from an environment
+  // variable like the broker credentials, never written into a config file.
+  "notifications": {
+    "enable": false,
+    // true = log what would be sent instead of sending. Use while testing.
+    "dry_run": false,
+    // Identical messages (same dedup_key, or same severity+title) are counted
+    // instead of resent while one is this recent. The next real send reports
+    // how many were suppressed.
+    "dedup_window_seconds": 900,
+    // Backstop against a flood of *distinct* messages; one notice is sent when
+    // the cap is hit, then silence until the hour window frees up.
+    "max_per_hour": 20,
+    "telegram": {
+      "bot_token": "${OFAI_TELEGRAM_BOT_TOKEN}",
+      // Per severity, so routine info can live in a muted chat while critical
+      // alerts land somewhere with notifications switched on. "default" is the
+      // fallback when a severity has no own entry.
+      "chat_ids": {
+        // "default":  "123456789",
+        // "info":     "123456789",
+        // "warning":  "123456789",
+        // "critical": "123456789"
+      }
+    }
+  },
   "data": {
     "rolling_weeks": 4,
     "timeframes": [

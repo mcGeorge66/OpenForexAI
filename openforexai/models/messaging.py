@@ -120,6 +120,10 @@ class EventType(StrEnum):
     BRIDGE_CALL_START  = "bridge_call_start"
     BRIDGE_CALL_END    = "bridge_call_end"
 
+    # ── Notifications (outbound channel: Telegram today, email later) ────────
+    NOTIFY_REQUEST  = "notify_request"
+    NOTIFY_RESPONSE = "notify_response"
+
     # ── System / management ───────────────────────────────────────────────────
     ROUTING_RELOAD_REQUESTED = "routing_reload_requested"
 

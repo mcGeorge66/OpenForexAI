@@ -215,6 +215,18 @@
     "description": "SemanticMemoryService response to a memory_request"
   },
 
+  // ── Notification service ──────────────────────────────────────────────────
+  "notify_request": {
+    "required": ["severity"],
+    "trace_root": false,
+    "description": "Outbound notification request to NotificationService — payload: {severity: info|warning|critical, title, message, dedup_key?}"
+  },
+  "notify_response": {
+    "required": [],
+    "trace_root": false,
+    "description": "NotificationService result — payload.result says whether it was sent, deduplicated, rate-limited or suppressed"
+  },
+
   // ── Market data queries ───────────────────────────────────────────────────────
   "candles_request": {
     "required": ["timeframe"],

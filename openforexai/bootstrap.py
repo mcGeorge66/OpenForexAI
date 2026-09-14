@@ -31,6 +31,7 @@ from openforexai.messaging.routing import RoutingTable
 from openforexai.registry.plugin_registry import PluginRegistry
 from openforexai.registry.runtime_registry import RuntimeRegistry
 from openforexai.services.llm_service import LLMService
+from openforexai.services.notification_service import NOTIFICATION_SERVICE_ID, NotificationService
 from openforexai.services.semantic_memory_service import SEMANTIC_MEMORY_SERVICE_ID, SemanticMemoryService
 from openforexai.tools import DEFAULT_REGISTRY
 from openforexai.tools.config_loader import AgentToolConfig
@@ -307,6 +308,15 @@ async def bootstrap(
     else:
         _log.info("SemanticMemoryService disabled via config; skipping startup")
 
+    # ── NotificationService ───────────────────────────────────────────────────
+    # Always constructed so the bus member and the send_notification tool exist
+    # even while notifications are switched off — callers then get a clean
+    # {"sent": false, "reason": "disabled"} instead of a missing-target error.
+    notification_service = NotificationService.from_config(
+        system_config.get("notifications", {}) or {}, bus, monitoring_bus,
+    )
+    _log.info("NotificationService ready", member_id=NOTIFICATION_SERVICE_ID)
+
     # ── Agents ────────────────────────────────────────────────────────────────
     broker_utc_offset = int(
         system_config.get("system", {}).get("broker_candle_utc_offset_hours", 3)
@@ -355,4 +365,4 @@ async def bootstrap(
 
     # llm_services are returned to the caller (main.py) which starts them
     # inside the TaskGroup alongside all other long-running services.
-    return agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services, memory_service
+    return agents, event_composers, repo_service, config_service, bus, data_container, repository, connected_brokers, llm_services, memory_service, notification_service

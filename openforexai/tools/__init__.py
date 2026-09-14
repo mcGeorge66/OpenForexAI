@@ -25,6 +25,7 @@ from openforexai.tools.sandbox.get_annotation import GetAnnotationTool
 from openforexai.tools.sandbox.trade_marker import TradeMarkerTool
 from openforexai.tools.sandbox.zone_marker import ZoneMarkerTool
 from openforexai.tools.system.alarm import RaiseAlarmTool
+from openforexai.tools.system.send_notification import SendNotificationTool
 from openforexai.tools.system.assessment_memory import AssessmentMemoryTool
 from openforexai.tools.system.semantic_memory import SemanticMemoryTool
 from openforexai.tools.system.examination_report import CreateExaminationReportTool
@@ -56,6 +57,7 @@ DEFAULT_REGISTRY.register(AutoPlaceOrderTool())
 DEFAULT_REGISTRY.register(ModifyOrderTool())
 DEFAULT_REGISTRY.register(ClosePositionTool())
 DEFAULT_REGISTRY.register(RaiseAlarmTool())
+DEFAULT_REGISTRY.register(SendNotificationTool())
 DEFAULT_REGISTRY.register(TriggerSyncTool())
 DEFAULT_REGISTRY.register(AssessmentMemoryTool())
 DEFAULT_REGISTRY.register(SemanticMemoryTool())
