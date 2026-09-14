@@ -673,6 +673,17 @@ class Agent:
                         # instead of waiting a full divider cycle (<6> → <4> worst case).
                         if should_run and self._any_candle_divider > 1:
                             self._m5_candle_event_count = self._any_candle_divider - 1
+                        # Log the skip like every other pass does. Without it the
+                        # trigger stays pending in the monitoring bus and the agent
+                        # is reported stale for doing exactly what it was told:
+                        # nothing outside its session window.
+                        self._emit_agent_trigger_skipped(
+                            event_val=event_val,
+                            source=msg.source_agent_id,
+                            reason="session_filter",
+                            backlog_remaining=backlog_remaining,
+                            trigger_age_ms=trigger_age_ms,
+                        )
                         self._logger.info(
                             "Trigger skipped — outside session filter",
                             trigger=event_val,
@@ -1340,6 +1351,8 @@ class Agent:
         backlog_remaining: int,
         trigger_age_ms: float | None,
     ) -> None:
+        if not self._is_debug_diagnostics_enabled():
+            return  # pure diagnostics — nothing depends on it
         self._emit_agent_monitoring_event(
             MonitoringEventType.AGENT_TRIGGER_RECEIVED,
             trigger=event_val,
@@ -1374,6 +1387,8 @@ class Agent:
         backlog_remaining: int,
         trigger_age_ms: float | None,
     ) -> None:
+        if not self._is_debug_diagnostics_enabled():
+            return  # pure diagnostics — nothing depends on it
         self._emit_agent_monitoring_event(
             MonitoringEventType.AGENT_BACKLOG_DETECTED,
             trigger=event_val,
@@ -1387,7 +1402,12 @@ class Agent:
         event_type: MonitoringEventType,
         **payload: Any,
     ) -> None:
-        if not self._is_debug_diagnostics_enabled():
+        # Deliberately not gated on debug level. AGENT_TRIGGER_SKIPPED is what
+        # clears an agent's pending trigger, so suppressing it at INFO turns
+        # every normal skip (divider, session, llm busy) into a false stale
+        # alarm. The two callers that really are debug-only diagnostics
+        # (trigger_received, backlog_detected) check the level themselves.
+        if self._monitoring_bus is None:
             return
         try:
             context = self._tool_dispatcher._context if self._tool_dispatcher is not None else None

@@ -34,6 +34,10 @@ _INFO_SUPPRESSED_EVENT_TYPES = {
     MonitoringEventType.SYNC_CHECK_STARTED,
     MonitoringEventType.SYNC_CHECK_COMPLETED,
     MonitoringEventType.M5_CANDLE_SAVED,
+    # Routine "did not run, and here is why" noise — one per skipped trigger.
+    # Suppressed from the event log at INFO, but still counted: emit() does the
+    # staleness bookkeeping before this filter runs.
+    MonitoringEventType.AGENT_TRIGGER_SKIPPED,
 }
 
 
@@ -111,6 +115,11 @@ class MonitoringBus(AbstractMonitoringBus):
 
     def emit(self, event: MonitoringEvent) -> None:
         """Publish *event* to all subscribers and ring buffer.  Never raises, never blocks."""
+        # Bookkeeping first, display filtering second. "Did the agent react?"
+        # must not depend on whether the event is shown at the current detail
+        # level — otherwise raising the level to INFO silently turns every
+        # normal skip into a stale alarm.
+        self._track_agent_activity(event)
         prepared = self._prepare_event(event)
         if prepared is None:
             return
@@ -120,23 +129,6 @@ class MonitoringBus(AbstractMonitoringBus):
         if str(prepared.event_type) in _AUTO_PIN_TYPES:
             self._protected[event_id] = prepared
             self._auto_pinned_ids.add(event_id)
-        # Track agent activity for staleness detection.
-        if str(prepared.event_type) == MonitoringEventType.AGENT_INPUT_BUILT:
-            agent_id = prepared.payload.get("agent_id")
-            if agent_id:
-                self._agent_last_active[str(agent_id)] = prepared.timestamp
-                # The agent reacted — anything delivered before this point is handled.
-                self._agent_pending_triggers.pop(str(agent_id), None)
-        elif str(prepared.event_type) == MonitoringEventType.AGENT_TRIGGER_SKIPPED:
-            # A logged skip (divider not reached, llm busy, outside session,
-            # paused) proves the agent saw the trigger and decided — that is
-            # healthy, not a stall. Only triggers it never processed at all
-            # should remain pending.
-            agent_id = prepared.payload.get("agent_id")
-            if agent_id:
-                self._agent_pending_triggers.pop(str(agent_id), None)
-        elif prepared.source_module == "eventbus":
-            self._record_delivery(prepared)
         for q in list(self._subscribers):
             try:
                 q.put_nowait(prepared)
@@ -144,6 +136,25 @@ class MonitoringBus(AbstractMonitoringBus):
                 pass
             except Exception:
                 pass  # never let monitoring break the main system
+
+    def _track_agent_activity(self, event: MonitoringEvent) -> None:
+        """Update the staleness bookkeeping from one raw monitoring event."""
+        if str(event.event_type) == MonitoringEventType.AGENT_INPUT_BUILT:
+            agent_id = event.payload.get("agent_id")
+            if agent_id:
+                self._agent_last_active[str(agent_id)] = event.timestamp
+                # The agent reacted — anything delivered before this point is handled.
+                self._agent_pending_triggers.pop(str(agent_id), None)
+        elif str(event.event_type) == MonitoringEventType.AGENT_TRIGGER_SKIPPED:
+            # A logged skip (divider not reached, llm busy, outside session,
+            # paused) proves the agent saw the trigger and decided — that is
+            # healthy, not a stall. Only triggers it never processed at all
+            # should remain pending.
+            agent_id = event.payload.get("agent_id")
+            if agent_id:
+                self._agent_pending_triggers.pop(str(agent_id), None)
+        elif event.source_module == "eventbus":
+            self._record_delivery(event)
 
     def _record_delivery(self, prepared: MonitoringEvent) -> None:
         """Note that a bus event was delivered to one or more agents.
