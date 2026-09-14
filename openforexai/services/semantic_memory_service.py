@@ -31,7 +31,11 @@ import asyncio
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from time import perf_counter
+
+import numpy as np
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -47,6 +51,46 @@ _log = get_logger(__name__)
 _TABLE_PREFIXES = ("mem_agent_", "mem_shared_")
 _EMBEDDING_MODEL = "BAAI/bge-m3"
 _DENSE_DIM = 1024
+
+# ColBERT gives one _DENSE_DIM-wide vector per token, so a ~400-token memory is
+# ~400k floats. Written as JSON text those were ~9 MB per row and cost ~0.19s per
+# row just to parse back — with ~55 candidates per recall that was ~10s of pure
+# parsing on every single analysis cycle. Stored as raw float32 bytes instead:
+# ~1.6 MB per row and essentially free to load (np.frombuffer is a view, no
+# per-number conversion). The readable `text` column is untouched and remains the
+# source of truth — these vectors are derived data, regenerable from it at any time.
+_COLBERT_BIN_FIELD = "colbert_bin"
+_COLBERT_DTYPE = np.float32
+
+
+def _pack_colbert(colbert: Any) -> bytes:
+    """Serialize ColBERT token vectors to bytes: uint32 per-token dim, then float32 data.
+
+    The dimension is stored in the blob itself rather than assumed to be
+    _DENSE_DIM — otherwise a model whose ColBERT width differs (or ever changes)
+    would silently reshape existing rows into garbage instead of failing loudly.
+    """
+    arr = np.asarray(colbert, dtype=_COLBERT_DTYPE)
+    if arr.size == 0:
+        return b""
+    arr = np.atleast_2d(arr)
+    dim = np.uint32(arr.shape[1]).tobytes()
+    return dim + np.ascontiguousarray(arr).tobytes()
+
+
+def _unpack_colbert(row: dict[str, Any]) -> Any:
+    """Read a row's ColBERT vectors, preferring the binary column.
+
+    Falls back to the legacy JSON column so rows written before the binary
+    column existed keep working (slower, but correct) instead of silently
+    scoring as "no match".
+    """
+    blob = row.get(_COLBERT_BIN_FIELD)
+    if blob:
+        dim = int(np.frombuffer(blob, dtype=np.uint32, count=1)[0])
+        return np.frombuffer(blob, dtype=_COLBERT_DTYPE, offset=4).reshape(-1, dim)
+    raw = row.get("colbert_vecs")
+    return json.loads(raw) if raw else []
 
 # BGE-M3's own commonly-recommended weighting for combining its three
 # representations into one score — dense carries recall, sparse+colbert add
@@ -173,6 +217,15 @@ class SemanticMemoryService:
         self._inbox: asyncio.Queue[AgentMessage] | None = None
         if bus is not None:
             self._inbox = bus.register_member(SEMANTIC_MEMORY_SERVICE_ID)
+        # Dedicated executor so a slow embed/LanceDB call only queues up behind
+        # other semantic-memory work, never behind unrelated blocking calls
+        # elsewhere in the process (MT5, config reads, ...) that happen to share
+        # asyncio's single default ThreadPoolExecutor otherwise.
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="semantic-memory")
+
+    async def _run_blocking(self, func, *args: Any) -> Any:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, func, *args)
 
     # ── Construction / startup ────────────────────────────────────────────────
 
@@ -210,9 +263,9 @@ class SemanticMemoryService:
         the LanceDB connection. Called once before the service accepts requests —
         the caller (bootstrap.py) awaits this before starting run(), so the first
         real agent request never has to wait for a multi-GB download."""
-        await asyncio.to_thread(self._ensure_bge_m3_ready)
+        await self._run_blocking(self._ensure_bge_m3_ready)
         self._lancedb_path.mkdir(parents=True, exist_ok=True)
-        self._db = await asyncio.to_thread(self._connect_lancedb)
+        self._db = await self._run_blocking(self._connect_lancedb)
         _log.info("SemanticMemoryService initialized", lancedb_path=str(self._lancedb_path))
 
     def _connect_lancedb(self) -> Any:
@@ -220,8 +273,9 @@ class SemanticMemoryService:
         return lancedb.connect(str(self._lancedb_path))
 
     def _ensure_bge_m3_ready(self) -> None:
-        """Blocking: runs in a worker thread via asyncio.to_thread. Loads the
-        already-downloaded BGE-M3 model from the local cache, fully offline.
+        """Blocking: runs in this service's dedicated worker thread (see
+        ``_run_blocking``). Loads the already-downloaded BGE-M3 model from the
+        local cache, fully offline.
 
         Previously this contacted HuggingFace on every restart that didn't set
         OPENFOREXAI_SKIP_MODEL_CHECK (i.e. every manual restart) "to verify the
@@ -297,7 +351,7 @@ class SemanticMemoryService:
 
     async def _embed(self, text: str) -> dict[str, Any]:
         """Returns {"dense": [float]*1024, "sparse": {token_id_str: weight}, "colbert": [[float]*dim, ...]}."""
-        return await asyncio.to_thread(self._embed_sync, text)
+        return await self._run_blocking(self._embed_sync, text)
 
     def _embed_sync(self, text: str) -> dict[str, Any]:
         output = self._model.encode(
@@ -323,20 +377,28 @@ class SemanticMemoryService:
     def _colbert_score(query_vecs: list[list[float]], doc_vecs: list[list[float]]) -> float:
         """MaxSim late-interaction score: for each query token vector, take its max
         cosine similarity across all document token vectors, then average over
-        query tokens — the standard ColBERT formula."""
-        if not query_vecs or not doc_vecs:
+        query tokens — the standard ColBERT formula.
+
+        Vectorized with numpy — the previous pure-Python nested-loop version (per-pair
+        `sum(x*y for x,y in zip(...))` over ~400-token x1024-dim vectors) measured 127s
+        for just 24 candidates in production (2026-09-11), which was the actual root
+        cause of the multi-minute `recall()` latency, not model inference or LanceDB.
+        This does the identical MaxSim-of-cosine-similarities math as one matrix
+        multiply instead of Q*N*D scalar Python operations.
+        """
+        # len() rather than truthiness: doc_vecs is a numpy array when it comes
+        # from the binary column, and `not array` raises on multi-element arrays.
+        if query_vecs is None or doc_vecs is None or len(query_vecs) == 0 or len(doc_vecs) == 0:
             return 0.0
 
-        def _cosine(a: list[float], b: list[float]) -> float:
-            dot = sum(x * y for x, y in zip(a, b))
-            norm_a = sum(x * x for x in a) ** 0.5
-            norm_b = sum(y * y for y in b) ** 0.5
-            if norm_a == 0.0 or norm_b == 0.0:
-                return 0.0
-            return dot / (norm_a * norm_b)
-
-        max_sims = [max(_cosine(q, d) for d in doc_vecs) for q in query_vecs]
-        return sum(max_sims) / len(max_sims)
+        q = np.asarray(query_vecs, dtype=np.float64)
+        d = np.asarray(doc_vecs, dtype=np.float64)
+        q_norm = np.linalg.norm(q, axis=1, keepdims=True)
+        d_norm = np.linalg.norm(d, axis=1, keepdims=True)
+        q_unit = np.divide(q, q_norm, out=np.zeros_like(q), where=q_norm != 0)
+        d_unit = np.divide(d, d_norm, out=np.zeros_like(d), where=d_norm != 0)
+        similarity = q_unit @ d_unit.T  # (num_query_tokens, num_doc_tokens) cosine sims
+        return float(similarity.max(axis=1).mean())
 
     # ── LanceDB operations ────────────────────────────────────────────────────
 
@@ -356,8 +418,11 @@ class SemanticMemoryService:
             pa.field("created_at_iso", pa.string()),
             pa.field("text", pa.string()),
             pa.field("vector", pa.list_(pa.float32(), _DENSE_DIM)),
-            pa.field("sparse_weights", pa.string()),   # JSON-encoded dict
-            pa.field("colbert_vecs", pa.string()),      # JSON-encoded nested list
+            pa.field("sparse_weights", pa.string()),   # JSON-encoded dict (small, ~4 KB)
+            # Legacy JSON column — kept so pre-binary rows stay readable; new rows
+            # write "" here and put the vectors in colbert_bin instead.
+            pa.field("colbert_vecs", pa.string()),
+            pa.field(_COLBERT_BIN_FIELD, pa.large_binary()),  # raw float32, (n_tokens, _DENSE_DIM)
             pa.field("tags", pa.list_(pa.string())),
             pa.field("importance", pa.float32()),
             pa.field("pair", pa.string()),
@@ -376,8 +441,23 @@ class SemanticMemoryService:
 
     def _open_or_create_table_sync(self, table: str) -> Any:
         if table in self._list_table_names():
-            return self._db.open_table(table)
+            tbl = self._db.open_table(table)
+            self._ensure_colbert_bin_column(tbl)
+            return tbl
         return self._db.create_table(table, schema=self._table_schema())
+
+    @staticmethod
+    def _ensure_colbert_bin_column(tbl: Any) -> None:
+        """Add the binary ColBERT column to a table created before it existed.
+
+        Without this, add() against a pre-migration table fails on schema
+        mismatch — the service must not depend on a migration having been run.
+        """
+        if _COLBERT_BIN_FIELD in tbl.schema.names:
+            return
+        import pyarrow as pa
+        tbl.add_columns(pa.field(_COLBERT_BIN_FIELD, pa.large_binary()))
+        _log.info("Added binary ColBERT column to existing table", table=tbl.name)
 
     def _remember_sync(self, table: str, row: dict[str, Any]) -> None:
         tbl = self._open_or_create_table_sync(table)
@@ -435,7 +515,10 @@ class SemanticMemoryService:
             "text": text,
             "vector": embedding["dense"],
             "sparse_weights": json.dumps(embedding["sparse"]),
-            "colbert_vecs": json.dumps(embedding["colbert"]),
+            # Binary is the live format; the legacy JSON column stays empty rather
+            # than duplicating ~9 MB per row that nothing reads.
+            "colbert_vecs": "",
+            _COLBERT_BIN_FIELD: _pack_colbert(embedding["colbert"]),
             "tags": [str(t) for t in (args.get("tags") or [])],
             "importance": float(args.get("importance", 0.5)),
             "pair": str(args.get("pair", "")),
@@ -446,7 +529,7 @@ class SemanticMemoryService:
         }
 
         async with self._table_lock(table):
-            await asyncio.to_thread(self._remember_sync, table, row)
+            await self._run_blocking(self._remember_sync, table, row)
 
         return {"id": row["id"], "table": table}
 
@@ -466,7 +549,7 @@ class SemanticMemoryService:
             raise ValueError(f"Invalid table name {table!r} — must start with 'mem_agent_' or 'mem_shared_'.")
         entry_id = str(args["id"])
         async with self._table_lock(table):
-            deleted = await asyncio.to_thread(self._forget_sync, table, entry_id)
+            deleted = await self._run_blocking(self._forget_sync, table, entry_id)
         return {"id": entry_id, "table": table, "deleted": deleted}
 
     async def update(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -478,7 +561,7 @@ class SemanticMemoryService:
             raise ValueError(f"Invalid table name {table!r} — must start with 'mem_agent_' or 'mem_shared_'.")
         entry_id = str(args["id"])
         async with self._table_lock(table):
-            existing_rows = await asyncio.to_thread(
+            existing_rows = await self._run_blocking(
                 lambda: self._db.open_table(table).search().where(f"id = '{entry_id}'").limit(1).to_list()
                 if table in self._list_table_names() else []
             )
@@ -499,11 +582,11 @@ class SemanticMemoryService:
                 "broker": existing.get("broker", ""),
                 "pattern_key": args.get("pattern_key") if args.get("pattern_key") is not None else existing.get("pattern_key", ""),
             }
-            await asyncio.to_thread(self._forget_sync, table, entry_id)
+            await self._run_blocking(self._forget_sync, table, entry_id)
         return await self.remember(remember_args)
 
     async def list_tables(self, args: dict[str, Any]) -> dict[str, Any]:
-        names = await asyncio.to_thread(self._list_table_names)
+        names = await self._run_blocking(self._list_table_names)
         return {"tables": sorted(names)}
 
     async def find_pattern(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -523,7 +606,7 @@ class SemanticMemoryService:
             raise ValueError("'pattern_key' is required.")
 
         for table in tables:
-            row = await asyncio.to_thread(self._find_by_pattern_sync, table, pattern_key)
+            row = await self._run_blocking(self._find_by_pattern_sync, table, pattern_key)
             if row is not None:
                 return {
                     "found": True,
@@ -556,19 +639,25 @@ class SemanticMemoryService:
         if args.get("candidate_pool") is not None:
             candidate_pool = min(candidate_pool, self._max_top_k * 10)
 
+        _t0 = perf_counter()
         query_embedding = await self._embed(query)
+        _embed_ms = round((perf_counter() - _t0) * 1000, 1)
 
         candidates: list[dict[str, Any]] = []
+        _search_ms: dict[str, float] = {}
         for table in tables:
-            rows = await asyncio.to_thread(
+            _ts = perf_counter()
+            rows = await self._run_blocking(
                 self._recall_one_table_sync, table, query_embedding["dense"], candidate_pool,
             )
+            _search_ms[table] = round((perf_counter() - _ts) * 1000, 1)
             candidates.extend(rows)
 
+        _t_rerank = perf_counter()
         scored: list[dict[str, Any]] = []
         for row in candidates:
             doc_sparse = json.loads(row.get("sparse_weights") or "{}")
-            doc_colbert = json.loads(row.get("colbert_vecs") or "[]")
+            doc_colbert = _unpack_colbert(row)
             dense_score = 1.0 - float(row.get("_distance", 0.0))  # LanceDB returns L2/cosine distance
             sparse_score = self._sparse_score(query_embedding["sparse"], doc_sparse)
             colbert_score = self._colbert_score(query_embedding["colbert"], doc_colbert)
@@ -592,6 +681,16 @@ class SemanticMemoryService:
             })
 
         scored.sort(key=lambda r: r["score"], reverse=True)
+
+        _rerank_ms = round((perf_counter() - _t_rerank) * 1000, 1)
+        _total_ms = round((perf_counter() - _t0) * 1000, 1)
+        if _total_ms > 2000:
+            _log.warning(
+                "Slow recall() — phase breakdown",
+                total_ms=_total_ms, embed_ms=_embed_ms, search_ms=_search_ms,
+                rerank_ms=_rerank_ms, candidate_count=len(candidates), tables=tables,
+            )
+
         return {"results": scored[:top_k]}
 
     # ── Bus loop ───────────────────────────────────────────────────────────────
@@ -618,6 +717,7 @@ class SemanticMemoryService:
 
         result: Any = None
         error: str | None = None
+        _started = perf_counter()
         try:
             if operation == "remember":
                 result = await self.remember(args)
@@ -636,6 +736,16 @@ class SemanticMemoryService:
         except Exception as exc:
             error = str(exc)
             _log.error("SemanticMemoryService: operation '%s' failed: %s", operation, exc, exc_info=True)
+
+        # Single-consumer queue (see run()) — one slow operation delays every request
+        # queued behind it. Logged here (not just inside recall()) so any operation's
+        # contribution to that queueing delay is visible, not just recall()'s own cost.
+        elapsed_ms = round((perf_counter() - _started) * 1000, 1)
+        if elapsed_ms > 2000:
+            _log.warning(
+                "Slow SemanticMemoryService operation — delays every request queued behind it",
+                operation=operation, elapsed_ms=elapsed_ms, source=msg.source_agent_id,
+            )
 
         await self._bus.publish(
             AgentMessage(
