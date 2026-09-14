@@ -1472,8 +1472,10 @@ class Agent:
     ) -> None:
         if self._monitoring_bus is None:
             return
-        candle = payload.get("candle") if isinstance(payload, dict) else None
+        payload = payload if isinstance(payload, dict) else {}
+        candle = payload.get("candle")
         candle_timestamp = candle.get("timestamp") if isinstance(candle, dict) else None
+        cycle_pair = self._resolve_cycle_pair(EventType.M5_CANDLE_TRIGGER.value, payload)
         try:
             context = self._tool_dispatcher._context if self._tool_dispatcher is not None else None
             self._monitoring_bus.emit(MonitoringEvent(
@@ -1494,8 +1496,13 @@ class Agent:
                     "ts": candle_timestamp,
                 },
             ))
-        except Exception:
-            pass
+        except Exception as exc:
+            # Swallowing this silently is how the undefined-name bug above
+            # stayed invisible: every call raised, nobody ever saw a counter.
+            self._logger.warning(
+                "Could not emit m5_trigger_counter",
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _is_analysis_agent(self) -> bool:
         parsed = AgentId.try_parse(self.agent_id)

@@ -155,3 +155,25 @@ def test_skipped_events_are_not_debug_only():
     # Counted, but kept out of the INFO event log.
     assert not [e for e in bus.recent_events(limit=10)
                 if e.event_type == MonitoringEventType.AGENT_TRIGGER_SKIPPED]
+
+
+async def test_every_m5_trigger_emits_a_counter_event():
+    """The counter the Monitor view filters on was never emitted: the payload
+    referenced `cycle_pair`, a local from a different method, so every call
+    raised NameError into a bare `except Exception: pass`."""
+    bus = MonitoringBus(detail_level="DEBUG")
+    agent = _agent(bus, session_allowed=False)
+    agent._config = {"pair": "USDJPY"}
+    del agent._publish_m5_trigger_counter          # use the real implementation
+    await agent._inbox.put(_trigger())
+
+    await _drain(agent)
+
+    counters = [e for e in bus.recent_events(limit=50)
+                if str(e.event_type) == EventType.M5_TRIGGER_COUNTER.value]
+    assert len(counters) == 1, "no m5_trigger_counter reached the monitoring bus"
+    p = counters[0].payload
+    assert p["pair"] == "USDJPY"
+    assert p["agent_id"] == agent.agent_id
+    assert p["session"] is False
+    assert p["run"] is False

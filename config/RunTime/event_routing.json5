@@ -201,5 +201,50 @@
       "to": "GLOBL-ALL___-GA-*",
       "priority": 40
     },
+    {
+      "id": "notify_agent_stale",
+      "description": "agent_stale → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "agent_stale",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
+      "id": "notify_order_result",
+      "description": "order_result → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "order_result",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
+      "id": "notify_risk_breach",
+      "description": "risk_breach → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "risk_breach",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
+      "id": "notify_slow_response",
+      "description": "slow_response → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "slow_response",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
+      "id": "notify_system_error",
+      "description": "system_error → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "system_error",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    }
   ]
 }
