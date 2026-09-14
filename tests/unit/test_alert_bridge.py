@@ -39,6 +39,19 @@ def test_every_auto_pinned_kind_is_bridged():
     assert len(bridged) == len(_AUTO_PIN_TYPES) - 1  # system_error is excluded
 
 
+def test_a_broker_coming_back_is_reported_too():
+    """The only non-error worth interrupting someone for — otherwise you learn
+    that the broker went away and never that it returned."""
+    assert should_bridge(_event(MonitoringEventType.BROKER_CONNECTED)) is True
+
+
+def test_the_pinboard_stays_errors_only():
+    """BROKER_CONNECTED is alerted on but must not be pinned: _AUTO_PIN_TYPES
+    means 'protect from eviction', and a successful connect is not a fault."""
+    from openforexai.monitoring.bus import _AUTO_PIN_TYPES
+    assert MonitoringEventType.BROKER_CONNECTED not in _AUTO_PIN_TYPES
+
+
 def test_system_error_is_not_bridged_twice():
     """Whoever raises it already publishes a richer bus event; bridging the
     monitoring copy as well would notify twice for one failure."""

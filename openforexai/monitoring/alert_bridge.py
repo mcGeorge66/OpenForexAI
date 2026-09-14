@@ -37,6 +37,14 @@ ALERT_BRIDGE_ID = "SYSTM-ALL___-GA-ALERT"
 # the monitoring copy. Bridging it too would notify twice for one failure.
 _ALREADY_ON_THE_BUS = frozenset({MonitoringEventType.SYSTEM_ERROR})
 
+# What is worth telling a human about. Starts from the monitoring bus's own
+# judgement of what must survive eviction — so a kind added there is covered
+# here without touching this module — plus the one non-error that matters:
+# a broker coming back. Deliberately a separate set rather than an addition to
+# _AUTO_PIN_TYPES, which means "protect from eviction" and should stay errors
+# only; a successful reconnect does not belong on an error pinboard.
+_ALERT_TYPES = frozenset(_AUTO_PIN_TYPES) | {MonitoringEventType.BROKER_CONNECTED}
+
 # Tried in order; the first present field becomes {message}. Every source names
 # its failure differently, and a rule should not have to know which.
 _MESSAGE_FIELDS = ("error", "message", "detail", "reason")
@@ -67,7 +75,7 @@ def alert_payload(event: Any) -> dict[str, Any]:
 
 def should_bridge(event: Any) -> bool:
     event_type = str(getattr(event, "event_type", ""))
-    if event_type not in _AUTO_PIN_TYPES:
+    if event_type not in _ALERT_TYPES:
         return False
     return event_type not in _ALREADY_ON_THE_BUS
 
