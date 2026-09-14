@@ -52,6 +52,7 @@ class ManagementServer:
         config_service=None,
         active_agents: dict[str, Any] | None = None,
         active_composers: dict[str, Any] | None = None,
+        notification_service=None,
         host: str = "127.0.0.1",
         port: int = 8765,
         log_level: str = "warning",
@@ -71,6 +72,7 @@ class ManagementServer:
         self._config_service = config_service
         self._active_agents = active_agents or {}
         self._active_composers = active_composers or {}
+        self._notification_service = notification_service
         self._server = None
 
     async def serve(self) -> None:
@@ -99,6 +101,7 @@ class ManagementServer:
             config_service=self._config_service,
             active_agents=self._active_agents,
             active_composers=self._active_composers,
+            notification_service=self._notification_service,
         )
 
         # Wire AGENT_QUERY_RESPONSE handler so POST /agents/{id}/ask

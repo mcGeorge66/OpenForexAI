@@ -29,6 +29,7 @@ import { EventStream, type SavedMonitorFilter } from '@/components/views/monitor
 import { ConfigViewer } from '@/components/views/config/ConfigViewer'
 import { ModuleConfigViewer } from '@/components/views/config/ModuleConfigViewer'
 import { EventRoutingEditor } from '@/components/views/config/EventRoutingEditor'
+import { TelegramDesigner } from '@/components/views/config/TelegramDesigner'
 import { BridgeToolsEditor } from '@/components/views/config/BridgeToolsEditor'
 import { ChartShotConfigEditor } from '@/components/views/config/ChartShotConfigEditor'
 import { AgentConfigWizard } from '@/components/views/config/AgentConfigWizard'
@@ -309,6 +310,7 @@ function MainApp() {
         if (activeSub === 'chartshot_config') return <ChartShotConfigEditor key="chartshot-config" />
         if (activeSub === 'bridge_tools') return <BridgeToolsEditor key="bridge-tools" />
         if (activeSub === 'event_routing') return <EventRoutingEditor key="event-routing" />
+        if (activeSub === 'telegram') return <TelegramDesigner key="telegram-designer" />
         if (activeSub === 'helper_config') return <HelperConfigViewer key="helper-config" />
         if (activeSub === 'package_manager') return <PackageManager key="package-manager" />
         if (activeSub === 'broker') return <ModuleConfigViewer moduleType="broker" key="broker" />

@@ -81,6 +81,65 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 
 // ── Exported API calls ────────────────────────────────────────────────────────
 
+
+// ── Telegram notification designer ──────────────────────────────────────────
+
+/** One field condition: a literal, or exactly one operator. */
+export type NotificationCondition =
+  | string | number | boolean | null
+  | { regex: string } | { contains: string } | { ne: unknown }
+  | { lt: number } | { lte: number } | { gt: number } | { gte: number }
+
+export type NotificationRule = {
+  severity?: string
+  title?: string
+  template?: string
+  only_if?: Record<string, NotificationCondition>
+  dedup_by?: string[]
+}
+
+export type NotificationsBlock = {
+  enable?: boolean
+  dry_run?: boolean
+  dedup_window_seconds?: number
+  max_per_hour?: number
+  telegram?: { bot_token?: string; chat_ids?: Record<string, string> }
+  rules?: Record<string, NotificationRule>
+}
+
+export type NotificationsConfigResponse = {
+  notifications: NotificationsBlock
+  event_types: string[]
+  severities: string[]
+  routing_owner: string
+}
+
+export type NotificationsSaveResponse = {
+  status: string
+  file: string
+  applied_without_restart: boolean
+  derived_routing_rules: number
+  notifications: NotificationsBlock
+}
+
+export type NotificationPreviewRequest = {
+  rule: NotificationRule
+  event_type: string
+  source?: string
+  instrument?: string
+  payload: Record<string, unknown>
+}
+
+export type NotificationPreviewResponse = {
+  matches: boolean
+  severity: string
+  title: string
+  text: string
+  dedup_key: string
+  chat_id: string | null
+  fields: string[]
+}
+
 export const api = {
   getVersion:     () => get<{ version: string }>('/version'),
   getHealth:      () => get<{ status: string; uptime_seconds: number; registered_agents: number }>('/health'),
@@ -246,6 +305,13 @@ export const api = {
   testDecisionPromptScript: (body: DecisionPromptScriptTestRequest) =>
                     post<DecisionPromptScriptTestResponse>('/config/decision-prompt/test-script', body),
   getConfigFile:   (name: string) => get<Record<string, unknown>>(`/config/files/${name}`),
+  getNotificationsConfig: () => get<NotificationsConfigResponse>('/config/notifications'),
+  saveNotificationsConfig: (notifications: NotificationsBlock) =>
+                    put<NotificationsSaveResponse>('/config/notifications', { notifications }),
+  previewNotificationRule: (body: NotificationPreviewRequest) =>
+                    post<NotificationPreviewResponse>('/config/notifications/preview', body),
+  sendNotificationTest: (body: { severity: string; title: string; text: string }) =>
+                    post<{ sent: boolean; reason?: string }>('/config/notifications/test', body),
   getConfigFileText: (name: string) => getText(`/config/files/${name}/text`),
   saveConfigFile:  (name: string, content: Record<string, unknown> | string) =>
                     put<{ status: string; file: string }>(`/config/files/${name}`, content),

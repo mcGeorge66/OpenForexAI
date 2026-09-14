@@ -2,7 +2,10 @@
   // Controls merge semantics for selected paths when loading default + custom.
   "ImportRules": {
     "Replace": [
-      "agents"
+      "agents",
+      // The Telegram designer owns this set: a merge would make deleting a
+      // rule shipped here impossible from the UI.
+      "notifications.rules"
     ]
   },
   "system": {

@@ -184,6 +184,7 @@ async def main() -> None:
         config_service=config_service,
         active_agents={agent.agent_id: agent for agent in agents},
         active_composers={ec.ec_id: ec for ec in event_composers},
+        notification_service=notification_service,
         host=api_cfg.get("host", "127.0.0.1"),
         port=api_cfg.get("port", 8765),
     )

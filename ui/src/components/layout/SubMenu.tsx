@@ -42,6 +42,7 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'chartshot_config', label: 'Chartshot Config' },
     { id: 'bridge_tools',     label: 'Bridge Tools'     },
     { id: 'event_routing',   label: 'Event Routing'    },
+    { id: 'telegram',        label: 'Telegram'         },
     { id: '__div1',          label: '', divider: true   },
     { id: 'ai_assistant',    label: 'AI-Assistant'     },
     { id: 'system',          label: 'System Config'    },

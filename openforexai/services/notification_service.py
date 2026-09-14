@@ -103,13 +103,14 @@ class NotificationService:
 
     # ── Construction ──────────────────────────────────────────────────────────
 
-    @classmethod
-    def from_config(
-        cls,
-        cfg: dict[str, Any],
-        bus: EventBus,
-        monitoring_bus: Any = None,
-    ) -> "NotificationService":
+    @staticmethod
+    def _settings_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+        """Parse the notifications config block into constructor keyword arguments.
+
+        Shared by from_config and apply_config so a saved config change is
+        interpreted exactly like a fresh start — the project rule is that config
+        takes effect without a restart, and two parsers would eventually disagree.
+        """
         telegram = cfg.get("telegram") if isinstance(cfg.get("telegram"), dict) else {}
         raw_chats = telegram.get("chat_ids") if isinstance(telegram.get("chat_ids"), dict) else {}
         chat_ids = {
@@ -127,17 +128,44 @@ class NotificationService:
                 "Notifications enabled in config but unusable — no bot_token and/or chat_ids; "
                 "staying inactive instead of failing at send time",
             )
-        return cls(
-            enabled=enabled,
-            dry_run=bool(cfg.get("dry_run", False)),
-            bot_token=token,
-            chat_ids=chat_ids,
-            dedup_window_seconds=int(cfg.get("dedup_window_seconds", 900) or 900),
-            max_per_hour=int(cfg.get("max_per_hour", 20) or 20),
-            rules=cfg.get("rules") if isinstance(cfg.get("rules"), dict) else {},
-            bus=bus,
-            monitoring_bus=monitoring_bus,
-        )
+        return {
+            "enabled": enabled,
+            "dry_run": bool(cfg.get("dry_run", False)),
+            "bot_token": token,
+            "chat_ids": chat_ids,
+            "dedup_window_seconds": int(cfg.get("dedup_window_seconds", 900) or 900),
+            "max_per_hour": int(cfg.get("max_per_hour", 20) or 20),
+            "rules": cfg.get("rules") if isinstance(cfg.get("rules"), dict) else {},
+        }
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: dict[str, Any],
+        bus: EventBus,
+        monitoring_bus: Any = None,
+    ) -> "NotificationService":
+        return cls(**cls._settings_from_config(cfg), bus=bus, monitoring_bus=monitoring_bus)
+
+    def apply_config(self, cfg: dict[str, Any]) -> None:
+        """Adopt a changed notifications config without restarting.
+
+        Deliberately keeps the dedup and rate-limit state: an edit to one rule
+        is not a reason to let every already-suppressed message through again.
+        """
+        settings = self._settings_from_config(cfg)
+        self._enabled = settings["enabled"]
+        self._dry_run = settings["dry_run"]
+        self._bot_token = settings["bot_token"]
+        self._chat_ids = settings["chat_ids"]
+        self._dedup_window = max(int(settings["dedup_window_seconds"]), 0)
+        self._max_per_hour = max(int(settings["max_per_hour"]), 1)
+        self._rules = settings["rules"]
+        _log.info("Notification config applied", enabled=self._enabled, rules=len(self._rules))
+
+    @property
+    def rules(self) -> dict[str, Any]:
+        return dict(self._rules)
 
     # ── Derived routing ───────────────────────────────────────────────────────
 

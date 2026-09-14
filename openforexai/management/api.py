@@ -109,6 +109,7 @@ def setup_query_handler(bus) -> None:
 _bus = None
 _routing_table = None
 _tool_registry = None
+_notification_service = None
 _indicator_registry = None
 _monitoring_bus = None
 _system_config: dict[str, Any] = {}
@@ -5196,6 +5197,177 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
         "composer_apply": composer_apply,
     }
 
+# ── Notifications (Telegram designer) ─────────────────────────────────────────
+#
+# The rules live in config/system.json5 under "notifications". They are the
+# single source for both halves of a warning: what gets said, and — derived
+# from them — the routing entry that makes the event reach the service at all.
+# Saving here therefore re-syncs the routing store too, so the two can never
+# drift apart. Nothing requires a restart.
+
+_NOTIFY_SEVERITIES = ("info", "warning", "critical")
+
+
+def _notifications_config_path() -> Path:
+    return _project_root() / "config" / "system.json5"
+
+
+def _redact_token(block: dict[str, Any]) -> dict[str, Any]:
+    """Never hand the bot token to the browser — it is the whole credential."""
+    out = copy.deepcopy(block)
+    telegram = out.get("telegram")
+    if isinstance(telegram, dict) and telegram.get("bot_token"):
+        raw = str(telegram["bot_token"])
+        # An unresolved ${VAR} is not a secret and is worth showing as-is.
+        telegram["bot_token"] = raw if raw.startswith("${") else "<gesetzt>"
+    return out
+
+
+@router.get("/config/notifications")
+async def get_notifications_config() -> dict[str, Any]:
+    """Effective notification config plus what a rule can be built from."""
+    block = _system_config.get("notifications", {}) if isinstance(_system_config, dict) else {}
+    block = block if isinstance(block, dict) else {}
+
+    event_types: list[str] = []
+    schema_path = _project_root() / _EVENT_SCHEMAS_PATH_REL
+    if schema_path.exists():
+        try:
+            schemas = await _read_json5_file(schema_path)
+            event_types = sorted(k for k in schemas if not str(k).startswith("_"))
+        except Exception:
+            event_types = []
+
+    return {
+        "notifications": _redact_token(block),
+        "event_types": event_types,
+        "severities": list(_NOTIFY_SEVERITIES),
+        "routing_owner": "telegram",
+    }
+
+
+class NotificationsSaveRequest(BaseModel):
+    notifications: dict[str, Any]
+
+
+@router.put("/config/notifications")
+async def save_notifications_config(req: NotificationsSaveRequest) -> dict[str, Any]:
+    """Persist the notifications block, apply it live, re-derive the routing."""
+    incoming = copy.deepcopy(req.notifications)
+
+    # The browser never sees the real token, so it cannot send one back. Keep
+    # whatever is on disk unless an actual new value arrives.
+    cfg_path = _notifications_config_path()
+    try:
+        on_disk = await _read_json5_file(cfg_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"system.json5 unlesbar: {exc}")
+    previous = on_disk.get("notifications") if isinstance(on_disk.get("notifications"), dict) else {}
+    prev_token = (previous.get("telegram") or {}).get("bot_token") if isinstance(previous.get("telegram"), dict) else None
+    telegram = incoming.setdefault("telegram", {})
+    if not isinstance(telegram, dict):
+        raise HTTPException(status_code=422, detail="telegram muss ein Objekt sein")
+    if str(telegram.get("bot_token", "")) in ("", "<gesetzt>"):
+        if prev_token is not None:
+            telegram["bot_token"] = prev_token
+        else:
+            telegram.pop("bot_token", None)
+
+    on_disk["notifications"] = incoming
+    _write_json_file(cfg_path, on_disk)
+
+    global _system_config
+    _system_config = load_json_config(cfg_path)
+    effective = _system_config.get("notifications", {}) if isinstance(_system_config, dict) else {}
+
+    if _config_service is not None and hasattr(_config_service, "update_config"):
+        _config_service.update_config(_system_config)
+
+    applied = False
+    derived = 0
+    if _notification_service is not None:
+        _notification_service.apply_config(effective if isinstance(effective, dict) else {})
+        applied = True
+        try:
+            from openforexai.messaging.routing_store import get_routing_store
+            store = get_routing_store(
+                _project_root() / "config" / "RunTime" / "event_routing.json5",
+                on_changed=_bus.reload_routing if _bus is not None else None,
+            )
+            derived = await _notification_service.sync_routing_rules(store)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Regeln gespeichert, aber Routing-Abgleich fehlgeschlagen: {exc}",
+            )
+
+    return {
+        "status": "saved",
+        "file": "config/system.json5",
+        "applied_without_restart": applied,
+        "derived_routing_rules": derived,
+        "notifications": _redact_token(effective if isinstance(effective, dict) else {}),
+    }
+
+
+class NotificationPreviewRequest(BaseModel):
+    rule: dict[str, Any]
+    event_type: str = ""
+    source: str = "SYSTM-ALL___-GA-TEST"
+    instrument: str = ""
+    payload: dict[str, Any] = {}
+
+
+@router.post("/config/notifications/preview")
+async def preview_notification_rule(req: NotificationPreviewRequest) -> dict[str, Any]:
+    """Render one rule against a sample event using the live rule engine.
+
+    Deliberately server-side: a preview reimplemented in the browser would
+    eventually disagree with what actually gets sent, which is worse than no
+    preview at all.
+    """
+    from openforexai.services.notification_rules import (
+        dedup_key_for, event_view, render, rule_applies,
+    )
+
+    view = event_view(req.event_type, req.source, req.instrument or None, req.payload)
+    applies = rule_applies(req.rule, view)
+    title = render(str(req.rule.get("title") or req.event_type), view)
+    text = render(str(req.rule.get("template") or ""), view)
+    severity = str(req.rule.get("severity") or "info")
+    return {
+        "matches": applies,
+        "severity": severity,
+        "title": title,
+        "text": text,
+        "dedup_key": dedup_key_for(req.event_type, req.rule, view),
+        "chat_id": (_notification_service._chat_ids.get(severity)
+                    or _notification_service._chat_ids.get("default")
+                    or None) if _notification_service is not None else None,
+        "fields": sorted(view.keys()),
+    }
+
+
+class NotificationTestRequest(BaseModel):
+    severity: str = "info"
+    title: str = "OpenForexAI Testnachricht"
+    text: str = "Wenn du das liest, funktioniert der Kanal."
+
+
+@router.post("/config/notifications/test")
+async def send_notification_test(req: NotificationTestRequest) -> dict[str, Any]:
+    """Send a real message so 'arrives on my phone' is verified, not assumed."""
+    if _notification_service is None:
+        raise HTTPException(status_code=503, detail="NotificationService nicht verfügbar")
+    result = await _notification_service.notify({
+        "severity": req.severity,
+        "title": req.title,
+        "message": req.text,
+        "dedup_key": f"designer_test_{datetime.now(UTC).timestamp()}",
+    })
+    return result
+
+
 def _resolve_information_doc_path() -> Path:
     """Resolve information document under config/."""
     cfg_root = _project_root() / "config"
@@ -6235,9 +6407,10 @@ def build_app(
     active_agents: dict[str, Any] | None = None,
     active_composers: dict[str, Any] | None = None,
     llm_services: list | None = None,
+    notification_service=None,
 ) -> FastAPI:
     """Build the FastAPI application and wire runtime dependencies."""
-    global _bus, _routing_table, _tool_registry, _indicator_registry
+    global _bus, _routing_table, _tool_registry, _indicator_registry, _notification_service
     global _monitoring_bus, _system_config, _start_time
     global _data_container, _repository, _connected_brokers, _config_service
     global _active_agents, _active_composers, _llm_services
@@ -6247,6 +6420,7 @@ def build_app(
     _bus = bus
     _routing_table = routing_table
     _tool_registry = tool_registry
+    _notification_service = notification_service
     _indicator_registry = indicator_registry
     _monitoring_bus = monitoring_bus
     _system_config = system_config or {}
