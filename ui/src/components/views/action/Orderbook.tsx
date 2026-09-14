@@ -347,6 +347,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
         <div class="row"><div class="label">From</div><div class="value">${formatTs(getTradeStartAt(selectedEntry))}</div></div>
         <div class="row"><div class="label">To</div><div class="value">${formatTs(getTradeEndDisplay(selectedEntry))}</div></div>
         <div class="row"><div class="label">Close</div><div class="value">${getCloseDisplay(selectedEntry)}</div></div>
+        <div class="row"><div class="label">Laufzeit</div><div class="value">${tradeDuration(selectedEntry)}</div></div>
       </div>
       <div class="card">
         <h2>Execution</h2>
@@ -449,6 +450,7 @@ ${chartImage ? `\n## Chart\n<img src="${chartImage}" style="width:100%" />\n` : 
 | From | ${formatTs(getTradeStartAt(selectedEntry))} |
 | To | ${formatTs(getTradeEndDisplay(selectedEntry))} |
 | Close | ${getCloseDisplay(selectedEntry)} |
+| Laufzeit | ${tradeDuration(selectedEntry)} |
 
 ## Execution
 | | |
@@ -559,7 +561,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                   <th className="px-3 py-2 text-left">Pair</th>
                   <th className="px-3 py-2 text-left">From</th>
                   <th className="px-3 py-2 text-left">To</th>
-                  <th className="px-3 py-2 text-right">HH:MM</th>
+                  <th className="px-3 py-2 text-right" title="Haltedauer vom Einstieg bis zur Schließung (hh:mm)">Laufzeit</th>
                   <th className="px-3 py-2 text-left">Id</th>
                   <th className="px-3 py-2 text-right">Units</th>
                   <th className="px-3 py-2 text-right">Stake</th>

@@ -57,6 +57,43 @@ def _serialize_result(result: Any, operation: str) -> Any:
     return result
 
 
+def _held_for(payload: dict) -> dict:
+    """Derive how long the position was held, as a number and as text.
+
+    Computed once here, where the event is born, rather than by every consumer
+    separately — the notification templates cannot calculate, and an agent
+    should not have to re-derive from two timestamps in different timezones
+    (opened_at comes from the broker in its own offset, requested_at in UTC).
+
+    Returns an empty dict when the timestamps are missing or unparsable; a
+    notification is never important enough to break its own delivery.
+    """
+    from datetime import datetime
+
+    def _parse(value):
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    # opened_at is the real start; requested_at is the fallback for the rare
+    # entry that never recorded a fill time (2 of 987 at the time of writing).
+    start = _parse(payload.get("opened_at")) or _parse(payload.get("requested_at"))
+    end = _parse(payload.get("closed_at"))
+    if start is None or end is None or start.tzinfo is None or end.tzinfo is None:
+        return {}
+    minutes = int((end - start).total_seconds() // 60)
+    if minutes < 0:
+        return {}
+    hours, rest = divmod(minutes, 60)
+    return {
+        "held_minutes": minutes,
+        "held_for": f"{hours}h {rest}min" if hours else f"{rest}min",
+    }
+
+
 class RepositoryService:
     """Processes REPO_REQUEST messages and responds with REPO_RESPONSE.
 
@@ -130,12 +167,15 @@ class RepositoryService:
             return
         if entry is None:
             return
+        payload = _serialize_result(entry, "position_closed")
+        if isinstance(payload, dict):
+            payload = {**payload, **_held_for(payload)}
         await self._bus.publish(
             AgentMessage(
                 event_type=EventType.POSITION_CLOSED,
                 source_agent_id=REPO_SERVICE_ID,
                 instrument=getattr(entry, "pair", None),
-                payload=_serialize_result(entry, "position_closed"),
+                payload=payload,
             ),
         )
 
