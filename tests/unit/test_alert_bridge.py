@@ -31,12 +31,18 @@ def _event(event_type, payload=None, **kw):
 
 # ── Selection ────────────────────────────────────────────────────────────────
 
-def test_every_auto_pinned_kind_is_bridged():
-    """Bound to _AUTO_PIN_TYPES on purpose: a kind added there later is
-    covered without touching this module."""
+def test_the_floor_follows_the_pinned_set_minus_the_named_exceptions():
+    """Bound to _AUTO_PIN_TYPES on purpose: a kind added there later is covered
+    without touching this module. Two kinds are excluded for stated reasons —
+    system_error is already published by its raiser, and tool_call_failed is
+    dominated by recoverable cases."""
     from openforexai.monitoring.bus import _AUTO_PIN_TYPES
-    bridged = [t for t in _AUTO_PIN_TYPES if should_bridge(_event(t))]
-    assert len(bridged) == len(_AUTO_PIN_TYPES) - 1  # system_error is excluded
+    from openforexai.monitoring.alert_bridge import (
+        _ALREADY_ON_THE_BUS, _NOISY_UNLESS_REQUESTED,
+    )
+    bridged = {t for t in _AUTO_PIN_TYPES if should_bridge(_event(t))}
+    expected = frozenset(_AUTO_PIN_TYPES) - _ALREADY_ON_THE_BUS - _NOISY_UNLESS_REQUESTED
+    assert bridged == expected
 
 
 def test_a_broker_coming_back_is_reported_too():
@@ -174,3 +180,25 @@ def test_a_pattern_condition_cannot_be_enumerated_and_is_not_guessed():
 def test_the_error_floor_holds_without_any_rule():
     """A deleted rule must never switch off the broker-disconnect alert."""
     assert should_bridge(_event(MonitoringEventType.BROKER_DISCONNECTED)) is True
+
+
+# ── The floor must not be dominated by recoverable failures ──────────────────
+
+def test_a_failed_tool_call_does_not_page_by_itself():
+    """Measured on 2026-09-14: 19 of 24 failed tool calls were the price guard
+    refusing an absolute price so the agent would rewrite it — which it did.
+    Four needless messages for every real one trains people to ignore the
+    channel."""
+    assert should_bridge(_event(MonitoringEventType.TOOL_CALL_FAILED)) is False
+
+
+def test_it_can_still_be_requested_deliberately():
+    """Opting in remains possible; it just is not the default."""
+    assert should_bridge(_event(MonitoringEventType.TOOL_CALL_FAILED),
+                         {"tool_call_failed"}) is True
+
+
+def test_it_stays_on_the_dashboard_pinboard():
+    """Not worth a notification is not the same as not worth keeping."""
+    from openforexai.monitoring.bus import _AUTO_PIN_TYPES
+    assert MonitoringEventType.TOOL_CALL_FAILED in _AUTO_PIN_TYPES

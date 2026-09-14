@@ -42,13 +42,26 @@ ALERT_BRIDGE_ID = "SYSTM-ALL___-GA-ALERT"
 # the monitoring copy. Bridging it too would notify twice for one failure.
 _ALREADY_ON_THE_BUS = frozenset({MonitoringEventType.SYSTEM_ERROR})
 
-# What is worth telling a human about. Starts from the monitoring bus's own
-# judgement of what must survive eviction — so a kind added there is covered
-# here without touching this module — plus the one non-error that matters:
-# a broker coming back. Deliberately a separate set rather than an addition to
-# _AUTO_PIN_TYPES, which means "protect from eviction" and should stay errors
-# only; a successful reconnect does not belong on an error pinboard.
-_ALERT_TYPES = frozenset(_AUTO_PIN_TYPES) | {MonitoringEventType.BROKER_CONNECTED}
+# Worth keeping for diagnosis, but not worth a phone notification on its own.
+# Measured on 2026-09-14: of 24 failed tool calls in the log, 19 were the
+# semantic-memory price guard refusing an absolute price so the agent would
+# rewrite it — which it then did. That is the guard working, not a fault, and
+# alerting on it would send four needless messages for every real one. It
+# stays pinned on the dashboard and can still be alerted on deliberately, with
+# a rule that filters the recoverable cases out.
+_NOISY_UNLESS_REQUESTED = frozenset({MonitoringEventType.TOOL_CALL_FAILED})
+
+# What is worth telling a human about without being asked. Starts from the
+# monitoring bus's own judgement of what must survive eviction — so a kind
+# added there is covered here without touching this module — plus the one
+# non-error that matters, a broker coming back, minus the kinds that are
+# dominated by recoverable cases. Deliberately a separate set rather than an
+# addition to _AUTO_PIN_TYPES, which means "protect from eviction": pinning and
+# alerting are different questions.
+_ALERT_TYPES = (
+    (frozenset(_AUTO_PIN_TYPES) | {MonitoringEventType.BROKER_CONNECTED})
+    - _NOISY_UNLESS_REQUESTED
+)
 
 # Tried in order; the first present field becomes {message}. Every source names
 # its failure differently, and a rule should not have to know which.

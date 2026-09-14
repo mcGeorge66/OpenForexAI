@@ -247,6 +247,15 @@
       "owner": "telegram"
     },
     {
+      "id": "notify_system_alert",
+      "description": "system_alert → NotificationService (abgeleitet aus notifications.rules)",
+      "event": "system_alert",
+      "from": "*",
+      "to": "SYSTM-ALL___-GA-NOTIFY",
+      "priority": 50,
+      "owner": "telegram"
+    },
+    {
       "id": "notify_system_error",
       "description": "system_error → NotificationService (abgeleitet aus notifications.rules)",
       "event": "system_error",
