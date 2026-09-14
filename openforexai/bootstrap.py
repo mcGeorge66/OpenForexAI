@@ -31,6 +31,7 @@ from openforexai.messaging.routing import RoutingTable
 from openforexai.registry.plugin_registry import PluginRegistry
 from openforexai.registry.runtime_registry import RuntimeRegistry
 from openforexai.services.llm_service import LLMService
+from openforexai.messaging.routing_store import get_routing_store
 from openforexai.services.notification_service import NOTIFICATION_SERVICE_ID, NotificationService
 from openforexai.services.semantic_memory_service import SEMANTIC_MEMORY_SERVICE_ID, SemanticMemoryService
 from openforexai.tools import DEFAULT_REGISTRY
@@ -315,7 +316,17 @@ async def bootstrap(
     notification_service = NotificationService.from_config(
         system_config.get("notifications", {}) or {}, bus, monitoring_bus,
     )
-    _log.info("NotificationService ready", member_id=NOTIFICATION_SERVICE_ID)
+    # Derive this service's routing entries from its own rules, through the
+    # shared store — one configured place per warning instead of two that must
+    # agree (and fail silently when they don't).
+    routing_store = get_routing_store(_ROUTING_PATH, on_changed=bus.reload_routing)
+    try:
+        derived = await notification_service.sync_routing_rules(routing_store)
+        _log.info("NotificationService ready",
+                  member_id=NOTIFICATION_SERVICE_ID, derived_routing_rules=derived)
+    except Exception as exc:
+        # A routing-sync problem must not stop the system from starting.
+        _log.error("Could not sync notification routing rules", error=str(exc))
 
     # ── Agents ────────────────────────────────────────────────────────────────
     broker_utc_offset = int(

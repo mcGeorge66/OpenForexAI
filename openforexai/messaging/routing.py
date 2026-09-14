@@ -70,6 +70,12 @@ class RoutingRule:
     comment: str = ""          # user notes, no effect on routing
     priority: int = 100
     disabled: bool = False     # when True this rule is skipped entirely
+    # Who maintains this rule. "rule" = hand-authored (rule designer, this file
+    # is its source of truth). Anything else names the service that derives it,
+    # e.g. "telegram" for entries generated from notifications.rules — those are
+    # replaced wholesale by their owner, so editing them here has no lasting
+    # effect and removing the source removes the rule.
+    owner: str = "rule"
 
     # ── Matching ──────────────────────────────────────────────────────────────
 
@@ -231,6 +237,30 @@ def _parse_rules(path: Path) -> list[RoutingRule]:
     return _rules_from_dict(data)
 
 
+def rule_to_dict(rule: RoutingRule) -> dict:
+    """Serialize a rule back to its file representation.
+
+    Mirrors _rules_from_dict exactly (note "from"/"disable" differ from the
+    field names) so a load/save round-trip does not quietly drop or rename
+    anything.
+    """
+    data: dict = {
+        "id": rule.id,
+        "description": rule.description,
+        "event": rule.event,
+        "from": rule.from_pattern,
+        "to": rule.to,
+        "priority": rule.priority,
+    }
+    if rule.comment:
+        data["comment"] = rule.comment
+    if rule.disabled:
+        data["disable"] = True
+    if rule.owner and rule.owner != "rule":
+        data["owner"] = rule.owner
+    return data
+
+
 def _rules_from_dict(data: dict) -> list[RoutingRule]:
     raw_rules = data.get("rules", [])
     rules: list[RoutingRule] = []
@@ -245,6 +275,7 @@ def _rules_from_dict(data: dict) -> list[RoutingRule]:
                 to=raw.get("to", ""),
                 priority=int(raw.get("priority", 100)),
                 disabled=bool(raw.get("disable", False)),
+                owner=str(raw.get("owner", "rule") or "rule"),
             )
             if not rule.to:
                 _log.warning("Rule %r has empty 'to' field — skipping", rule.id)

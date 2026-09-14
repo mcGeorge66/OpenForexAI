@@ -1589,6 +1589,10 @@ class RoutingRuleInfo(BaseModel):
     from_pattern: str
     to: str
     priority: int
+    # "rule" = hand-authored via the designer. Anything else names the service
+    # that derives and owns the entry (e.g. "telegram"); those are regenerated
+    # from their source, so editing them here would not survive.
+    owner: str = "rule"
 
 
 class ToolExecuteRequest(BaseModel):
@@ -3814,6 +3818,7 @@ async def list_routing_rules() -> list[RoutingRuleInfo]:
             from_pattern=r.from_pattern,
             to=r.to,
             priority=r.priority,
+            owner=r.owner,
         )
         for r in _routing_table.rules
     ]
@@ -5271,6 +5276,52 @@ async def config_file_text(name: str) -> dict[str, str]:
     cfg_path = _project_root() / "config" / "RunTime" / f"{name}.json5"
     return {"text": _read_text_file(cfg_path)}
 
+async def _save_designer_routing_rules(cfg_path: Path, content: dict[str, Any] | str) -> dict:
+    """Persist the rule designer's edits through the shared routing store.
+
+    The designer sees every rule, including the ones services derive for
+    themselves, but it only owns the hand-authored ones. Anything with a
+    foreign owner in the payload is dropped here rather than written back:
+    its owner rebuilds it from its own config, so a copy saved from the UI
+    would either be overwritten on the next sync or linger as an orphan.
+    """
+    from openforexai.messaging.routing import _rules_from_dict
+    from openforexai.messaging.routing_store import DESIGNER_OWNER, get_routing_store
+
+    data = json5.loads(content) if isinstance(content, str) else content
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="event_routing content must be an object")
+
+    parsed = _rules_from_dict(data)
+    designer_rules = [r for r in parsed if r.owner == DESIGNER_OWNER]
+    ignored = [r.id for r in parsed if r.owner != DESIGNER_OWNER]
+
+    store = get_routing_store(
+        cfg_path, on_changed=_bus.reload_routing if _bus is not None else None
+    )
+    try:
+        await store.save_designer_rules(designer_rules)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save routing rules: {exc}")
+
+    reloaded = _bus is not None
+    if not reloaded and _routing_table is not None:
+        # No bus wired (e.g. API used standalone) — reload the table directly so
+        # a saved rule still takes effect without a restart.
+        _routing_table.load(cfg_path)
+        reloaded = True
+
+    result: dict[str, Any] = {
+        "status": "saved",
+        "file": "config/RunTime/event_routing.json5",
+        "rules_saved": len(designer_rules),
+        "routing_reloaded": reloaded,
+    }
+    if ignored:
+        result["derived_rules_unchanged"] = ignored
+    return result
+
+
 @router.put("/config/files/{name}")
 async def save_config_file(name: str, content: dict[str, Any] | str) -> dict:
     """Save editable config files (agent_tools | event_routing)."""
@@ -5286,16 +5337,17 @@ async def save_config_file(name: str, content: dict[str, Any] | str) -> dict:
             status_code=404,
             detail=f"Config file not found on disk: {cfg_path.name}",
         )
-    _write_json_file(cfg_path, content)
 
     extra: dict[str, Any] = {}
 
-    if name == "event_routing" and _routing_table is not None:
-        try:
-            _routing_table.load(cfg_path)
-            extra["routing_reloaded"] = True
-        except Exception as exc:
-            extra["routing_reload_error"] = str(exc)
+    if name == "event_routing":
+        # Routing rules go through the shared store, never straight to disk:
+        # it is also written by services that derive their own rules, and a
+        # blind full-file overwrite from here would delete theirs. The store
+        # keeps every rule it does not own and triggers the hot-reload.
+        return await _save_designer_routing_rules(cfg_path, content)
+
+    _write_json_file(cfg_path, content)
 
     if name == "agent_tools" and _tool_registry is not None:
         try:

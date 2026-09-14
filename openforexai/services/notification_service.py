@@ -139,6 +139,35 @@ class NotificationService:
             monitoring_bus=monitoring_bus,
         )
 
+    # ── Derived routing ───────────────────────────────────────────────────────
+
+    ROUTING_OWNER = "telegram"
+
+    async def sync_routing_rules(self, store: Any) -> int:
+        """Make sure every configured rule's event actually reaches this service.
+
+        Without this a warning needs two entries that must agree — miss the
+        routing half and the event never arrives, miss the rule half and it is
+        discarded on arrival. Both fail silently, which is the one failure mode
+        an alerting channel must not have. Deriving the routing from the rules
+        leaves a single place to configure.
+        """
+        from openforexai.messaging.routing import RoutingRule
+
+        derived = [
+            RoutingRule(
+                id=f"notify_{event_type}",
+                description=f"{event_type} → NotificationService (abgeleitet aus notifications.rules)",
+                event=event_type,
+                from_pattern="*",
+                to=NOTIFICATION_SERVICE_ID,
+                priority=50,
+                owner=self.ROUTING_OWNER,
+            )
+            for event_type in sorted(self._rules)
+        ]
+        return await store.replace_owner(self.ROUTING_OWNER, derived)
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     async def notify(self, args: dict[str, Any]) -> dict[str, Any]:
