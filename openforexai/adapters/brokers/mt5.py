@@ -79,6 +79,21 @@ class MT5Broker(BrokerBase):
         # configured broker timezone instead of leaving it as UTC.
         self._broker_tz = timezone(timedelta(hours=int(broker_utc_offset_hours)))
         self._mt5 = None  # set in connect()
+        # NOTE: all MT5 calls go through asyncio.to_thread — see _call_blocking.
+        #
+        # Never hand a `functools.partial` that wraps an MT5 API function to
+        # Executor.submit()/run_in_executor(): the MT5 C extension then returns
+        # None with mt5.last_error()=(-2, "Unnamed arguments not allowed").
+        # This broke every order placement between 2026-09-11 and 2026-09-14
+        # (10/10 rejected, while account_info()/positions_get() kept working).
+        # Isolated A/B against the live terminal, same process, same request:
+        #   executor + partial(fn, req)  -> None, (-2, ...)   BROKEN
+        #   executor + lambda: fn(req)   -> retcode 0          ok
+        #   partial(fn, req)() inline    -> retcode 0          ok
+        #   fn(req) inline               -> retcode 0          ok
+        # So a dedicated executor is fine per se — the partial is the problem.
+        # asyncio.to_thread is safe because its internal partial wraps
+        # contextvars' ctx.run, not the MT5 function itself.
 
     @classmethod
     def from_config(cls, cfg: dict) -> MT5Broker:
@@ -309,6 +324,12 @@ class MT5Broker(BrokerBase):
             request["stoplimit"] = float(order.limit_price)
 
         result = await self._call_mt5("order_send", request)
+        if result is None:
+            error_code, error_desc = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send returned None (no trade-server response — connection lost or "
+                f"malformed request) — mt5.last_error()={error_code}: {error_desc}"
+            )
         status = (
             TradeStatus.OPEN
             if result.retcode == mt5.TRADE_RETCODE_DONE
@@ -375,6 +396,12 @@ class MT5Broker(BrokerBase):
             "tp": float(take_profit) if take_profit is not None else float(p.tp or 0.0),
         }
         result = await self._call_mt5("order_send", request)
+        if result is None:
+            error_code, error_desc = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send returned None (no trade-server response — connection lost or "
+                f"malformed request) — mt5.last_error()={error_code}: {error_desc}"
+            )
         status = (
             TradeStatus.OPEN
             if result.retcode == mt5.TRADE_RETCODE_DONE
@@ -436,6 +463,12 @@ class MT5Broker(BrokerBase):
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
         result = await self._call_mt5("order_send", request)
+        if result is None:
+            error_code, error_desc = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send returned None (no trade-server response — connection lost or "
+                f"malformed request) — mt5.last_error()={error_code}: {error_desc}"
+            )
 
         from openforexai.models.trade import TradeSignal
         dummy_signal = TradeSignal(
