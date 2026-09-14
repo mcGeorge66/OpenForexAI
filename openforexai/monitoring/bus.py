@@ -82,6 +82,12 @@ class MonitoringBus(AbstractMonitoringBus):
         self._auto_pinned_ids: set[str] = set()           # subset of _protected that was auto-pinned
         # Last time each agent completed a cycle (keyed by agent_id string).
         self._agent_last_active: dict[str, datetime] = {}
+        # Bus events delivered to an agent since it last started working:
+        # agent_id → event_type → (count, timestamp of the newest one).
+        # Cleared whenever the agent reacts, so a non-empty entry means
+        # "this arrived and nothing happened yet" — the basis for staleness
+        # detection that follows the agent's real triggers instead of a clock.
+        self._agent_pending_triggers: dict[str, dict[str, tuple[int, datetime]]] = {}
 
     # ── Subscription management ───────────────────────────────────────────────
 
@@ -119,6 +125,18 @@ class MonitoringBus(AbstractMonitoringBus):
             agent_id = prepared.payload.get("agent_id")
             if agent_id:
                 self._agent_last_active[str(agent_id)] = prepared.timestamp
+                # The agent reacted — anything delivered before this point is handled.
+                self._agent_pending_triggers.pop(str(agent_id), None)
+        elif str(prepared.event_type) == MonitoringEventType.AGENT_TRIGGER_SKIPPED:
+            # A logged skip (divider not reached, llm busy, outside session,
+            # paused) proves the agent saw the trigger and decided — that is
+            # healthy, not a stall. Only triggers it never processed at all
+            # should remain pending.
+            agent_id = prepared.payload.get("agent_id")
+            if agent_id:
+                self._agent_pending_triggers.pop(str(agent_id), None)
+        elif prepared.source_module == "eventbus":
+            self._record_delivery(prepared)
         for q in list(self._subscribers):
             try:
                 q.put_nowait(prepared)
@@ -126,6 +144,32 @@ class MonitoringBus(AbstractMonitoringBus):
                 pass
             except Exception:
                 pass  # never let monitoring break the main system
+
+    def _record_delivery(self, prepared: MonitoringEvent) -> None:
+        """Note that a bus event was delivered to one or more agents.
+
+        The bus reports a single target as a string and a fan-out as a list;
+        both are handled. Only the event type and a count are kept — enough to
+        answer "did trigger X arrive and go unanswered?" without holding any
+        payload.
+        """
+        payload = prepared.payload or {}
+        event_type = payload.get("event")
+        target = payload.get("target")
+        if not event_type or not target:
+            return
+        targets = target if isinstance(target, list) else [target]
+        for raw in targets:
+            agent_id = str(raw or "").strip()
+            if not agent_id or agent_id.startswith("("):  # "(future)" placeholder
+                continue
+            per_agent = self._agent_pending_triggers.setdefault(agent_id, {})
+            count, _ = per_agent.get(str(event_type), (0, prepared.timestamp))
+            per_agent[str(event_type)] = (count + 1, prepared.timestamp)
+
+    def agent_pending_triggers(self, agent_id: str) -> dict[str, tuple[int, datetime]]:
+        """Bus events delivered to *agent_id* since it last started a cycle."""
+        return dict(self._agent_pending_triggers.get(agent_id, {}))
 
     def set_detail_level(self, level: str) -> None:
         self._detail_level = _normalize_detail_level(level)

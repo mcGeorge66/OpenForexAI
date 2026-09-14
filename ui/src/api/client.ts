@@ -1103,6 +1103,10 @@ export interface InitialConsoleAgentItem {
   comment?: string | null
   last_error?: { timestamp: string; event_type: string; message: string } | null
   last_active_at?: string | null
+  /** Backend verdict: a trigger this agent should have acted on went unanswered.
+   *  Not a fixed idle timeout — event-driven agents idle for hours by design. */
+  stale?: boolean
+  stale_reason?: string | null
 }
 
 export interface InitialConsoleComposerItem {

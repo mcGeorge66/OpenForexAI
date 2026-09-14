@@ -348,15 +348,18 @@ export function InitialPage() {
                             {!agent.enabled ? 'disabled' : agent.session_active ? 'enabled' : 'session closed'}
                           </span>
                         )}
-                        {/* Level 3: stale detection */}
-                        {agent.enabled && agent.session_active && agent.last_active_at && (() => {
-                          const minsAgo = (Date.now() - new Date(agent.last_active_at).getTime()) / 60_000
-                          return minsAgo > 15 ? (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-amber-900/40 text-amber-300 border border-amber-700/50" title={`Last active ${Math.round(minsAgo)}m ago`}>
-                              stale
-                            </span>
-                          ) : null
-                        })()}
+                        {/* Level 3: stale detection — the backend decides, by comparing
+                            the agent's own triggers against its reaction. A plain idle
+                            timeout would flag every event-driven agent (the examiner only
+                            runs on position_closed) during normal quiet periods. */}
+                        {agent.enabled && agent.session_active && agent.stale && (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-amber-900/40 text-amber-300 border border-amber-700/50"
+                            title={agent.stale_reason || 'Trigger unbeantwortet'}
+                          >
+                            stale
+                          </span>
+                        )}
                         {/* Level 2: last error indicator */}
                         {agent.last_error && (
                           <span

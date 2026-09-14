@@ -213,6 +213,70 @@ def _compute_agent_session_active(cfg: dict[str, Any], now_utc: datetime) -> boo
     return False
 
 
+# Triggers a human fires by hand — never a sign the agent is stuck.
+_MANUAL_AGENT_TRIGGERS = {"agent_query", "prompt_updated"}
+# How long a delivered trigger may sit unanswered before it counts as missed.
+# A cycle announces itself (AGENT_INPUT_BUILT) within seconds of the trigger,
+# so this only has to cover dispatch and queueing, not the cycle's own runtime
+# (measured up to ~65s) — a running cycle already clears the pending trigger.
+_STALE_GRACE_SECONDS = 60
+
+
+def _compute_agent_stale(
+    cfg: dict[str, Any],
+    agent_id: str,
+    now_utc: datetime,
+) -> tuple[bool, str | None]:
+    """Report whether an agent failed to act on a trigger it should have acted on.
+
+    Deliberately not a fixed "idle for N minutes" rule: agents driven by rare
+    business events (the examiner runs only on position_closed) are idle for
+    hours by design, and a badge that cries wolf all day gets ignored — which
+    is exactly when it would have mattered. Instead this compares the agent's
+    own triggers against its reaction, so a missed trigger is flagged at once
+    while legitimate quiet stays silent.
+    """
+    if _monitoring_bus is None:
+        return False, None
+
+    last_active = _monitoring_bus.agent_last_active(agent_id)
+
+    timer_cfg = cfg.get("timer") if isinstance(cfg.get("timer"), dict) else {}
+    if timer_cfg and bool(timer_cfg.get("enabled", False)):
+        interval = max(int(timer_cfg.get("interval_seconds", 300) or 300), 1)
+        if last_active is None:
+            return False, None  # never ran yet — startup, not a stall
+        overdue = (now_utc - last_active).total_seconds() - interval
+        if overdue > _STALE_GRACE_SECONDS:
+            return True, (
+                f"Timer alle {interval}s, aber seit {int((now_utc - last_active).total_seconds())}s "
+                "kein Zyklus gestartet"
+            )
+        return False, None
+
+    configured = {str(t) for t in (cfg.get("event_triggers") or [])} - _MANUAL_AGENT_TRIGGERS
+    if not configured:
+        return False, None
+
+    # A pending trigger is one the agent neither acted on nor consciously
+    # skipped: the agent logs a skip for every deliberate pass (AnyCandle
+    # divider, llm busy, outside session, paused) and that clears the entry.
+    # So anything still pending here was simply not processed — no divider
+    # arithmetic needed, and no reason to wait for a second occurrence.
+    pending = _monitoring_bus.agent_pending_triggers(agent_id)
+
+    for event_type, (count, last_seen) in pending.items():
+        if event_type not in configured:
+            continue  # a response to the agent's own request, not a trigger
+        waited = (now_utc - last_seen).total_seconds()
+        if waited > _STALE_GRACE_SECONDS:
+            return True, (
+                f"{count}x '{event_type}' zugestellt, aber weder verarbeitet "
+                f"noch übersprungen — seit {int(waited)}s keine Reaktion"
+            )
+    return False, None
+
+
 def _agent_task_summary(agent_cfg: dict[str, Any]) -> str:
     comment = agent_cfg.get("comment")
     if isinstance(comment, str) and comment.strip():
@@ -1887,8 +1951,9 @@ async def get_console_initial() -> dict[str, Any]:
                 continue
             enabled = bool(cfg.get("enable", True))
             session_active = _compute_agent_session_active(cfg, now_utc)
-            # Level 3: last active timestamp for stale detection.
+            # Level 3: last active timestamp + trigger-aware stale detection.
             last_active: datetime | None = _monitoring_bus.agent_last_active(agent_id) if _monitoring_bus is not None else None
+            is_stale, stale_reason = _compute_agent_stale(cfg, agent_id, now_utc)
             agents.append({
                 "agent_id": agent_id,
                 "enabled": enabled,
@@ -1903,6 +1968,8 @@ async def get_console_initial() -> dict[str, Any]:
                 "comment": cfg.get("comment") or None,
                 "last_error": pinned_by_agent.get(agent_id),        # Level 2
                 "last_active_at": last_active.isoformat() if last_active else None,  # Level 3
+                "stale": is_stale,
+                "stale_reason": stale_reason,
             })
 
     ec_cfg_all = _system_config.get("event_composers", {}) if isinstance(_system_config, dict) else {}
