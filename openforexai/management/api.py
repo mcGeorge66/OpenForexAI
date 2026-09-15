@@ -5252,23 +5252,23 @@ async def get_notifications_config() -> dict[str, Any]:
     # exactly what happened on 2026-09-14, when the process was started from a
     # shell without the bot-token variable and Telegram was silently off.
     active = False
-    inactive_reason: str | None = "NotificationService nicht verfügbar"
+    inactive_reason: str | None = "NotificationService unavailable"
     if _notification_service is not None:
         active = bool(getattr(_notification_service, "_enabled", False))
         if active:
             inactive_reason = None
         elif not block.get("enable", False):
-            inactive_reason = "In der Konfiguration abgeschaltet"
+            inactive_reason = "Disabled in the configuration"
         elif not getattr(_notification_service, "_bot_token", ""):
             inactive_reason = (
-                "Kein Bot-Token — die Umgebungsvariable OFAI_TELEGRAM_BOT_TOKEN war "
-                "beim Start des Prozesses nicht gesetzt. Neustart aus einer Sitzung, "
-                "die sie kennt."
+                "No bot token — the environment variable OFAI_TELEGRAM_BOT_TOKEN was not "
+                "set when the process started. Restart from a session that "
+                "knows it."
             )
         elif not getattr(_notification_service, "_chat_ids", {}):
-            inactive_reason = "Keine Chat-ID konfiguriert"
+            inactive_reason = "No chat ID configured"
         else:
-            inactive_reason = "Inaktiv, Grund unbekannt"
+            inactive_reason = "Inactive, reason unknown"
 
     return {
         "notifications": _redact_token(block),
@@ -5393,7 +5393,7 @@ class NotificationTestRequest(BaseModel):
 async def send_notification_test(req: NotificationTestRequest) -> dict[str, Any]:
     """Send a real message so 'arrives on my phone' is verified, not assumed."""
     if _notification_service is None:
-        raise HTTPException(status_code=503, detail="NotificationService nicht verfügbar")
+        raise HTTPException(status_code=503, detail="NotificationService unavailable")
     result = await _notification_service.notify({
         "severity": req.severity,
         "title": req.title,

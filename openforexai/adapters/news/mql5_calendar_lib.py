@@ -190,8 +190,8 @@ def find_event_ids(
     Alle gesetzten Filter werden per UND verknüpft.
 
     time_op:
-      "gt"       größer als time_value
-      "gte"      größer/gleich time_value
+      "gt"       greater than time_value
+      "gte"      greater than or equal to time_value
       "eq"       gleich time_value
       "lt"       kleiner als time_value
       "lte"      kleiner/gleich time_value

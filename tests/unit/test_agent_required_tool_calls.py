@@ -125,7 +125,7 @@ async def test_reminders_capped_at_two_then_final_pinned_error(monkeypatch: pyte
     pinned = monitoring_bus.pinned_events()
     assert len(pinned) == 1
     assert "create_examination_report" in pinned[0]["payload"]["message"]
-    assert "2 Erinnerung" in pinned[0]["payload"]["message"]
+    assert "2 reminder(s)" in pinned[0]["payload"]["message"]
 
 
 @pytest.mark.asyncio

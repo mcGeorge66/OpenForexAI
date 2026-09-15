@@ -26,27 +26,28 @@ def test_parse_rejects_invalid_d_a_combo_or_shape(fomak):
         parse_fomak(fomak)
 
 
-def test_explain_fomak_de_mentions_all_components():
-    text = explain_fomak("3U223S", lang="de")
-    for label in ("Trendstärke", "Volatilität", "Persistenz", "Impuls", "Alignment"):
+def test_explain_fomak_mentions_all_components():
+    text = explain_fomak("3U223S")
+    for label in ("Trend strength", "Volatility", "Persistence", "Impulse", "Alignment"):
         assert label in text
     assert "Noise" not in text
-
-
-def test_explain_fomak_en():
-    text = explain_fomak("3U223S", lang="en")
-    assert "trend" in text.lower()
     assert "3U223S" in text
 
 
-def test_interpret_fomak_returns_nonempty_text_both_languages():
-    de = interpret_fomak("3U223S", lang="de")
-    en = interpret_fomak("3U223S", lang="en")
-    assert de and en
-    assert "3U223S" in de
-    assert "3U223S" in en
+def test_explain_fomak_is_english_only():
+    """These texts are handed to a model, and the models are addressed in
+    English throughout — the German variant and the lang switch were removed
+    so no code path can put German in front of one."""
+    text = explain_fomak("3U223S") + interpret_fomak("3U223S")
+    assert not any(ch in text for ch in "äöüßÄÖÜ")
+
+
+def test_interpret_fomak_returns_nonempty_text():
+    text = interpret_fomak("3U223S")
+    assert text
+    assert "3U223S" in text
 
 
 def test_interpret_range_market():
-    text = interpret_fomak("1N112S", lang="de")
-    assert "Range" in text or "seitwärts" in text.lower()
+    text = interpret_fomak("1N112S")
+    assert "range" in text.lower() or "sideways" in text.lower()

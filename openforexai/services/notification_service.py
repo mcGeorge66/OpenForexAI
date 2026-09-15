@@ -51,7 +51,7 @@ _log = get_logger(__name__)
 _SEVERITIES = ("info", "warning", "critical")
 # Telegram rejects messages above 4096 characters outright.
 _TELEGRAM_MAX_CHARS = 4096
-_TRUNCATION_MARKER = "\n… (gekürzt)"
+_TRUNCATION_MARKER = "\n… (truncated)"
 _SEVERITY_PREFIX = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
 
 
@@ -260,9 +260,9 @@ class NotificationService:
                 return {"sent": False, "reason": "rate_limited"}
             self._cap_notice_sent = True
             title, message, severity = (
-                "Benachrichtigungslimit erreicht",
-                f"Mehr als {self._max_per_hour} Nachrichten in einer Stunde — "
-                "weitere werden bis zum Abklingen unterdrückt.",
+                "Notification limit reached",
+                f"More than {self._max_per_hour} messages within an hour — "
+                "further ones are suppressed until it subsides.",
                 "warning",
             )
 
@@ -316,7 +316,7 @@ class NotificationService:
         head = f"{_SEVERITY_PREFIX.get(severity, '')} {title}".strip()
         parts = [p for p in (head, message) if p]
         if suppressed:
-            parts.append(f"(+{suppressed} gleichartige seither unterdrückt)")
+            parts.append(f"(+{suppressed} of the same kind suppressed since)")
         text = "\n\n".join(parts)
         if len(text) > _TELEGRAM_MAX_CHARS:
             text = text[: _TELEGRAM_MAX_CHARS - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER

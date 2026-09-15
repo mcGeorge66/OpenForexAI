@@ -156,30 +156,30 @@ class CreateExaminationReportTool(BaseTool):
         pattern_key = arguments.get("pattern_key")
 
         content_parts = [
-            f"# Trade-Untersuchung: {order_id}",
+            f"# Trade examination: {order_id}",
             "",
-            f"**Pair:** {context.pair or 'unbekannt'}  ",
-            f"**Untersucht von (Examiner):** {context.agent_id}  ",
-            f"**Eröffnet von:** {opening_agent_id}  ",
+            f"**Pair:** {context.pair or 'unknown'}  ",
+            f"**Examined by:** {context.agent_id}  ",
+            f"**Opened by:** {opening_agent_id}  ",
         ]
         if execution_agent_id:
-            content_parts.append(f"**Ausgeführt/geschlossen von:** {execution_agent_id}  ")
+            content_parts.append(f"**Executed/closed by:** {execution_agent_id}  ")
         content_parts.append(f"**Verdict:** {verdict}  ")
         if pattern_key:
-            content_parts.append(f"**Pattern-Key:** `{pattern_key}`  ")
+            content_parts.append(f"**Pattern key:** `{pattern_key}`  ")
         content_parts += [
             "",
-            "## Befund",
+            "## Findings",
             "",
             report_markdown.strip(),
             "",
-            "## Was ins Gedächtnis geschrieben oder aktualisiert wurde",
+            "## What was written to or updated in memory",
             "",
         ]
         for entry in memory_writes:
-            action_label = "neu angelegt" if entry["action"] == "created" else "aktualisiert"
+            action_label = "created" if entry["action"] == "created" else "updated"
             content_parts.append(
-                f"- Tabelle `{entry['table']}`, Eintrag `{entry['id']}` ({action_label}): {entry['text']}"
+                f"- Table `{entry['table']}`, entry `{entry['id']}` ({action_label}): {entry['text']}"
             )
         content = "\n".join(content_parts)
 
@@ -190,7 +190,7 @@ class CreateExaminationReportTool(BaseTool):
             tags.append(str(pattern_key))
 
         title_label = await _resolve_title_label(context, order_id)
-        title = f"Trade-Untersuchung {title_label} ({context.pair or '?'})"
+        title = f"Trade examination {title_label} ({context.pair or '?'})"
 
         doc_id = await repo_request(
             context,

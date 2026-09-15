@@ -47,7 +47,7 @@ def compute_agent_stale(
             return False, None  # never ran yet — startup, not a stall
         idle = (now_utc - last_active).total_seconds()
         if idle - interval > STALE_GRACE_SECONDS:
-            return True, f"Timer alle {interval}s, aber seit {int(idle)}s kein Zyklus gestartet"
+            return True, f"Timer every {interval}s, but no cycle started for {int(idle)}s"
         return False, None
 
     configured = {str(t) for t in (cfg.get("event_triggers") or [])} - MANUAL_AGENT_TRIGGERS
@@ -60,8 +60,8 @@ def compute_agent_stale(
         waited = (now_utc - last_seen).total_seconds()
         if waited > STALE_GRACE_SECONDS:
             return True, (
-                f"{count}x '{event_type}' zugestellt, aber weder verarbeitet "
-                f"noch übersprungen — seit {int(waited)}s keine Reaktion"
+                f"{count}x '{event_type}' delivered, but neither processed "
+                f"nor skipped — no reaction for {int(waited)}s"
             )
     return False, None
 

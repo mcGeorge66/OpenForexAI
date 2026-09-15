@@ -38,96 +38,44 @@ def _validate_da_combo(d_char: str, a_char: str) -> None:
         raise FomakParseError(f"Invalid D/A combination: A='{a_char}' implies D must be 'N', got '{d_char}'")
 
 
-_S_DESC = {
-    "de": {1: "geringe Trendstärke - kaum bis leicht gerichtete Bewegung.",
-           2: "mittlere Trendstärke - klarer, aber nicht dominanter Drift.",
-           3: "hohe bis extreme Trendstärke - deutliche bis sehr große Netto-Bewegung."},
-    "en": {1: "low trend strength - hardly any to slightly directional movement.",
+_S_DESC = {1: "low trend strength - hardly any to slightly directional movement.",
            2: "medium trend strength - a clear but not dominant drift.",
-           3: "high to extreme trend strength - strong to very large net move."},
-}
-_V_DESC = {
-    "de": {1: "niedrige Volatilität - ruhiger bis unterdurchschnittlicher Markt.",
-           2: "normale Volatilität - typische Range.",
-           3: "erhöhte bis sehr hohe Volatilität - größere Schwünge bis starke Spikes."},
-    "en": {1: "low volatility - quiet to below-average market.",
+           3: "high to extreme trend strength - strong to very large net move."}
+_V_DESC = {1: "low volatility - quiet to below-average market.",
            2: "normal volatility - typical range.",
-           3: "elevated to very high volatility - larger swings to strong spikes."},
-}
-_P_DESC = {
-    "de": {1: "geringe Persistenz - häufige Richtungswechsel, Trendversuche oft unterbrochen.",
-           2: "mittlere Persistenz - etwas Trend, aber mit Rücksetzern.",
-           3: "hohe bis extreme Persistenz - die meisten bis fast alle Kerzen laufen in dieselbe Richtung."},
-    "en": {1: "low persistence - frequent direction changes, trend attempts often interrupted.",
+           3: "elevated to very high volatility - larger swings to strong spikes."}
+_P_DESC = {1: "low persistence - frequent direction changes, trend attempts often interrupted.",
            2: "medium persistence - some trend, but with pullbacks.",
-           3: "high to extreme persistence - most to almost all candles moving in the same direction."},
-}
-_I_DESC = {
-    "de": {1: "kaum bis leichter Impuls - keine ausgeprägten Beschleunigungsphasen.",
-           2: "moderater Impuls - klare Bewegungsphasen ohne Extreme.",
-           3: "starker bis sehr starker Impuls - kräftige bis explosive Bewegungen."},
-    "en": {1: "almost no to light impulse - no strong acceleration phases.",
+           3: "high to extreme persistence - most to almost all candles moving in the same direction."}
+_I_DESC = {1: "almost no to light impulse - no strong acceleration phases.",
            2: "moderate impulse - clear movement phases without extremes.",
-           3: "strong to very strong impulse - powerful to explosive moves."},
-}
-_DIR_TEXT = {
-    "de": {"U": "aufwärts (bullisch)", "D": "abwärts (bärisch)", "N": "neutral / flach"},
-    "en": {"U": "upwards (bullish)", "D": "downwards (bearish)", "N": "neutral / flat"},
-}
-_A_TEXT = {
-    "de": {"S": "Richtung stimmt mit dem höheren Trend überein.",
-           "O": "Richtung läuft gegen den höheren Trend.",
-           "U": "Block neutral, höherer Trend zeigt nach oben.",
-           "D": "Block neutral, höherer Trend zeigt nach unten.",
-           "N": "höherer Trend neutral oder unklar."},
-    "en": {"S": "direction is aligned with the higher-timeframe trend.",
+           3: "strong to very strong impulse - powerful to explosive moves."}
+_DIR_TEXT = {"U": "upwards (bullish)", "D": "downwards (bearish)", "N": "neutral / flat"}
+_A_TEXT = {"S": "direction is aligned with the higher-timeframe trend.",
            "O": "direction is opposite to the higher-timeframe trend.",
            "U": "no direction in block, higher-timeframe trend up.",
            "D": "no direction in block, higher-timeframe trend down.",
-           "N": "higher-timeframe trend neutral or unclear."},
-}
+           "N": "higher-timeframe trend neutral or unclear."}
 
 
-def _norm_lang(lang: str | None) -> str:
-    """English unless a caller explicitly asks for German.
-
-    The default used to be German, which meant a tool result handed to an LLM
-    came back in German whenever the caller omitted `lang` — the models are
-    addressed in English throughout, so the default has to match.
-    """
-    l = (lang or "en").lower()
-    return l if l in ("de", "en") else "en"
-
-
-def explain_fomak(fomak: str, lang: str | None = None) -> str:
+def explain_fomak(fomak: str) -> str:
     """Component-by-component explanation (S/V/P/I/D/A each described)."""
-    lang = _norm_lang(lang)
     p = parse_fomak(fomak)
     s_bin, v_bin, p_bin, i_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin"))
     d_char, a_char = p["D_char"], p["A_char"]
 
-    if lang == "de":
-        return (
-            f"FOMAK {fomak} beschreibt einen Markt, der insgesamt {_DIR_TEXT['de'][d_char]} gerichtet ist.\n\n"
-            f"S (Trendstärke): {s_bin} --> {_S_DESC['de'][s_bin]}\n"
-            f"V (Volatilität): {v_bin} --> {_V_DESC['de'][v_bin]}\n"
-            f"P (Persistenz):  {p_bin} --> {_P_DESC['de'][p_bin]}\n"
-            f"I (Impuls):      {i_bin} --> {_I_DESC['de'][i_bin]}\n"
-            f"A (Alignment):   {a_char} --> {_A_TEXT['de'][a_char]}"
-        )
     return (
-        f"FOMAK {fomak} describes a market that is overall {_DIR_TEXT['en'][d_char]}.\n\n"
-        f"S (Trend strength): {s_bin} --> {_S_DESC['en'][s_bin]}\n"
-        f"V (Volatility):     {v_bin} --> {_V_DESC['en'][v_bin]}\n"
-        f"P (Persistence):    {p_bin} --> {_P_DESC['en'][p_bin]}\n"
-        f"I (Impulse):        {i_bin} --> {_I_DESC['en'][i_bin]}\n"
-        f"A (Alignment):      {a_char} --> {_A_TEXT['en'][a_char]}"
+        f"FOMAK {fomak} describes a market that is overall {_DIR_TEXT[d_char]}.\n\n"
+        f"S (Trend strength): {s_bin} --> {_S_DESC[s_bin]}\n"
+        f"V (Volatility):     {v_bin} --> {_V_DESC[v_bin]}\n"
+        f"P (Persistence):    {p_bin} --> {_P_DESC[p_bin]}\n"
+        f"I (Impulse):        {i_bin} --> {_I_DESC[i_bin]}\n"
+        f"A (Alignment):      {a_char} --> {_A_TEXT[a_char]}"
     )
 
 
-def interpret_fomak(fomak: str, lang: str | None = None) -> str:
+def interpret_fomak(fomak: str) -> str:
     """Condensed, semantic interpretation — a short readable market description."""
-    lang = _norm_lang(lang)
     p = parse_fomak(fomak)
     s_bin, v_bin, p_bin, i_bin = (int(p[k]) for k in ("S_bin", "V_bin", "P_bin", "I_bin"))
     d_char, a_char = p["D_char"], p["A_char"]
@@ -143,41 +91,6 @@ def interpret_fomak(fomak: str, lang: str | None = None) -> str:
         a_sign = -1
     else:
         a_sign = 0
-
-    if lang == "de":
-        direction = {"U": "aufwärts", "D": "abwärts", "N": "seitwärts / neutral"}[d_char]
-        bias = {"U": "bullisch", "D": "bärisch", "N": "neutral"}[d_char]
-        higher_bias = {
-            "S": "der höhere Trend unterstützt diese Richtung",
-            "O": "der höhere Trend läuft dagegen",
-            "U": "Block neutral, höherer Trend aufwärts",
-            "D": "Block neutral, höherer Trend abwärts",
-            "N": "der höhere Trend ist neutral oder unklar",
-        }[a_char]
-
-        if s_bin >= 3 and p_bin >= 2:
-            regime = "einen starken und relativ sauberen Trendmarkt"
-        elif s_bin >= 3:
-            regime = "einen starken, aber unruhigen Trend bzw. eine Beschleunigungsphase"
-        elif s_bin <= 1 and p_bin <= 1:
-            regime = "einen seitwärts gerichteten Range-Markt"
-        elif v_bin >= 3 and p_bin <= 1:
-            regime = "eine chaotische, hochvolatile Marktphase"
-        else:
-            regime = "einen moderat trendigen Markt ohne klaren Extremzustand"
-
-        header = f"Der aktuelle FOMAK {fomak} beschreibt {regime}, der überwiegend {direction} ({bias}) verläuft - {higher_bias}."
-
-        comments = []
-        if i_bin >= 3:
-            comments.append("Die aktuellen Bewegungen haben ausgeprägten Impuls-Charakter; Breakouts und schnelle Schübe sind wahrscheinlich.")
-        elif i_bin <= 1:
-            comments.append("Der Impuls ist derzeit schwach - Bewegungen laufen leicht aus.")
-        if d_sign != 0 and a_sign != 0 and d_sign != a_sign:
-            comments.append("Die aktuelle Bewegung läuft gegen den Trend der höheren Zeitebene - eher eine Korrektur- oder Gegenbewegung.")
-        elif d_sign != 0 and a_sign != 0 and d_sign == a_sign:
-            comments.append("Kurzfristige und übergeordnete Trendrichtung stimmen überein.")
-        return header + ("\n" + " ".join(comments) if comments else "")
 
     direction = {"U": "upwards", "D": "downwards", "N": "sideways / neutral"}[d_char]
     bias = {"U": "bullish", "D": "bearish", "N": "neutral"}[d_char]

@@ -44,7 +44,7 @@ _VALID_MEMORY_WRITES = [
     {"table": "mem_agent_OXS_T-EURUSD-AA-PTJ", "id": "abc", "action": "created", "text": "first occurrence of X"},
 ]
 
-_EXPECTED_TITLE = "Trade-Untersuchung 2026-08-24 05:00 (3h 56min) (EURUSD)"
+_EXPECTED_TITLE = "Trade examination 2026-08-24 05:00 (3h 56min) (EURUSD)"
 
 
 @pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_title_falls_back_to_order_id_when_entry_unavailable(tool, monkeyp
         },
         _context(),
     )
-    assert result["title"] == "Trade-Untersuchung order-1 (EURUSD)"
+    assert result["title"] == "Trade examination order-1 (EURUSD)"
 
 
 @pytest.mark.asyncio
@@ -113,7 +113,7 @@ async def test_title_shows_start_without_duration_when_not_yet_closed(tool, monk
         },
         _context(),
     )
-    assert result["title"] == "Trade-Untersuchung 2026-08-24 05:00 (EURUSD)"
+    assert result["title"] == "Trade examination 2026-08-24 05:00 (EURUSD)"
 
 
 @pytest.mark.asyncio

@@ -142,7 +142,7 @@ async def test_long_message_is_truncated_to_telegram_limit():
     await svc.notify({"severity": "info", "title": "T", "message": "x" * 9000})
 
     assert len(svc.sent[0][0]) <= 4096
-    assert svc.sent[0][0].endswith("(gekürzt)")
+    assert svc.sent[0][0].endswith("(truncated)")
 
 
 async def test_unresolved_env_placeholder_counts_as_unconfigured():

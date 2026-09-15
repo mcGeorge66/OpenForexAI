@@ -84,11 +84,6 @@ class ComputeFomakTool(BaseTool):
                 "type": "boolean",
                 "description": "Include a plain-language explanation of the code. Default false.",
             },
-            "lang": {
-                "type": "string",
-                "enum": ["de", "en"],
-                "description": "Language for the explanation, if requested. Default 'en'.",
-            },
         },
         "required": ["timeframe", "lookback_candles"],
     }
@@ -155,9 +150,8 @@ class ComputeFomakTool(BaseTool):
             response["higher_timeframe_direction"] = result["higher_timeframe_direction"]
             response["raw_values"] = result["raw_values"]
         if _truthy(arguments.get("include_explanation")):
-            lang = arguments.get("lang")
             response["explanation"] = (
-                f"{explain_fomak(result['fomak'], lang)}\n\n{interpret_fomak(result['fomak'], lang)}"
+                f"{explain_fomak(result['fomak'])}\n\n{interpret_fomak(result['fomak'])}"
             )
         return response
 

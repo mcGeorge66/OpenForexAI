@@ -71,7 +71,7 @@ async def test_include_raw_values(tool, fake_bus_request):
 @pytest.mark.asyncio
 async def test_include_explanation(tool, fake_bus_request):
     result = await tool.execute(
-        {"timeframe": "M5", "lookback_candles": 24, "include_explanation": True, "lang": "de"}, _context(),
+        {"timeframe": "M5", "lookback_candles": 24, "include_explanation": True}, _context(),
     )
     assert "explanation" in result
     assert result["fomak"] in result["explanation"]

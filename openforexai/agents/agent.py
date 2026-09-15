@@ -1297,8 +1297,8 @@ class Agent:
         if unmet_final:
             tool_names = ", ".join(sorted({str(entry.get("tool", "?")) for entry in unmet_final}))
             self._emit_system_error(
-                f"Zyklus nach {reminders_sent} Erinnerung(en) nicht vollständig: "
-                f"Pflicht-Tool-Aufruf(e) fehlen: {tool_names}"
+                f"Cycle incomplete after {reminders_sent} reminder(s): "
+                f"required tool call(s) missing: {tool_names}"
             )
 
         response_schema, schema_name = self._response_schema()
