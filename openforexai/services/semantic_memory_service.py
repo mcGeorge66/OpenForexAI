@@ -154,11 +154,28 @@ _JPY_PRICE_BAND = ((50.0, 400.0), (2, 3))       # (magnitude range, decimal-digi
 _MAJOR_PRICE_BAND = ((0.3, 3.0), (4, 5))
 
 # Indicator/metric name in front of the number, with only filler between them
-# ("RSI 60.87", "RSI lag bei etwa 60.87", "Slope_S: 0.945").
+# ("RSI 60.87", "RSI around 60.87", "Slope_S: 0.945").
+#
+# The English approximation markers matter as much as the German ones: an RSI
+# between 50 and 100 with two decimals sits squarely inside the JPY price band,
+# so "RSI around 60.87" is only distinguishable from a price by its label — and
+# the examiner's own prompt prescribes exactly those words ("around", "about",
+# "approx."). They were missing while the examiner wrote German, and would have
+# caused false rejections from the moment it switched to English.
+#
+# Only approximation and copula words are listed, never words that carry price
+# context ("support", "stop", "level"): an earlier version exempted any number
+# with an indicator name loosely nearby, and three real price quotes reached
+# the store that way.
 _PRICE_LABEL_BEFORE_RE = re.compile(
     r"(?:rsi|slope_s|slope|atr|confidence|konfidenz|adx|macd|stoch)"
     r"(?:[\s:=-]*(?:lag|liegt|liegen|war|ist|betrug|beträgt|bei|von|mit|um|auf"
-    r"|ca\.|circa|etwa|rund|about|at|of|was|is)\b){0,4}"
+    r"|ca\.|circa|etwa|rund"
+    r"|about|around|approx\.?|approximately|roughly|near|at|of|was|were|is|are"
+    # A trailing "\b" alone would not match after an abbreviation's full stop
+    # ("approx. 60.87", "ca. 60.87") — a dot followed by a space is no word
+    # boundary, so those two spellings silently failed to be exempt.
+    r"|reached|printed|stood|sat|sits)(?:\b|(?<=\.))){0,4}"
     r"[\s:=-]*$",
     re.IGNORECASE,
 )
@@ -653,6 +670,12 @@ class SemanticMemoryService:
                 "broker": existing.get("broker", ""),
                 "pattern_key": args.get("pattern_key") if args.get("pattern_key") is not None else existing.get("pattern_key", ""),
             }
+            # Validate before deleting. remember() rejects text that names an
+            # absolute price, and this method used to delete the old row first
+            # and call remember() afterwards — so a rejected rewrite destroyed
+            # the observation it was meant to improve, with nothing written in
+            # its place.
+            _reject_absolute_price_quotes(remember_args["text"], str(remember_args["pair"]))
             await self._run_blocking(self._forget_sync, table, entry_id)
         return await self.remember(remember_args)
 

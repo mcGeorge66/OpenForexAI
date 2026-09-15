@@ -423,3 +423,63 @@ async def test_find_pattern_collapses_the_same_note_written_to_two_tables(servic
         "tables": ["mem_agent_a", "mem_shared_b"], "pattern_key": "K", "limit": 3,
     })
     assert out["match_count"] == 2, [m["text"] for m in out["matches"]]
+
+
+# ── Guard: English approximation markers, and no data loss on rejection ──────
+
+@pytest.mark.parametrize("text", [
+    "RSI around 60.87 at the entry",
+    "RSI approx. 60.87",
+    "RSI approximately 60.87",
+    "RSI roughly 60.87",
+    "RSI near 60.87",
+    "RSI reached 60.87",
+    "the M15 RSI stood at 60.87",
+    "RSI lag bei etwa 60.87",
+])
+def test_indicator_values_are_not_mistaken_for_prices(text):
+    """An RSI between 50 and 100 with two decimals sits inside the JPY price
+    band, so only its label tells it apart from a price — and the examiner's
+    prompt prescribes exactly these approximation words."""
+    from openforexai.services.semantic_memory_service import find_absolute_price_quotes
+    assert find_absolute_price_quotes(text, "USDJPY") == []
+
+
+@pytest.mark.parametrize("text", [
+    "the stop was at 158.946",
+    "support around 1.16795",
+    "closed at 159.004 by stop",
+])
+def test_real_price_quotes_are_still_rejected(text):
+    from openforexai.services.semantic_memory_service import find_absolute_price_quotes
+    pair = "USDJPY" if text.count(".") and "1.1" not in text else "EURUSD"
+    assert find_absolute_price_quotes(text, pair)
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_update_leaves_the_existing_memory_intact(service):
+    """update() deleted the old row before re-inserting, and the price guard
+    only ran on the insert — so a rejected rewrite destroyed the observation it
+    was meant to improve."""
+    remembered = await service.remember({
+        "table": "mem_agent_test", "agent_id": "a", "pair": "USDJPY",
+        "pattern_key": "USDJPY_KEEP", "text": "Stop lag etwa 6 Pips unter dem Einstieg",
+    })
+    with pytest.raises(ValueError):
+        await service.update({
+            "table": "mem_agent_test", "id": remembered["id"],
+            "text": "the stop was at 158.946",
+        })
+    found = await service.find_pattern({"tables": ["mem_agent_test"], "pattern_key": "USDJPY_KEEP"})
+    assert found["found"] is True, "die alte Beobachtung darf nicht verschwunden sein"
+    assert found["id"] == remembered["id"]
+    assert found["text"] == "Stop lag etwa 6 Pips unter dem Einstieg"
+
+
+@pytest.mark.parametrize("text", ["confidence ca. 0.62", "RSI approx. 60.87"])
+def test_abbreviations_with_a_full_stop_are_exempt_too(text):
+    """"ca." and "approx." end in a dot, and a dot before a space is no word
+    boundary — the trailing \b made both spellings fail to be exempt."""
+    from openforexai.services.semantic_memory_service import find_absolute_price_quotes
+    assert find_absolute_price_quotes(text, "USDJPY") == []
+    assert find_absolute_price_quotes(text, "EURUSD") == []
