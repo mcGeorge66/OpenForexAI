@@ -5385,8 +5385,8 @@ async def preview_notification_rule(req: NotificationPreviewRequest) -> dict[str
 
 class NotificationTestRequest(BaseModel):
     severity: str = "info"
-    title: str = "OpenForexAI Testnachricht"
-    text: str = "Wenn du das liest, funktioniert der Kanal."
+    title: str = "OpenForexAI test message"
+    text: str = "If you can read this, the channel works."
 
 
 @router.post("/config/notifications/test")
