@@ -584,8 +584,13 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                     key={entry.id}
                     onClick={() => setSelectedId(entry.id)}
                     className={[
-                      'border-b border-gray-900 cursor-pointer hover:bg-gray-900/60',
-                      selectedId === entry.id ? 'bg-emerald-900/20' : '',
+                      'border-b border-gray-900 cursor-pointer',
+                      // The selected row gets its own hover shade: a shared
+                      // hover:bg-gray-900 would dim the selection the moment
+                      // the pointer sits on it, which is most of the time.
+                      selectedId === entry.id
+                        ? 'bg-emerald-700/45 hover:bg-emerald-700/55'
+                        : 'hover:bg-gray-900/60',
                     ].join(' ')}
                   >
                     <td className="px-3 py-2">
