@@ -709,6 +709,10 @@ export interface AnalysisOverlaySnapshot {
 
 export interface OrderDecisionContext {
   symbol?: string | null
+  /** The market-character code the analysis agent saw and echoed into its
+   *  answer. Absent for orders from before it existed, and for any order that
+   *  did not come from an agent cycle that computed one. */
+  fomak?: string | null
   decision?: string | null
   confidence?: number | null
   order_start_signal?: string | null

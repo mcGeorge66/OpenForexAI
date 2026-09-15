@@ -570,6 +570,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                   <th className="px-3 py-2 text-left">To</th>
                   <th className="px-3 py-2 text-right" title="Time held from entry to close (hh:mm)">Runtime</th>
                   <th className="px-3 py-2 text-left">Id</th>
+                  <th className="px-3 py-2 text-left" title="Market character at the entry (FOMAK) — blank when none was computed for this order">FOMAK</th>
                   <th className="px-3 py-2 text-right">Units</th>
                   <th className="px-3 py-2 text-right">Stake</th>
                   <th className="px-3 py-2 text-right">Result</th>
@@ -612,6 +613,9 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-400 tabular-nums">{tradeDuration(entry)}</td>
                     <td className="px-3 py-2 text-white text-xs font-mono">{entry.broker_order_id ?? '-'}</td>
+                    <td className="px-3 py-2 text-left text-xs font-mono text-cyan-300">
+                      {entry.decision_context?.fomak?.trim() || <span className="text-gray-600">-</span>}
+                    </td>
                     <td className="px-3 py-2 text-right text-gray-200">{entry.units.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right text-gray-200">{formatStake(entry.stake_estimate)}</td>
                     <td className={[
@@ -681,7 +685,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                 ))}
                 {!loading && entries.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                    <td colSpan={11} className="px-3 py-8 text-center text-gray-500">
                       No orders in the orderbook.
                     </td>
                   </tr>
