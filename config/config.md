@@ -13,7 +13,6 @@ AI-Assistant
 System Config  
 Helper Config  
 
-Package Manager  
 Broker Modules  
 LLM Modules  
 
