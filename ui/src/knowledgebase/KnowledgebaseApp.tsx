@@ -163,6 +163,38 @@ export function KnowledgebaseApp() {
     return out
   }, [docs])
 
+  /** A folder's tick means "everything in here is selected", so it follows its
+   *  contents: unticking a single document unticks the folders above it, and
+   *  ticking the last missing one ticks them back. Applied deepest folder
+   *  first, so a parent already sees its corrected children. An empty folder
+   *  keeps whatever it was given — there is nothing to derive from. */
+  const withFolderTicks = useCallback((ids: Set<string>): Set<string> => {
+    const childrenOf = new Map<string, string[]>()
+    const parentOf = new Map<string, string | null>()
+    for (const d of docs) {
+      parentOf.set(d.id, d.parent_id ?? null)
+      if (d.parent_id) {
+        if (!childrenOf.has(d.parent_id)) childrenOf.set(d.parent_id, [])
+        childrenOf.get(d.parent_id)!.push(d.id)
+      }
+    }
+    const depthOf = (id: string) => {
+      let depth = 0
+      for (let p = parentOf.get(id) ?? null; p; p = parentOf.get(p) ?? null) depth++
+      return depth
+    }
+    const parents = docs
+      .filter(d => d.is_folder && (childrenOf.get(d.id)?.length ?? 0) > 0)
+      .sort((a, b) => depthOf(b.id) - depthOf(a.id))
+
+    const next = new Set(ids)
+    for (const folder of parents) {
+      if (childrenOf.get(folder.id)!.every(child => next.has(child))) next.add(folder.id)
+      else next.delete(folder.id)
+    }
+    return next
+  }, [docs])
+
   /** Ticking a folder ticks everything inside it, at any depth. The bulk
    *  actions work on ids, so a folder selected on its own would move or delete
    *  the folder and leave its documents behind. */
@@ -172,7 +204,7 @@ export function KnowledgebaseApp() {
       const group = [id, ...descendantIds(id)]
       if (next.has(id)) group.forEach(x => next.delete(x))
       else group.forEach(x => next.add(x))
-      return next
+      return withFolderTicks(next)
     })
   }
 
