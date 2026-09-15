@@ -21,6 +21,41 @@ def _format_duration(total_seconds: float) -> str:
     return f"{hours}h {minutes}min" if hours else f"{minutes}min"
 
 
+_IMPORT_FOLDER_TITLE = "[Import]"
+
+
+async def _import_folder_id(context: ToolContext) -> str | None:
+    """Id of the Knowledgebase's `[Import]` folder, created on first use.
+
+    Same convention the UI's own "→ KB" buttons follow (see
+    ui/src/knowledgebase/kbImport.ts): a single folder of that title at the
+    root. Reports used to land at the root next to the hand-written documents,
+    which buried them.
+
+    Returns None if the lookup or the creation fails. A report is worth writing
+    even without a folder — it then lands at the root, as before — so this must
+    never be the reason an examination has no audit trail.
+    """
+    try:
+        docs = await repo_request(context, "kb_list_documents", {})
+        if isinstance(docs, list):
+            for doc in docs:
+                if (
+                    isinstance(doc, dict)
+                    and doc.get("title") == _IMPORT_FOLDER_TITLE
+                    and doc.get("is_folder")
+                ):
+                    return str(doc.get("id")) or None
+        created = await repo_request(
+            context,
+            "kb_create_document",
+            {"doc": {"title": _IMPORT_FOLDER_TITLE, "content": "", "is_folder": True, "tags": []}},
+        )
+        return str(created) if created else None
+    except Exception:
+        return None
+
+
 async def _resolve_title_label(context: ToolContext, order_id: str) -> str:
     """'<start time> (<duration>)' for the report title, read from the authoritative
     order-book record instead of trusted from the LLM's own arguments. Falls back to
@@ -201,6 +236,7 @@ class CreateExaminationReportTool(BaseTool):
                     "content": content,
                     "tags": tags,
                     "is_folder": False,
+                    "parent_id": await _import_folder_id(context),
                 },
             },
         )
