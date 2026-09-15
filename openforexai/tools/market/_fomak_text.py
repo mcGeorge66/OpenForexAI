@@ -89,8 +89,14 @@ _A_TEXT = {
 
 
 def _norm_lang(lang: str | None) -> str:
-    l = (lang or "de").lower()
-    return l if l in ("de", "en") else "de"
+    """English unless a caller explicitly asks for German.
+
+    The default used to be German, which meant a tool result handed to an LLM
+    came back in German whenever the caller omitted `lang` — the models are
+    addressed in English throughout, so the default has to match.
+    """
+    l = (lang or "en").lower()
+    return l if l in ("de", "en") else "en"
 
 
 def explain_fomak(fomak: str, lang: str | None = None) -> str:

@@ -1567,7 +1567,7 @@ class Agent:
         lines = [
             str(entry.get("nudge_message"))
             if entry.get("nudge_message")
-            else f"Bitte rufe zuerst das Tool '{entry.get('tool')}' korrekt auf, bevor du abschließt."
+            else f"Please call the tool '{entry.get('tool')}' correctly before you finish."
             for entry in unmet
         ]
         return "\n".join(lines)
@@ -1683,11 +1683,16 @@ class Agent:
             if not entries:
                 return ""
 
+            # English, like every other string this code puts in front of a model.
+            # Agent prompts refer to this heading by name, so it is part of the
+            # contract with them — changing the wording means changing theirs too.
             header = (
-                "ERFAHRUNGSWERTE AUS FRÜHEREN TRADES (Beobachtungen eines Prüf-Agenten — keine "
-                "Regeln, keine Vorgaben. Du entscheidest selbst, ob und wie stark das hier "
-                "einfließt, genau wie ein Mensch Erfahrung gegen die aktuelle Situation abwägt"
-                + (" — exakt gleiches Marktmuster (FOMAK) wie in einer früheren Situation" if exact_match else "")
+                "EXPERIENCE FROM EARLIER TRADES (observations by an examiner agent — no "
+                "rules, no requirements. You decide yourself whether and how strongly "
+                "this weighs in, exactly as a human weighs experience against the "
+                "situation at hand"
+                + (" — the exact same market pattern (FOMAK) as in an earlier situation"
+                   if exact_match else "")
                 + "):"
             )
             lines = [header]

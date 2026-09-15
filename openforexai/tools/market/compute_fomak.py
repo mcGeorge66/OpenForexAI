@@ -87,7 +87,7 @@ class ComputeFomakTool(BaseTool):
             "lang": {
                 "type": "string",
                 "enum": ["de", "en"],
-                "description": "Language for the explanation, if requested. Default 'de'.",
+                "description": "Language for the explanation, if requested. Default 'en'.",
             },
         },
         "required": ["timeframe", "lookback_candles"],
