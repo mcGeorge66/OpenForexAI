@@ -239,9 +239,9 @@ async def test_remember_accepts_indicator_values_that_resemble_prices(service):
     # real USDJPY prices (e.g. "60.87") — these must not be mistaken for
     # absolute price quotes just because of nearby-keyword exemptions.
     text = (
-        "RSI lag bei etwa 60.87 und Slope_S bei 0.945, beide im positiven "
-        "Bereich. Dies war die 4. beobachtete Situation dieses Patterns; 3 von "
-        "4 Trades endeten profitabel, mit einem Ergebnis von rund 11R."
+        "RSI was around 60.87 and Slope_S around 0.945, both positive. This was "
+        "the 4th observed situation of this pattern; 3 of 4 trades ended "
+        "profitably, with a result of roughly 11R."
     )
     result = await service.remember({
         "table": "mem_agent_test", "text": text, "agent_id": "a", "pair": "USDJPY",
@@ -276,7 +276,7 @@ async def test_remember_checks_both_bands_when_pair_missing(service):
 async def test_remember_pair_missing_does_not_reject_indicator_values(service):
     # Sanity check that the empty-pair fallback (checking both bands) does not
     # become overly aggressive: indicator values must still be exempt.
-    text = "RSI lag bei etwa 60.87, ATR bei 0.945."
+    text = "RSI was around 60.87, ATR around 0.945."
     result = await service.remember({"table": "mem_shared_test", "text": text, "agent_id": "a"})
     assert result["table"] == "mem_shared_test"
 
@@ -435,7 +435,6 @@ async def test_find_pattern_collapses_the_same_note_written_to_two_tables(servic
     "RSI near 60.87",
     "RSI reached 60.87",
     "the M15 RSI stood at 60.87",
-    "RSI lag bei etwa 60.87",
 ])
 def test_indicator_values_are_not_mistaken_for_prices(text):
     """An RSI between 50 and 100 with two decimals sits inside the JPY price
@@ -476,10 +475,24 @@ async def test_a_rejected_update_leaves_the_existing_memory_intact(service):
     assert found["text"] == "Stop lag etwa 6 Pips unter dem Einstieg"
 
 
-@pytest.mark.parametrize("text", ["confidence ca. 0.62", "RSI approx. 60.87"])
+@pytest.mark.parametrize("text", ["confidence approx. 0.62", "RSI approx. 60.87"])
 def test_abbreviations_with_a_full_stop_are_exempt_too(text):
     """"ca." and "approx." end in a dot, and a dot before a space is no word
     boundary — the trailing \b made both spellings fail to be exempt."""
     from openforexai.services.semantic_memory_service import find_absolute_price_quotes
     assert find_absolute_price_quotes(text, "USDJPY") == []
     assert find_absolute_price_quotes(text, "EURUSD") == []
+
+
+@pytest.mark.parametrize("text", [
+    "RSI lag bei etwa 60.87",
+    "Der Stop lag bei 158.946",
+    "el stop estaba en 158.946",
+])
+def test_non_english_indicator_phrasing_is_not_exempt(text):
+    """The exempting words are English only, on purpose. There was no reason
+    for the net to cover German and not Spanish or French — everything the
+    models are addressed in is English, so anything else is a fault to see
+    rather than to accommodate."""
+    from openforexai.services.semantic_memory_service import find_absolute_price_quotes
+    assert find_absolute_price_quotes(text, "USDJPY")

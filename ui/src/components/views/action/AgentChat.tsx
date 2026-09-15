@@ -882,7 +882,7 @@ export function AgentChat() {
                           <button
                             onClick={() => setAnchorDateTime('')}
                             className="px-1 text-gray-500 hover:text-gray-300"
-                            title="Anchor zurücksetzen (live)"
+                            title="Reset anchor (live)"
                           >
                             ×
                           </button>

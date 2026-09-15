@@ -253,7 +253,7 @@ function conditionFor(rule: MonitorFilterRule, negated: boolean): unknown | null
 /** Translate a saved filter into notification-rule conditions. */
 export function compileFilterForNotification(group: MonitorFilterGroup): CompiledFilter {
   if (group.rules.length === 0) {
-    return { ok: false, reason: 'Der Filter ist leer — er würde jedes Ereignis melden.' }
+    return { ok: false, reason: 'The filter is empty — it would report every event.' }
   }
 
   const onlyIf: Record<string, unknown> = {}
@@ -265,9 +265,9 @@ export function compileFilterForNotification(group: MonitorFilterGroup): Compile
     if (join === 'OR' || join === 'OR_NOT') {
       return {
         ok: false,
-        reason: 'ODER-Verknüpfungen lassen sich nicht übersetzen — '
-          + 'Benachrichtigungsregeln verknüpfen ausschließlich mit UND. '
-          + 'Lege dafür zwei Filter an.',
+        reason: 'OR conditions cannot be translated — '
+          + 'notification rules combine conditions with AND only. '
+          + 'Create two filters instead.',
       }
     }
 
@@ -275,7 +275,7 @@ export function compileFilterForNotification(group: MonitorFilterGroup): Compile
       ? (rule.path ?? '').trim()
       : FIELD_TO_PAYLOAD_KEY[rule.field]
     if (!key) {
-      return { ok: false, reason: `Das Feld "${rule.field}" hat keine Entsprechung in der Nachricht.` }
+      return { ok: false, reason: `The field "${rule.field}" has no counterpart in the message.` }
     }
 
     const condition = conditionFor(rule, join === 'AND_NOT')
@@ -283,14 +283,14 @@ export function compileFilterForNotification(group: MonitorFilterGroup): Compile
       return {
         ok: false,
         reason: join === 'AND_NOT'
-          ? `"${rule.operator}" lässt sich nicht verneinen — nur "ist gleich" kann negiert werden.`
-          : `Die Bedingung für "${rule.field}" ist unvollständig.`,
+          ? `"${rule.operator}" cannot be negated — only "equals" can be.`
+          : `The condition for "${rule.field}" is incomplete.`,
       }
     }
     if (key in onlyIf) {
       return {
         ok: false,
-        reason: `Zwei Bedingungen auf "${key}" — eine Regel kann je Feld nur eine prüfen.`,
+        reason: `Two conditions on "${key}" — a rule can check only one per field.`,
       }
     }
     onlyIf[key] = condition
@@ -300,7 +300,7 @@ export function compileFilterForNotification(group: MonitorFilterGroup): Compile
   if (alertTypes.length === 0) {
     return {
       ok: false,
-      reason: 'Ohne "Event Type ist gleich …" weiß die Brücke nicht, welche '
+      reason: 'Without "event type equals …" the bridge does not know which '
         + 'Monitoring-Ereignisse sie weiterleiten soll.',
     }
   }

@@ -68,7 +68,7 @@ export function applyPatch(source: string, patch: PatchBlock): { result: string;
   }
 
   if (startLine < 1 || endLine > total || startLine > endLine) {
-    return { result: source, error: `PATCH L${startLine}-L${endLine}: Zeilenbereich ungültig (${total} Zeilen)` }
+    return { result: source, error: `PATCH L${startLine}-L${endLine}: line range invalid (${total} lines)` }
   }
   const newLines = code.endsWith('\n') ? code.slice(0, -1).split('\n') : code.split('\n')
   return { result: [...lines.slice(0, startLine - 1), ...newLines, ...lines.slice(endLine)].join('\n') }

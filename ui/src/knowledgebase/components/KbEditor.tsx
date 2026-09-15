@@ -105,11 +105,11 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
   // switching documents remounts it fresh — previewContent's useState(initialContent) and
   // Monaco's own onMount (which pushes initialContent into the model) already start correct.
 
-  // Add "Bild einfügen" to Monaco's right-click context menu
+  // Add "Insert image" to Monaco's right-click context menu
   const setupImagePaste = useCallback((editor: Monaco.editor.IStandaloneCodeEditor) => {
     editor.addAction({
       id: 'insert-image-from-clipboard',
-      label: 'Bild aus Zwischenablage einfügen',
+      label: 'Paste image from clipboard',
       contextMenuGroupId: '1_modification',
       contextMenuOrder: 1,
       run: async (ed) => {
@@ -135,7 +135,7 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
           }
           alert('Kein Bild in der Zwischenablage gefunden.')
         } catch {
-          alert('Zugriff auf Zwischenablage verweigert. Bitte Berechtigung im Browser erlauben.')
+          alert('Clipboard access denied. Please allow the permission in the browser.')
         }
       },
     })
@@ -191,9 +191,9 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
       {/* Toolbar */}
       {(viewMode === 'edit' || viewMode === 'split') && (
         <div className="flex items-center gap-1 px-2 py-1 bg-gray-900 border-b border-gray-700 flex-shrink-0 flex-wrap print:hidden">
-          <ToolBtn title="H1" icon={Heading1} onClick={() => insert(ed(), '\n# Überschrift\n')} />
-          <ToolBtn title="H2" icon={Heading2} onClick={() => insert(ed(), '\n## Überschrift\n')} />
-          <ToolBtn title="H3" icon={Heading3} onClick={() => insert(ed(), '\n### Überschrift\n')} />
+          <ToolBtn title="H1" icon={Heading1} onClick={() => insert(ed(), '\n# Heading\n')} />
+          <ToolBtn title="H2" icon={Heading2} onClick={() => insert(ed(), '\n## Heading\n')} />
+          <ToolBtn title="H3" icon={Heading3} onClick={() => insert(ed(), '\n### Heading\n')} />
           <div className="w-px h-5 bg-gray-700 mx-1" />
           <ToolBtn title="Fett" icon={Bold} onClick={() => wrap(ed(), '**', '**')} />
           <ToolBtn title="Kursiv" icon={Italic} onClick={() => wrap(ed(), '_', '_')} />
@@ -207,10 +207,10 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
           <ToolBtn title="Link" icon={Link2} onClick={() => wrap(ed(), '[', '](https://)')} />
           <ToolBtn title="Interner Link [[Titel]]" icon={Link2}
             onClick={() => insert(ed(), '[[Dokumenttitel]]')} />
-          <ToolBtn title="Bild einfügen" icon={Image}
+          <ToolBtn title="Insert image" icon={Image}
             onClick={() => insert(ed(), '![Beschreibung](https://)')} />
           <div className="w-px h-5 bg-gray-700 mx-1" />
-          <ToolBtn title="Tabelle einfügen" icon={Table}
+          <ToolBtn title="Insert table" icon={Table}
             onClick={() => insert(ed(), '\n| Spalte 1 | Spalte 2 | Spalte 3 |\n|---|---|---|\n| Wert | Wert | Wert |\n')} />
           <div className="flex-1" />
           <button

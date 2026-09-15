@@ -110,7 +110,7 @@ export function ChartAssistantWindow({
           <button
             onClick={redock}
             onMouseDown={e => e.stopPropagation()}
-            title="Zurück ins Browserfenster andocken"
+            title="Dock back into the browser window"
             className="text-gray-500 hover:text-gray-300"
           >
             <PictureInPicture2 className="w-4 h-4" />
@@ -121,7 +121,7 @@ export function ChartAssistantWindow({
               <button
                 onClick={() => void popOut()}
                 onMouseDown={e => e.stopPropagation()}
-                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+                title="Detach as its own window (can be dragged out of the browser)"
                 className="text-gray-500 hover:text-gray-300"
               >
                 <PictureInPicture2 className="w-4 h-4" />

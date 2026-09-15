@@ -513,7 +513,7 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
             onMouseDown={e => e.stopPropagation()}
             onClick={redock}
             className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
-            title="Zurück ins Browserfenster andocken"
+            title="Dock back into the browser window"
           >
             <PictureInPicture2 className="w-4 h-4" />
           </button>
@@ -524,7 +524,7 @@ function EventDetailWindow({ event, onClose }: DetailWindowProps) {
                 onMouseDown={e => e.stopPropagation()}
                 onClick={() => void popOut()}
                 className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors"
-                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+                title="Detach as its own window (can be dragged out of the browser)"
               >
                 <PictureInPicture2 className="w-4 h-4" />
               </button>
@@ -978,7 +978,7 @@ export function EventStream({
           </label>
           <label
             className="inline-flex items-center gap-2 text-xs text-sky-200"
-            title="Treffer dieses Filters auch dann melden, wenn die Konsole nicht offen ist. Wird beim Speichern als Telegram-Regel angelegt."
+            title="Report matches of this filter even when the console is not open. Saved as a Telegram rule."
           >
             <input
               type="checkbox"

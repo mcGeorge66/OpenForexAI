@@ -47,16 +47,16 @@ function describeSendError(err: unknown): string {
   if (statusMatch) {
     const status = Number(statusMatch[1])
     if (status === 404) {
-      return 'Der Assistant-Endpoint ist auf dem Server nicht erreichbar (404) — vermutlich muss der ' +
-        'Python-Backend-Prozess neu gestartet werden, um diese Route zu laden.'
+      return 'The assistant endpoint is not reachable on the server (404) — the ' +
+        'Python backend process probably needs a restart to load this route.'
     }
     const detail = statusMatch[2].trim()
     return `Der Server hat die Anfrage abgelehnt (HTTP ${status})${detail ? `: ${detail}` : ''}.`
   }
   if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(raw)) {
-    return 'Der Server ist gerade nicht erreichbar (Netzwerkfehler) — bitte prüfen, ob das Backend läuft, und es erneut versuchen.'
+    return 'The server is not reachable right now (network error) — check whether the backend is running and try again.'
   }
-  return `Unerwarteter Fehler beim Senden: ${raw}`
+  return `Unexpected error while sending: ${raw}`
 }
 
 // One line per tool call, e.g. "trade_marker(open) OK" / "assessment_memory FAILED" —

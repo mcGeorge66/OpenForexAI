@@ -568,7 +568,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                   <th className="px-3 py-2 text-left">Pair</th>
                   <th className="px-3 py-2 text-left">From</th>
                   <th className="px-3 py-2 text-left">To</th>
-                  <th className="px-3 py-2 text-right" title="Haltedauer vom Einstieg bis zur Schließung (hh:mm)">Laufzeit</th>
+                  <th className="px-3 py-2 text-right" title="Time held from entry to close (hh:mm)">Laufzeit</th>
                   <th className="px-3 py-2 text-left">Id</th>
                   <th className="px-3 py-2 text-right">Units</th>
                   <th className="px-3 py-2 text-right">Stake</th>
@@ -669,7 +669,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                               onOpenInChartAnalysis(entry.id)
                             }}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-sky-400 hover:text-sky-300 text-xs"
-                            title="In Chart Analyse öffnen"
+                            title="Open in chart analysis"
                           >
                             <LineChart className="w-3.5 h-3.5" />
                             Chart

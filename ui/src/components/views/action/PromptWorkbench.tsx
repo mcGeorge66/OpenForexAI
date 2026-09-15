@@ -1030,13 +1030,13 @@ ${transcript}`
       try {
         decisionScriptConfig = decisionScript.trim() ? JSON.parse(decisionScriptConfigText) : {}
       } catch (err) {
-        pushMessage('assistant', `Script Config ist kein gültiges JSON, wird als {} behandelt: ${String(err)}`)
+        pushMessage('assistant', `Script config is not valid JSON, treated as {}: ${String(err)}`)
       }
       let ecScriptConfig: Record<string, unknown> = {}
       try {
         ecScriptConfig = step1Mode === 'ec' ? JSON.parse(ecScriptConfigText) : {}
       } catch (err) {
-        pushMessage('assistant', `EC Script Config ist kein gültiges JSON, wird als {} behandelt: ${String(err)}`)
+        pushMessage('assistant', `EC Script config is not valid JSON, treated as {}: ${String(err)}`)
       }
       const resp = await api.promptWorkbenchSimulateStep({
         system_prompt: promptText,
@@ -1130,7 +1130,7 @@ ${transcript}`
   const handlePreview = async () => {
     if (total === 0) { setSimPreview({ kind: 'notice', text: 'Keine Kerzen geladen.' }); return }
     if (toolBlocksState.length === 0) {
-      setSimPreview({ kind: 'notice', text: 'Keine tool_blocks konfiguriert — Profil laden oder Tool hinzufügen.' })
+      setSimPreview({ kind: 'notice', text: 'No tool_blocks configured — load a profile or add a tool.' })
       return
     }
     setSimPreviewLoading(true)
@@ -1330,7 +1330,7 @@ ${transcript}`
         <span className="text-xs text-white">Workbench Config:</span>
         <button
           onClick={handleNewWorkbench}
-          title="Alles zurücksetzen — leerer Workbench"
+          title="Reset everything — empty workbench"
           className="px-2 py-0.5 rounded border border-gray-700 bg-gray-900 text-white text-xs hover:text-gray-200"
         >
           New
@@ -1411,12 +1411,12 @@ ${transcript}`
               commitCandleCount()
               ;(e.target as HTMLInputElement).blur()
             }}
-            title="Wert übernehmen mit Enter oder beim Verlassen des Felds"
+            title="Apply the value with Enter or when leaving the field"
             className="w-11 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-xs"
           />
         </div>
 
-        <div className="flex items-center gap-1 text-xs text-white" title="Optional: Kerzen bis zu diesem Zeitpunkt laden statt der aktuellsten. Leer lassen für Live-Daten.">
+        <div className="flex items-center gap-1 text-xs text-white" title="Optional: load candles up to this point in time instead of the most recent ones. Leave empty for live data.">
           <span>Anchor</span>
           <input
             type="datetime-local"
@@ -1427,7 +1427,7 @@ ${transcript}`
           {anchorDate && (
             <button
               onClick={() => setAnchorDate('')}
-              title="Anchor zurücksetzen (Live-Daten)"
+              title="Reset anchor (live data)"
               className="text-gray-500 hover:text-gray-300"
             >
               ×
@@ -1497,7 +1497,7 @@ ${transcript}`
         <button
           onClick={() => chartRef.current?.resetView()}
           disabled={total === 0}
-          title="Zoom/Pan zurücksetzen — alle geladenen Kerzen wieder sichtbar"
+          title="Reset zoom/pan — all loaded candles visible again"
           className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
         >
           <RotateCcw className="w-3 h-3" /> Reset
@@ -1560,7 +1560,7 @@ ${transcript}`
             </div>
             <div
               className="flex items-center gap-0.5 mr-2 rounded border border-gray-700 overflow-hidden"
-              title="Was Step/Run tatsächlich ausführt — unabhängig davon, welcher Tab links gerade angezeigt wird. Agent = LLM (Prompt-Tab), EC = deterministisches Skript (EC-Tab), kein LLM."
+              title="What Step/Run actually executes — independently of which tab is shown on the left. Agent = LLM (prompt tab), EC = deterministic script (EC tab), no LLM."
             >
               {(['agent', 'ec'] as const).map(mode => (
                 <button
@@ -1595,7 +1595,7 @@ ${transcript}`
                   <button
                     onClick={clearChatHistory}
                     disabled={messages.length === 0}
-                    title="Chatverlauf löschen"
+                    title="Clear chat history"
                     className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
                   >
                     <Trash2 className="w-3 h-3" /> Delete
@@ -1634,7 +1634,7 @@ ${transcript}`
                       {toolLines.length > 0 && (
                         <div
                           className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono"
-                          title="Tatsächlich ausgeführte Tool-Aufrufe dieser Antwort — nicht vom Antworttext abgeleitet"
+                          title="The tool calls actually executed for this answer — not derived from the answer text"
                         >
                           Tools: {toolLines.join(', ')}
                         </div>
@@ -1658,7 +1658,7 @@ ${transcript}`
                         <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
                           <summary
                             className="cursor-pointer select-none text-gray-400 hover:text-white"
-                            title="Das exakte 'input'-JSON, das an das BA Decision Script übergeben wurde — backend-erzeugt, nicht editierbar"
+                            title="The exact 'input' JSON handed to the BA decision script — produced by the backend, not editable"
                           >
                             Script Input
                           </summary>
@@ -1792,7 +1792,7 @@ ${transcript}`
                     <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2" open>
                       <summary
                         className="cursor-pointer select-none text-gray-400 hover:text-white"
-                        title="Das exakte 'input'-JSON, das dem EC-Script im letzten Step/Run übergeben wurde — backend-erzeugt, nicht editierbar"
+                        title="The exact 'input' JSON handed to the EC script on the last Step/Run — produced by the backend, not editable"
                       >
                         input
                       </summary>
@@ -1803,7 +1803,7 @@ ${transcript}`
                     <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2">
                       <summary
                         className="cursor-pointer select-none text-gray-400 hover:text-white"
-                        title="Der `snapshot`-Global, den das EC-Script bekommt, wenn im Snapshot-Tab tool_blocks konfiguriert sind — via Step/Run oder Test/Preview im Snapshot-Tab befüllt"
+                        title="The `snapshot` global the EC script receives when tool_blocks are configured in the snapshot tab — filled via Step/Run or Test/Preview in the snapshot tab"
                       >
                         snapshot
                       </summary>
@@ -1970,7 +1970,7 @@ ${transcript}`
                 <details className="space-y-1">
                   <summary
                     className="text-white cursor-pointer select-none"
-                    title="Tool-Zugriff der AA-Agentin während Step/Run, über Agent._run_with_tools — den exakten Aufruf, den echte AA-Agenten nutzen. Leer = keine Tools angeboten."
+                    title="The AA agent's tool access during Step/Run, through Agent._run_with_tools — the exact call real AA agents use. Empty = no tools offered."
                   >
                     AA Tool Access (Step/Run) — leer = keine Tools wie in Produktion
                     {simulationAllowedTools.length > 0 && ` (${simulationAllowedTools.length})`}
@@ -1999,7 +1999,7 @@ ${transcript}`
                 <details className="space-y-1">
                   <summary
                     className="text-white cursor-pointer select-none"
-                    title="Optionales JSON Schema (tool_config.response_schema), das die finale Antwort der AA-Agentin strukturell erzwingt — über den echten Provider-Mechanismus (OpenAI response_format strict / Anthropic forced tool_choice), nicht per Prompt-Bitte. Hier gegen den echten LLM-Endpoint testen, bevor es in eine Agent-Config übernommen wird."
+                    title="Optional JSON Schema (tool_config.response_schema) that structurally forces the AA agent's final answer — through the real provider mechanism (OpenAI response_format strict / Anthropic forced tool_choice), not by asking in the prompt. Test it here against the real LLM endpoint before putting it into an agent config."
                   >
                     Response Schema — optional, erzwingt die JSON-Struktur der Antwort
                     {responseSchemaText.trim() && ' (aktiv)'}
@@ -2027,7 +2027,7 @@ ${transcript}`
                 </details>
 
                 <div className="space-y-1">
-                  <span className="text-white" title="Deterministisches Skript, das die AA-Entscheidung bekommt und die BA-Rolle simuliert: entscheidet ob/wie gehandelt wird, zeichnet das Ergebnis via trade_marker.">
+                  <span className="text-white" title="Deterministic script that receives the AA decision and simulates the BA role: decides whether and how to trade, records the result via trade_marker.">
                     BA Decision Script (async def main(input, config, tools))
                   </span>
                   <ScriptEditor
@@ -2049,7 +2049,7 @@ ${transcript}`
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-white" title="Wird als config['memory_key'] ans Skript übergeben — dein Skript nutzt es selbst mit assessment_memory, um Zustand über Schritte/Sitzungen hinweg zu speichern.">
+                  <span className="text-white" title="Handed to the script as config['memory_key'] — your script uses it with assessment_memory to keep state across steps and sessions.">
                     Memory Key
                   </span>
                   <input
@@ -2086,14 +2086,14 @@ ${transcript}`
 
                 <label
                   className="flex items-center gap-2 cursor-pointer select-none"
-                  title="Wenn aktiv, muss der älteste noch offene Trade zuerst geschlossen werden, bevor ein neuerer geschlossen werden darf — wie bei FIFO-pflichtigen Brokern."
+                  title="When active, the oldest still-open trade has to be closed before a newer one may be closed — as with brokers under a FIFO rule."
                 >
                   <input type="checkbox" checked={fifoEnabled} onChange={e => setFifoEnabled(e.target.checked)} className="accent-emerald-500" />
                   <span className={fifoEnabled ? 'text-emerald-400' : 'text-white'}>FIFO aktivieren</span>
                 </label>
                 <label
                   className="flex items-center gap-2 cursor-pointer select-none"
-                  title="Standardmäßig aus: ein aufgezeichneter Trade gilt als beim Broker ausgeführt und kann nicht gelöscht, nur geschlossen werden."
+                  title="Off by default: a recorded trade counts as executed at the broker and cannot be deleted, only closed."
                 >
                   <input type="checkbox" checked={allowTradeDelete} onChange={e => setAllowTradeDelete(e.target.checked)} className="accent-emerald-500" />
                   <span className={allowTradeDelete ? 'text-emerald-400' : 'text-white'}>delete of trades accepted</span>
@@ -2108,7 +2108,7 @@ ${transcript}`
                   <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2 border-t border-gray-800 pt-2" open>
                     <summary
                       className="cursor-pointer select-none text-gray-400 hover:text-white"
-                      title="Alle in dieser Session gesetzten Trades (offen + geschlossen), mit Pips-Ergebnis für bereits geschlossene — dieselbe Berechnung wie am Trendline-Label im Chart."
+                      title="All trades placed in this session (open and closed), with the pip result for those already closed — the same calculation as on the trendline label in the chart."
                     >
                       Trades — {tradeSummary.closedCount} geschlossen, {tradeSummary.openCount} offen
                       {tradeSummary.closedCount > 0 && (
@@ -2166,7 +2166,7 @@ ${transcript}`
                       <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2">
                         <summary
                           className="cursor-pointer select-none text-gray-400 hover:text-white"
-                          title="Das exakte 'input'-JSON, das an das BA Decision Script übergeben wurde — backend-erzeugt, nicht editierbar"
+                          title="The exact 'input' JSON handed to the BA decision script — produced by the backend, not editable"
                         >
                           Script Input
                         </summary>
@@ -2210,7 +2210,7 @@ ${transcript}`
                     <JsonViewer data={contextPreview} defaultExpandLevel={1} />
                   </div>
                 ) : (
-                  <p className="text-white italic">{contextPreviewLoading ? 'Lädt…' : 'Kein Preview verfügbar.'}</p>
+                  <p className="text-white italic">{contextPreviewLoading ? 'Loading…' : 'No preview available.'}</p>
                 )}
               </>
             )}

@@ -52,7 +52,7 @@ export function EntityAssistantPanel({ chat }: { chat: EntityAssistantChat }) {
 
         <div className="flex items-center gap-3 text-[11px]">
           <label className="flex items-center gap-1.5 cursor-pointer select-none"
-            title="Code-Blöcke und Patches sofort anwenden">
+            title="Apply code blocks and patches immediately">
             <div onClick={() => setAutoWrite(v => !v)}
               className={['relative w-7 h-4 rounded-full transition-colors cursor-pointer', autoWrite ? 'bg-emerald-600' : 'bg-gray-700'].join(' ')}>
               <div className={['absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform', autoWrite ? 'translate-x-3.5' : 'translate-x-0.5'].join(' ')} />
@@ -62,7 +62,7 @@ export function EntityAssistantPanel({ chat }: { chat: EntityAssistantChat }) {
           </label>
 
           <label className="flex items-center gap-1.5 cursor-pointer select-none"
-            title="LLM darf Tests auslösen und selbst debuggen">
+            title="Let the LLM trigger tests and debug on its own">
             <div onClick={() => setCanTest(v => !v)}
               className={['relative w-7 h-4 rounded-full transition-colors cursor-pointer', canTest ? 'bg-amber-600' : 'bg-gray-700'].join(' ')}>
               <div className={['absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform', canTest ? 'translate-x-3.5' : 'translate-x-0.5'].join(' ')} />
@@ -109,7 +109,7 @@ export function EntityAssistantPanel({ chat }: { chat: EntityAssistantChat }) {
         <div className="flex-shrink-0 flex items-end gap-2 px-3 py-2 border-t border-gray-800">
           <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown} rows={2}
-            placeholder="Frage oder Änderungsauftrag… (Enter senden, Shift+Enter Zeilenumbruch)"
+            placeholder="Question or change request… (Enter to send, Shift+Enter for a new line)"
             className="flex-1 resize-none bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
             disabled={loading} />
           <button type="button" onClick={send} disabled={loading || !input.trim()}

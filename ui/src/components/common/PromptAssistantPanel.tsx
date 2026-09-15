@@ -172,7 +172,7 @@ export function PromptAssistantPanel({ chat }: { chat: PromptAssistantChat }) {
               title={
                 lastInput?.available
                   ? `Zuletzt empfangener Input (${lastInput.timestamp}, Trigger: ${lastInput.trigger}) wird automatisch mitgegeben`
-                  : 'Dieser Agent hat seit dem letzten Start noch keinen Zyklus verarbeitet — kein Input verfügbar'
+                  : 'This agent has not processed a cycle since the last start — no input available'
               }
             >
               {lastInput?.available ? '✓ Last input included' : '(no last input yet)'}

@@ -1116,7 +1116,7 @@ ${analysisSection}`
             editing it manually re-fetches around the new point either way. */}
         <div
           className="flex items-center gap-1 text-xs text-white"
-          title="Kerzen bis zu diesem Zeitpunkt laden statt der aktuellsten. Leer lassen für Live-Daten. Im Order-Fokus automatisch auf den Close-Zeitpunkt der Order gesetzt."
+          title="Load candles up to this point in time instead of the most recent ones. Leave empty for live data. In order focus this is set to the order's close time automatically."
         >
           <span>Anchor</span>
           <input
@@ -1128,7 +1128,7 @@ ${analysisSection}`
           {anchorDateTime && (
             <button
               onClick={() => setAnchorDateTime('')}
-              title="Anchor zurücksetzen (Live-Daten)"
+              title="Reset anchor (live data)"
               className="text-gray-500 hover:text-gray-300"
             >
               ×
@@ -1159,8 +1159,8 @@ ${analysisSection}`
             title={`Geladen: ${loadedRangeInfo.first} → ${loadedRangeInfo.last} (${loadedRangeInfo.count} Kerzen)`}
           >
             {loadedRangeInfo.count}× {loadedRangeInfo.first.slice(0, 16).replace('T', ' ')} → {loadedRangeInfo.last.slice(0, 16).replace('T', ' ')}
-            {loadedRangeInfo.outOfRange === 'both' && ' ⚠ Order-Start+Ende außerhalb!'}
-            {loadedRangeInfo.outOfRange === 'start' && ' ⚠ Order-Start außerhalb!'}
+            {loadedRangeInfo.outOfRange === 'both' && ' ⚠ order start and end outside!'}
+            {loadedRangeInfo.outOfRange === 'start' && ' ⚠ order start outside!'}
             {loadedRangeInfo.outOfRange === 'end' && ' ⚠ Order-Ende außerhalb!'}
           </span>
         )}

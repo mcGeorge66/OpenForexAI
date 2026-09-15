@@ -139,9 +139,16 @@ def _is_valid_table_name(name: str) -> bool:
 # that way, e.g. "per Stop bei 156.020 nach etwa zwei M5-Kerzen" (exempted by
 # "Kerzen") and "bei 1,16270, rund 3,4 Pips" (exempted by "Pips").
 #
-# Both decimal separators are matched. The texts are German, and prices get
-# written with a comma just as readily as with a dot — the two comma-written
-# quotes above are the proof.
+# Both decimal separators are matched. Everything written here is English and
+# uses a dot, but the two real leaks quoted above were comma-written, and a
+# comma costs nothing to cover.
+#
+# The exempting words are English only. An earlier version also listed German
+# ones, on the theory that they were a net in case the model slipped back into
+# German — but there is no reason that net should cover German and not Spanish
+# or French. A write in any language other than English is rejected, loudly,
+# which is what should happen: everything the models are addressed in is
+# English, so German output is a fault to see, not to accommodate.
 
 # The lookarounds only rule out matching *part* of a longer number
 # ("1.234.567"); a trailing comma or full stop is punctuation, and excluding
@@ -168,23 +175,21 @@ _MAJOR_PRICE_BAND = ((0.3, 3.0), (4, 5))
 # with an indicator name loosely nearby, and three real price quotes reached
 # the store that way.
 _PRICE_LABEL_BEFORE_RE = re.compile(
-    r"(?:rsi|slope_s|slope|atr|confidence|konfidenz|adx|macd|stoch)"
-    r"(?:[\s:=-]*(?:lag|liegt|liegen|war|ist|betrug|beträgt|bei|von|mit|um|auf"
-    r"|ca\.|circa|etwa|rund"
-    r"|about|around|approx\.?|approximately|roughly|near|at|of|was|were|is|are"
+    r"(?:rsi|slope_s|slope|atr|confidence|adx|macd|stoch)"
+    r"(?:[\s:=-]*(?:about|around|approx\.?|approximately|roughly|near|at|of"
+    r"|was|were|is|are|reached|printed|stood|sat|sits)"
     # A trailing "\b" alone would not match after an abbreviation's full stop
-    # ("approx. 60.87", "ca. 60.87") — a dot followed by a space is no word
-    # boundary, so those two spellings silently failed to be exempt.
-    r"|reached|printed|stood|sat|sits)(?:\b|(?<=\.))){0,4}"
+    # ("approx. 60.87") — a dot followed by a space is no word boundary.
+    r"(?:\b|(?<=\.))){0,4}"
     r"[\s:=-]*$",
     re.IGNORECASE,
 )
 # Unit immediately after the number.
 _PRICE_UNIT_AFTER_RE = re.compile(
-    r"^\s*-?\s*(?:%|prozent|pips?|punkte?|points?|kerzen?|candles?|atr|mal|r\b)",
+    r"^\s*-?\s*(?:%|percent|pips?|points?|candles?|bars?|atr|x|r\b)",
     re.IGNORECASE,
 )
-# Enough for the longest label plus its filler ("confidence lag bei etwa ").
+# Enough for the longest label plus its filler ("confidence of approximately ").
 _PRICE_LABEL_LOOKBACK = 40
 
 
@@ -231,8 +236,8 @@ def _reject_absolute_price_quotes(text: str, pair: str) -> None:
             "value in relative terms — pips/ATR distance, position within a range, or "
             "distance to a level — and never as an absolute price quote, since an "
             "absolute price from a past trade is meaningless once the market has moved "
-            "on. Example: instead of 'Stop bei 158.946', write something like 'Stop etwa "
-            "6 Pips unter dem Einstieg'."
+            "on. Example: instead of 'stop at 158.946', write something like 'stop "
+            "about 6 pips below the entry'."
         )
 
 

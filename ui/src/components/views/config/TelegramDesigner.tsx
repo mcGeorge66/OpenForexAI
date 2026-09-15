@@ -13,14 +13,14 @@ import { useProjectRoot, joinPath } from '@/api/useProjectRoot'
 // field. The editor keeps that shape rather than inventing a friendlier one, so
 // what is shown here is what the engine evaluates.
 const OPERATORS = [
-  { value: 'eq',       label: 'ist gleich',      hint: 'Literalvergleich (Text, Zahl, true/false)' },
-  { value: 'ne',       label: 'ist ungleich',    hint: 'Alles außer diesem Wert' },
-  { value: 'regex',    label: 'passt auf Regex', hint: 'Python-Regex, Teiltreffer genügt' },
-  { value: 'contains', label: 'enthält',         hint: 'Einfacher Teilstring' },
-  { value: 'gte',      label: '>=',              hint: 'Numerisch' },
-  { value: 'gt',       label: '>',               hint: 'Numerisch' },
-  { value: 'lte',      label: '<=',              hint: 'Numerisch' },
-  { value: 'lt',       label: '<',               hint: 'Numerisch' },
+  { value: 'eq',       label: 'equals',          hint: 'Literal comparison (text, number, true/false)' },
+  { value: 'ne',       label: 'not equal',       hint: 'Anything but this value' },
+  { value: 'regex',    label: 'matches regex',   hint: 'Python regex, a partial match is enough' },
+  { value: 'contains', label: 'contains',        hint: 'Plain substring' },
+  { value: 'gte',      label: '>=',              hint: 'Numeric' },
+  { value: 'gt',       label: '>',               hint: 'Numeric' },
+  { value: 'lte',      label: '<=',              hint: 'Numeric' },
+  { value: 'lt',       label: '<',               hint: 'Numeric' },
 ] as const
 
 type OperatorId = typeof OPERATORS[number]['value']
@@ -156,7 +156,7 @@ export function TelegramDesigner() {
       try {
         payload = samplePayload.trim() ? JSON.parse(samplePayload) as Record<string, unknown> : {}
       } catch (err) {
-        setPreviewError(`Beispiel-Payload ist kein gültiges JSON: ${String(err)}`)
+        setPreviewError(`The example payload is not valid JSON: ${String(err)}`)
         setPreview(null)
         return
       }
@@ -173,18 +173,18 @@ export function TelegramDesigner() {
 
   const issues = useMemo(() => {
     const out: string[] = []
-    if (!draft.event.trim()) out.push('Event-Typ fehlt — er entscheidet, worauf die Regel überhaupt reagiert.')
-    if (!draft.title.trim() && !draft.template.trim()) out.push('Titel und Text sind beide leer — die Nachricht würde verworfen.')
+    if (!draft.event.trim()) out.push('The event type is missing — it decides what the rule reacts to at all.')
+    if (!draft.title.trim() && !draft.template.trim()) out.push('Title and text are both empty — the message would be discarded.')
     if (selected === null && draft.event && rules[draft.event]) {
-      out.push(`Hinweis: für "${draft.event}" existiert bereits eine Regel — Speichern überschreibt sie.`)
+      out.push(`Note: a rule for "${draft.event}" already exists — saving overwrites it.`)
     }
     draft.filters.forEach(f => {
       if (!f.field.trim()) return
       if (['gt', 'gte', 'lt', 'lte'].includes(f.op) && Number.isNaN(Number(f.value.trim()))) {
-        out.push(`Filter "${f.field}": ${f.op} braucht eine Zahl, "${f.value}" ist keine.`)
+        out.push(`Filter "${f.field}": ${f.op} needs a number, "${f.value}" is not one.`)
       }
       if (f.op === 'regex') {
-        try { new RegExp(f.value) } catch { out.push(`Filter "${f.field}": "${f.value}" ist kein gültiger Regex.`) }
+        try { new RegExp(f.value) } catch { out.push(`Filter "${f.field}": "${f.value}" is not a valid regex.`) }
       }
     })
     return out
@@ -205,7 +205,7 @@ export function TelegramDesigner() {
         `${okMsg} — ${res.derived_routing_rules} Routing-Regeln abgeglichen` +
         (res.applied_without_restart
           ? ', sofort aktiv ohne Neustart.'
-          : '. Dienst nicht erreichbar, wird erst nach einem Neustart aktiv.'),
+          : '. Service not reachable, becomes active only after a restart.'),
       )
     } catch (err) { setError(String(err)) }
     finally { setSaving(false) }
@@ -223,7 +223,7 @@ export function TelegramDesigner() {
     if (!selected) return
     const next = { ...rules }
     delete next[selected]
-    await persist(next, null, `Regel "${selected}" gelöscht`)
+    await persist(next, null, `Rule "${selected}" deleted`)
   }
 
   const handleSettingsSave = () => persist(rules, selected, 'Einstellungen gespeichert')
@@ -237,7 +237,7 @@ export function TelegramDesigner() {
       const events = await api.getEvents({ event_type: eventType, limit: 1 })
       const payload = events?.[0]?.payload
       if (!payload || typeof payload !== 'object') {
-        if (!quiet) setError(`Kein gespeichertes "${eventType}"-Event gefunden — Beispiel bitte von Hand eintragen.`)
+        if (!quiet) setError(`No stored "${eventType}" event found — please enter an example by hand.`)
         return false
       }
       setSamplePayload(JSON.stringify(payload, null, 2))
@@ -263,7 +263,7 @@ export function TelegramDesigner() {
       const res = await api.sendNotificationTest({
         severity: 'info',
         title: 'OpenForexAI Testnachricht',
-        text: 'Wenn du das liest, funktioniert der Kanal.',
+        text: 'If you can read this, the channel works.',
       })
       setMessage(res.sent ? 'Testnachricht verschickt.' : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
     } catch (err) { setError(String(err)) }
@@ -272,9 +272,9 @@ export function TelegramDesigner() {
   /** Sends exactly what the preview shows, so the phone gets the real thing. */
   const sendRuleTest = async () => {
     setError(null); setMessage(null)
-    if (!preview) { setError('Keine Vorschau — Event-Typ wählen und Beispiel-Payload prüfen.'); return }
+    if (!preview) { setError('No preview — pick an event type and check the example payload.'); return }
     if (!preview.title && !preview.text) {
-      setError('Titel und Text sind leer — es gäbe nichts zu senden.')
+      setError('Title and text are empty — there would be nothing to send.')
       return
     }
     try {
@@ -284,7 +284,7 @@ export function TelegramDesigner() {
         text: preview.text,
       })
       setMessage(res.sent
-        ? `Gesendet an Chat ${preview.chat_id ?? '—'}. Prüfe Telegram.`
+        ? `Sent to chat ${preview.chat_id ?? '—'}. Check Telegram.`
         : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
     } catch (err) { setError(String(err)) }
   }
@@ -327,7 +327,7 @@ export function TelegramDesigner() {
               <span className="mt-0.5">{active ? '●' : '▲'}</span>
               <span>
                 {active ? (
-                  <>Dienst <strong>sendet</strong>{block.dry_run ? ' — aber Dry-Run ist an, es wird nur geloggt' : ''}.</>
+                  <>Dienst <strong>sendet</strong>{block.dry_run ? ' — but dry run is on, it is only logged' : ''}.</>
                 ) : (
                   <>Dienst sendet <strong>nicht</strong>. {inactiveReason}</>
                 )}
@@ -340,7 +340,7 @@ export function TelegramDesigner() {
                 <h3 className="text-sm text-gray-200 font-medium">Kanal</h3>
                 <div className="flex items-center gap-2">
                   <button onClick={() => void sendChannelTest()}
-                    title="Sendet eine allgemeine Nachricht, um den Kanal zu prüfen"
+                    title="Sends a generic message to check the channel"
                     className="text-xs px-3 py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white flex items-center gap-1">
                     <Send className="w-3.5 h-3.5" /> Kanal testen
                   </button>
@@ -376,7 +376,7 @@ export function TelegramDesigner() {
                 <label className="text-xs text-gray-300">
                   Bot-Token
                   <input className={`${inputCls} text-gray-500`} value={block.telegram?.bot_token ?? ''} readOnly
-                    title="Wird nie an den Browser ausgeliefert — Änderung nur über die Umgebungsvariable" />
+                    title="Never delivered to the browser — change it only through the environment variable" />
                   <span className="mt-1 flex items-center gap-1 text-[10px] text-gray-500">
                     <Lock className="w-2.5 h-2.5" /> nur per Umgebungsvariable
                   </span>
@@ -422,7 +422,7 @@ export function TelegramDesigner() {
                         )}
                         {rules[name].origin === 'monitor_filter' && (
                           <span
-                            title={`Aus dem Monitor-Filter "${rules[name].source_filter ?? ''}" erzeugt`}
+                            title={`Generated from the monitor filter "${rules[name].source_filter ?? ''}"`}
                             className="ml-1 rounded px-1.5 py-0.5 text-[10px] bg-sky-900/60 text-sky-200 border border-sky-600/40"
                           >
                             Monitor
@@ -449,7 +449,7 @@ export function TelegramDesigner() {
                   </h3>
                   <div className="flex items-center gap-2">
                     <button onClick={() => void sendRuleTest()} disabled={!preview?.title && !preview?.text}
-                      title="Schickt genau die Nachricht aus der Vorschau an Telegram"
+                      title="Sends exactly the message from the preview to Telegram"
                       className="text-xs px-3 py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white disabled:opacity-40 flex items-center gap-1">
                       <Send className="w-3.5 h-3.5" /> An Telegram senden
                     </button>
@@ -573,7 +573,7 @@ export function TelegramDesigner() {
                     <div className="flex items-center justify-between">
                       <span>Beispiel-Payload (JSON)</span>
                       <button onClick={() => void loadRealSample(draft.event)} disabled={!draft.event}
-                        title="Holt das letzte tatsächlich aufgetretene Event dieses Typs aus dem Event-Log"
+                        title="Fetches the most recent real event of this type from the event log"
                         className="text-[10px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-40">
                         Echtes Event laden
                       </button>
@@ -590,15 +590,15 @@ export function TelegramDesigner() {
                       <div className="space-y-1">
                         <p className={preview.matches ? 'text-emerald-400' : 'text-gray-500'}>
                           {preview.matches
-                            ? '✓ Filter treffen zu — Nachricht würde gesendet'
-                            : '✗ Filter treffen nicht zu — keine Nachricht'}
+                            ? '✓ Filters match — the message would be sent'
+                            : '✗ Filters do not match — no message'}
                         </p>
                         <div className="rounded bg-gray-900 border border-gray-700 p-2 whitespace-pre-wrap text-gray-200">
                           <span className="font-semibold">{preview.title || '(kein Titel)'}</span>
                           {preview.text ? `\n${preview.text}` : ''}
                         </div>
                         <p className="text-gray-500">
-                          Chat: <span className="font-mono text-gray-400">{preview.chat_id ?? '— keine Chat-ID für diesen Schweregrad'}</span>
+                          Chat: <span className="font-mono text-gray-400">{preview.chat_id ?? '— no chat ID for this severity'}</span>
                         </p>
                         <p className="text-gray-500">
                           Dedup-Schlüssel: <span className="font-mono text-gray-400">{preview.dedup_key}</span>

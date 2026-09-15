@@ -32,7 +32,7 @@ export function SearchPanel({ query, results, onQuery, onNavigate, onClose }: Pr
             ref={inputRef}
             value={query}
             onChange={e => onQuery(e.target.value)}
-            placeholder="Dokumentübergreifend suchen…"
+            placeholder="Search across documents…"
             className="flex-1 bg-transparent text-sm text-gray-200 outline-none placeholder-gray-600"
           />
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">

@@ -51,7 +51,7 @@ export function TopMenu({ active, onSelect, onHandbook }: TopMenuProps) {
         <button
           onClick={() => onHandbook('de')}
           className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
-          title="Handbuch öffnen (Deutsch)"
+          title="Open the handbook (German)"
         >
           Handbuch
         </button>

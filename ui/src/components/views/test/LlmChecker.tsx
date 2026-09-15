@@ -129,7 +129,7 @@ function PromptEditorWindow({ value, onChange, onTakeOver, onClose }: PromptEdit
             onMouseDown={e => e.stopPropagation()}
             onClick={redock}
             className="text-gray-500 hover:text-white transition-colors"
-            title="Zurück ins Browserfenster andocken"
+            title="Dock back into the browser window"
           >
             <PictureInPicture2 className="w-4 h-4" />
           </button>
@@ -140,7 +140,7 @@ function PromptEditorWindow({ value, onChange, onTakeOver, onClose }: PromptEdit
                 onMouseDown={e => e.stopPropagation()}
                 onClick={() => void popOut()}
                 className="text-gray-500 hover:text-white transition-colors"
-                title="Als eigenes Fenster lösen (aus dem Browser herausziehbar)"
+                title="Detach as its own window (can be dragged out of the browser)"
               >
                 <PictureInPicture2 className="w-4 h-4" />
               </button>

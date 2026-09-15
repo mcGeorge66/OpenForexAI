@@ -147,7 +147,7 @@ export function ChartAssistantPanel({ overlay, context, initialMessages, onMessa
         <button
           onClick={clearMessages}
           disabled={messages.length === 0}
-          title="Chatverlauf löschen"
+          title="Clear chat history"
           className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs disabled:opacity-40"
         >
           <Trash2 className="w-3 h-3" /> Delete
@@ -161,8 +161,8 @@ export function ChartAssistantPanel({ overlay, context, initialMessages, onMessa
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2 min-h-0">
         {messages.length === 0 && (
           <p className="text-xs text-white italic">
-            Frag nach dem sichtbaren Chart (Preisverlauf, Indikatoren, Support/Resistance){context.extraSystemPrompt ? ' oder der fokussierten Order (Einstieg, SL/TP, Original-Analyse)' : ''}.
-            Der Assistent kann bei Bedarf selbst Marker/Zonen im Chart setzen{context.extraAllowedTools?.length ? ' und zusätzliche Order-Detaildaten nachschlagen (Trace, Kerzen, Agent-Entscheidungen)' : ''}.
+            Frag nach dem sichtbaren Chart (Preisverlauf, Indikatoren, Support/Resistance){context.extraSystemPrompt ? ' or of the focused order (entry, SL/TP, original analysis)' : ''}.
+            Der Assistent kann bei Bedarf selbst Marker/Zonen im Chart setzen{context.extraAllowedTools?.length ? ' and look up additional order detail (trace, candles, agent decisions)' : ''}.
           </p>
         )}
         {messages.map(msg => {

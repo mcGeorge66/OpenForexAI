@@ -148,7 +148,7 @@ export function JsonViewer({ data, defaultExpandLevel = 1, emptyText = '(leer)',
               type="button"
               onClick={() => setQuery('')}
               className="text-gray-500 hover:text-gray-300 flex-shrink-0"
-              title="Suche löschen"
+              title="Clear search"
             >
               <X className="w-3 h-3" />
             </button>

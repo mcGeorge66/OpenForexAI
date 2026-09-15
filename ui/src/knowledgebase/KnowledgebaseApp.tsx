@@ -120,7 +120,7 @@ export function KnowledgebaseApp() {
   }
 
   const deleteDoc = async (id: string) => {
-    if (!confirm('Dokument wirklich löschen?')) return
+    if (!confirm('Really delete this document?')) return
     if (activeId === id) {
       setActiveId(null)
       setActiveDoc(null)
@@ -163,8 +163,8 @@ export function KnowledgebaseApp() {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
     const confirmText = ids.length === 1
-      ? 'Dokument wirklich löschen?'
-      : `${ids.length} Dokumente wirklich löschen?`
+      ? 'Really delete this document?'
+      : `Really delete ${ids.length} documents?`
     if (!confirm(confirmText)) return
     if (activeId && ids.includes(activeId)) {
       setActiveId(null)
@@ -272,7 +272,7 @@ export function KnowledgebaseApp() {
       {selectMode && (
         <div className="flex items-center gap-3 px-4 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0 text-xs print:hidden">
           <span className="text-gray-400">
-            {selectedIds.size === 0 ? 'Elemente auswählen…' : `${selectedIds.size} ausgewählt`}
+            {selectedIds.size === 0 ? 'Select items…' : `${selectedIds.size} selected`}
           </span>
           <div className="flex-1" />
           <button
@@ -364,7 +364,7 @@ export function KnowledgebaseApp() {
             <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">
               {docs.length === 0
                 ? 'Kein Dokument vorhanden — erstelle eines mit "+ Dokument"'
-                : 'Dokument auswählen'}
+                : 'Select document'}
             </div>
           )}
         </div>
