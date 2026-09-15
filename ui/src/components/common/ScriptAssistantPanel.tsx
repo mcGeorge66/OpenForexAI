@@ -158,7 +158,7 @@ export function ScriptAssistantPanel({
           {history.length === 0 && !loading && (
             <p className="text-xs text-white italic mt-4 text-center">
               Fragen zum Script, Änderungen, Patches — alles möglich.<br />
-              <span className="text-gray-700">Auto-Write: Änderungen sofort in den Editor übernehmen</span>
+              <span className="text-gray-700">Auto-write: apply changes to the editor immediately</span>
             </p>
           )}
           {history.map((msg, i) => (

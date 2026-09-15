@@ -133,7 +133,7 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
             reader.readAsDataURL(blob)
             return
           }
-          alert('Kein Bild in der Zwischenablage gefunden.')
+          alert('No image found in the clipboard.')
         } catch {
           alert('Clipboard access denied. Please allow the permission in the browser.')
         }
@@ -184,7 +184,7 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
           value={title}
           onChange={e => onTitleChange(e.target.value)}
           className="w-full bg-transparent text-xl font-bold text-white outline-none placeholder-gray-600 print:text-3xl"
-          placeholder="Titel…"
+          placeholder="Title…"
         />
       </div>
 
@@ -199,19 +199,19 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
           <ToolBtn title="Kursiv" icon={Italic} onClick={() => wrap(ed(), '_', '_')} />
           <ToolBtn title="Code" icon={Code} onClick={() => wrap(ed(), '`', '`')} />
           <div className="w-px h-5 bg-gray-700 mx-1" />
-          <ToolBtn title="Ungeordnete Liste" icon={List} onClick={() => insert(ed(), '\n- Element\n')} />
-          <ToolBtn title="Geordnete Liste" icon={ListOrdered} onClick={() => insert(ed(), '\n1. Element\n')} />
-          <ToolBtn title="Zitat" icon={Quote} onClick={() => insert(ed(), '\n> Zitat\n')} />
-          <ToolBtn title="Trennlinie" icon={Minus} onClick={() => insert(ed(), '\n---\n')} />
+          <ToolBtn title="Bullet list" icon={List} onClick={() => insert(ed(), '\n- Element\n')} />
+          <ToolBtn title="Numbered list" icon={ListOrdered} onClick={() => insert(ed(), '\n1. Element\n')} />
+          <ToolBtn title="Quote" icon={Quote} onClick={() => insert(ed(), '\n> Quote\n')} />
+          <ToolBtn title="Divider" icon={Minus} onClick={() => insert(ed(), '\n---\n')} />
           <div className="w-px h-5 bg-gray-700 mx-1" />
           <ToolBtn title="Link" icon={Link2} onClick={() => wrap(ed(), '[', '](https://)')} />
-          <ToolBtn title="Interner Link [[Titel]]" icon={Link2}
-            onClick={() => insert(ed(), '[[Dokumenttitel]]')} />
+          <ToolBtn title="Internal link [[Title]]" icon={Link2}
+            onClick={() => insert(ed(), '[[Document title]]')} />
           <ToolBtn title="Insert image" icon={Image}
             onClick={() => insert(ed(), '![Beschreibung](https://)')} />
           <div className="w-px h-5 bg-gray-700 mx-1" />
           <ToolBtn title="Insert table" icon={Table}
-            onClick={() => insert(ed(), '\n| Spalte 1 | Spalte 2 | Spalte 3 |\n|---|---|---|\n| Wert | Wert | Wert |\n')} />
+            onClick={() => insert(ed(), '\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Value | Value | Value |\n')} />
           <div className="flex-1" />
           <button
             onClick={onSave}
@@ -223,22 +223,22 @@ export function KbEditor({ title, initialContent, onTitleChange, onSave, saving,
                 : 'text-white hover:text-gray-200 hover:bg-gray-700 border border-gray-600',
               saving ? 'opacity-50 cursor-not-allowed' : '',
             ].join(' ')}
-            title="Speichern (Ctrl+S)"
+            title="Save (Ctrl+S)"
           >
             <Save className="w-3.5 h-3.5" />
-            {saving ? 'Speichern…' : saved ? '✓ Gespeichert' : 'Speichern'}
+            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
           </button>
-          <ModeBtn active={isEditMode} label="Bearbeiten" icon={Edit3} onClick={() => setViewMode('edit')} />
-          <ModeBtn active={isSplitMode} label="Geteilt" icon={Columns} onClick={() => setViewMode('split')} />
-          <ModeBtn active={isPreviewMode} label="Vorschau" icon={Eye} onClick={() => setViewMode('preview')} />
+          <ModeBtn active={isEditMode} label="Edit" icon={Edit3} onClick={() => setViewMode('edit')} />
+          <ModeBtn active={isSplitMode} label="Split" icon={Columns} onClick={() => setViewMode('split')} />
+          <ModeBtn active={isPreviewMode} label="Preview" icon={Eye} onClick={() => setViewMode('preview')} />
         </div>
       )}
 
       {viewMode === 'preview' && (
         <div className="flex items-center justify-end gap-1 px-3 py-1 bg-gray-900 border-b border-gray-700 flex-shrink-0 print:hidden">
-          <ModeBtn active={isEditMode} label="Bearbeiten" icon={Edit3} onClick={() => setViewMode('edit')} />
-          <ModeBtn active={isSplitMode} label="Geteilt" icon={Columns} onClick={() => setViewMode('split')} />
-          <ModeBtn active={isPreviewMode} label="Vorschau" icon={Eye} onClick={() => setViewMode('preview')} />
+          <ModeBtn active={isEditMode} label="Edit" icon={Edit3} onClick={() => setViewMode('edit')} />
+          <ModeBtn active={isSplitMode} label="Split" icon={Columns} onClick={() => setViewMode('split')} />
+          <ModeBtn active={isPreviewMode} label="Preview" icon={Eye} onClick={() => setViewMode('preview')} />
         </div>
       )}
 

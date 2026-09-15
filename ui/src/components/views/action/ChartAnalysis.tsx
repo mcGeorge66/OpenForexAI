@@ -1019,7 +1019,7 @@ ${analysisSection}`
 
     try {
       await kbImport('ChartAnalysis', md)
-      setKbMsg('✓ In Knowledgebase gespeichert')
+      setKbMsg('✓ Saved to the knowledgebase')
       setTimeout(() => setKbMsg(null), 2000)
     } catch (e) {
       setError(`KB Import failed: ${String(e)}`)
@@ -1156,7 +1156,7 @@ ${analysisSection}`
                 ? 'text-amber-300 border-amber-700 bg-amber-900/20'
                 : 'text-gray-500 border-gray-700 bg-gray-900/40'
             }`}
-            title={`Geladen: ${loadedRangeInfo.first} → ${loadedRangeInfo.last} (${loadedRangeInfo.count} Kerzen)`}
+            title={`Geladen: ${loadedRangeInfo.first} → ${loadedRangeInfo.last} (${loadedRangeInfo.count} carzen)`}
           >
             {loadedRangeInfo.count}× {loadedRangeInfo.first.slice(0, 16).replace('T', ' ')} → {loadedRangeInfo.last.slice(0, 16).replace('T', ' ')}
             {loadedRangeInfo.outOfRange === 'both' && ' ⚠ order start and end outside!'}
@@ -1186,7 +1186,7 @@ ${analysisSection}`
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => chartRef.current?.fitAllCandles()}
-            title="Alle geladenen Kerzen in den sichtbaren Bereich einpassen"
+            title="Fit all loaded candles into the visible area"
             className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-white hover:text-white text-xs flex items-center gap-1"
           >
             <Maximize2 className="w-3 h-3" /> Fit
@@ -1230,7 +1230,7 @@ ${analysisSection}`
             : <button
                 onClick={() => void handleKbImport()}
                 className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs flex items-center gap-1"
-                title="In Knowledgebase [Import] speichern"
+                title="Save to knowledgebase [Import]"
               >
                 <BookOpen className="w-3 h-3" /> → KB
               </button>
@@ -1763,7 +1763,7 @@ function DrawingToolsPanel({
                               type="text"
                               value={d.label ?? ''}
                               onChange={e => onUpdateLabel(d.id, e.target.value)}
-                              placeholder="Label text… (| = neue Zeile)"
+                              placeholder="Label text… (| = new line)"
                               className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1 text-gray-200"
                               style={{ fontSize: '11px' }}
                             />

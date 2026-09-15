@@ -190,7 +190,7 @@ export function TelegramDesigner() {
     return out
   }, [draft, rules, selected])
 
-  const blocking = issues.filter(i => !i.startsWith('Hinweis:'))
+  const blocking = issues.filter(i => !i.startsWith('Note:'))
 
   const persist = async (nextRules: Record<string, NotificationRule>, keep: string | null, okMsg: string) => {
     setSaving(true); setError(null); setMessage(null)
@@ -202,9 +202,9 @@ export function TelegramDesigner() {
       if (keep && savedRules[keep]) { setSelected(keep); setDraft(ruleToDraft(keep, savedRules[keep])) }
       else { setSelected(null); setDraft(EMPTY_DRAFT) }
       setMessage(
-        `${okMsg} — ${res.derived_routing_rules} Routing-Regeln abgeglichen` +
+        `${okMsg} — ${res.derived_routing_rules} routing rule(s) reconciled` +
         (res.applied_without_restart
-          ? ', sofort aktiv ohne Neustart.'
+          ? ', active immediately without a restart.'
           : '. Service not reachable, becomes active only after a restart.'),
       )
     } catch (err) { setError(String(err)) }
@@ -212,11 +212,11 @@ export function TelegramDesigner() {
   }
 
   const handleSave = async () => {
-    if (blocking.length > 0) { setError('Bitte zuerst die Hinweise beheben.'); return }
+    if (blocking.length > 0) { setError('Please resolve the notes first.'); return }
     const next = { ...rules }
     if (selected && selected !== draft.event) delete next[selected]
     next[draft.event] = draftToRule(draft)
-    await persist(next, draft.event, `Regel "${draft.event}" gespeichert`)
+    await persist(next, draft.event, `Rule "${draft.event}" saved`)
   }
 
   const handleDelete = async () => {
@@ -226,7 +226,7 @@ export function TelegramDesigner() {
     await persist(next, null, `Rule "${selected}" deleted`)
   }
 
-  const handleSettingsSave = () => persist(rules, selected, 'Einstellungen gespeichert')
+  const handleSettingsSave = () => persist(rules, selected, 'Settings saved')
 
   /** Pull the newest real event of this type as the sample payload.
    *  A preview against a made-up payload proves nothing; against the last
@@ -262,10 +262,10 @@ export function TelegramDesigner() {
     try {
       const res = await api.sendNotificationTest({
         severity: 'info',
-        title: 'OpenForexAI Testnachricht',
+        title: 'OpenForexAI test message',
         text: 'If you can read this, the channel works.',
       })
-      setMessage(res.sent ? 'Testnachricht verschickt.' : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
+      setMessage(res.sent ? 'Test message sent.' : `Not sent: ${res.reason ?? 'unknown'}`)
     } catch (err) { setError(String(err)) }
   }
 
@@ -285,7 +285,7 @@ export function TelegramDesigner() {
       })
       setMessage(res.sent
         ? `Sent to chat ${preview.chat_id ?? '—'}. Check Telegram.`
-        : `Nicht verschickt: ${res.reason ?? 'unbekannt'}`)
+        : `Not sent: ${res.reason ?? 'unknown'}`)
     } catch (err) { setError(String(err)) }
   }
 
@@ -327,9 +327,9 @@ export function TelegramDesigner() {
               <span className="mt-0.5">{active ? '●' : '▲'}</span>
               <span>
                 {active ? (
-                  <>Dienst <strong>sendet</strong>{block.dry_run ? ' — but dry run is on, it is only logged' : ''}.</>
+                  <>Service <strong>is sending</strong>{block.dry_run ? ' — but dry run is on, it is only logged' : ''}.</>
                 ) : (
-                  <>Dienst sendet <strong>nicht</strong>. {inactiveReason}</>
+                  <>Service is <strong>not</strong> sending. {inactiveReason}</>
                 )}
               </span>
             </div>
@@ -398,7 +398,7 @@ export function TelegramDesigner() {
               {/* ── Rule list ── */}
               <section className="border border-gray-700 rounded bg-gray-900/40 overflow-hidden self-start">
                 <div className="flex items-center justify-between px-3 py-2 bg-gray-900 border-b border-gray-800">
-                  <h3 className="text-sm text-gray-200 font-medium">Regeln</h3>
+                  <h3 className="text-sm text-gray-200 font-medium">Rules</h3>
                   <button onClick={() => { setSelected(null); setDraft(EMPTY_DRAFT); setError(null); setMessage(null) }}
                     className="text-xs px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-1">
                     <Plus className="w-3 h-3" /> Neu
@@ -432,7 +432,7 @@ export function TelegramDesigner() {
                     </li>
                   ))}
                   {ruleNames.length === 0 && (
-                    <li className="px-3 py-3 text-xs text-gray-600">Noch keine Regel.</li>
+                    <li className="px-3 py-3 text-xs text-gray-600">No rules yet.</li>
                   )}
                 </ul>
                 <p className="px-3 py-2 text-[10px] text-gray-500 border-t border-gray-800 leading-4">
@@ -445,7 +445,7 @@ export function TelegramDesigner() {
               <section className="border border-gray-700 rounded p-3 bg-gray-900/40 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm text-gray-200 font-medium">
-                    {selected ? `Regel: ${selected}` : 'Neue Regel'}
+                    {selected ? `Rule: ${selected}` : 'New rule'}
                   </h3>
                   <div className="flex items-center gap-2">
                     <button onClick={() => void sendRuleTest()} disabled={!preview?.title && !preview?.text}
@@ -535,12 +535,12 @@ export function TelegramDesigner() {
                     </button>
                   </div>
                   {draft.filters.length === 0 && (
-                    <p className="text-[11px] text-gray-500">Ohne Filter meldet jedes Vorkommen dieses Events.</p>
+                    <p className="text-[11px] text-gray-500">Without a filter every occurrence of this event is reported.</p>
                   )}
                   {draft.filters.map(f => (
                     <div key={f.id} className="grid grid-cols-[1fr_150px_1fr_28px] gap-2 items-center">
                       <input className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono"
-                        placeholder="Feld, z.B. success oder order.pair"
+                        placeholder="Field, e.g. success or order.pair"
                         value={f.field} onChange={e => setFilter(f.id, { field: e.target.value })} />
                       <select className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
                         value={f.op} onChange={e => setFilter(f.id, { op: e.target.value as OperatorId })}
@@ -548,7 +548,7 @@ export function TelegramDesigner() {
                         {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                       <input className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono"
-                        placeholder="Wert" value={f.value} onChange={e => setFilter(f.id, { value: e.target.value })} />
+                        placeholder="Value" value={f.value} onChange={e => setFilter(f.id, { value: e.target.value })} />
                       <button onClick={() => setDraft(p => ({ ...p, filters: p.filters.filter(x => x.id !== f.id) }))}
                         className="text-gray-500 hover:text-red-400" title="Bedingung entfernen">
                         <Trash2 className="w-3.5 h-3.5" />
@@ -571,7 +571,7 @@ export function TelegramDesigner() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <div className="block text-xs text-gray-300">
                     <div className="flex items-center justify-between">
-                      <span>Beispiel-Payload (JSON)</span>
+                      <span>Example payload (JSON)</span>
                       <button onClick={() => void loadRealSample(draft.event)} disabled={!draft.event}
                         title="Fetches the most recent real event of this type from the event log"
                         className="text-[10px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-40">
@@ -594,7 +594,7 @@ export function TelegramDesigner() {
                             : '✗ Filters do not match — no message'}
                         </p>
                         <div className="rounded bg-gray-900 border border-gray-700 p-2 whitespace-pre-wrap text-gray-200">
-                          <span className="font-semibold">{preview.title || '(kein Titel)'}</span>
+                          <span className="font-semibold">{preview.title || '(no title)'}</span>
                           {preview.text ? `\n${preview.text}` : ''}
                         </div>
                         <p className="text-gray-500">
@@ -605,7 +605,7 @@ export function TelegramDesigner() {
                         </p>
                       </div>
                     )}
-                    {!previewError && !preview && <p className="text-gray-600">Event-Typ wählen für die Vorschau.</p>}
+                    {!previewError && !preview && <p className="text-gray-600">Pick an event type for the preview.</p>}
                   </div>
                 </div>
 

@@ -193,9 +193,9 @@ export function useEntityAssistantChat({
         let runResult: ECExecuteResponse | null = null
         try { runResult = await onRunTestRef.current() } catch { /* non-fatal */ }
         const resultSummary = runResult
-          ? `Test-Ergebnis:\n\`\`\`json\n${JSON.stringify(runResult, null, 2)}\n\`\`\``
+          ? `Test result:\n\`\`\`json\n${JSON.stringify(runResult, null, 2)}\n\`\`\``
           : 'The test could not be run.'
-        const followUp = `[Automatisches Test-Feedback, Iteration ${iteration + 1}]\n${resultSummary}`
+        const followUp = `[Automatic test feedback, iteration ${iteration + 1}]\n${resultSummary}`
         appendMessage({ role: 'user', content: followUp })
         if (runResult && !runResult.success) { await runAgentLoop(followUp, iteration + 1); return }
         setLoading(false)

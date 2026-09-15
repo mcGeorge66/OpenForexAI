@@ -51,7 +51,7 @@ function describeSendError(err: unknown): string {
         'Python backend process probably needs a restart to load this route.'
     }
     const detail = statusMatch[2].trim()
-    return `Der Server hat die Anfrage abgelehnt (HTTP ${status})${detail ? `: ${detail}` : ''}.`
+    return `The server rejected the request (HTTP ${status})${detail ? `: ${detail}` : ''}.`
   }
   if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(raw)) {
     return 'The server is not reachable right now (network error) — check whether the backend is running and try again.'
@@ -249,7 +249,7 @@ export function useChartAssistantChat(overlay: AnnotationOverlay, options: UseCh
         swing_levels: ctx.swingLevels ?? [],
         drawings: ctx.drawings ?? [],
       })
-      pushMessage('assistant', resp.error ? `Fehler: ${resp.error}` : (resp.answer || '(leere Antwort)'), resp.tool_events, !!resp.error)
+      pushMessage('assistant', resp.error ? `Error: ${resp.error}` : (resp.answer || '(leere Antwort)'), resp.tool_events, !!resp.error)
       overlay.applyAnnotationUpdates(resp)
     } catch (err) {
       pushMessage('assistant', describeSendError(err), undefined, true)

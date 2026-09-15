@@ -405,7 +405,7 @@ export function EventRoutingEditor() {
                       <td className="px-2 py-1.5 text-gray-500">{idx + 1}</td>
                       <td className="px-2 py-1.5">
                         {isDerived(r) ? (
-                          <span title={`Dynamisch — erzeugt vom Dienst "${ruleOwner(r)}", nicht editierbar`}
+                          <span title={`Derived — produced by the "${ruleOwner(r)}" service, not editable`}
                             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] bg-violet-900/60 text-violet-200 border border-violet-600/40">
                             <Lock className="w-2.5 h-2.5" /> {ruleOwner(r)}
                           </span>

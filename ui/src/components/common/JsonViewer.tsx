@@ -136,13 +136,13 @@ export function JsonViewer({ data, defaultExpandLevel = 1, emptyText = '(leer)',
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="In JSON suchen…"
+          placeholder="Search in JSON…"
           className="flex-1 min-w-0 bg-gray-950 border border-gray-700 rounded px-1.5 py-0.5 text-[11px] text-gray-200 focus:outline-none focus:border-emerald-500"
         />
         {query && (
           <>
             <span className="text-[10px] text-gray-500 whitespace-nowrap">
-              {debouncedQuery ? `${matchCount} Treffer` : '…'}
+              {debouncedQuery ? `${matchCount} matches` : '…'}
             </span>
             <button
               type="button"

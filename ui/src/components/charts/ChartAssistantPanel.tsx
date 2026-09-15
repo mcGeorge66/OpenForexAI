@@ -201,7 +201,7 @@ export function ChartAssistantPanel({ overlay, context, initialMessages, onMessa
             }
           }}
           rows={2}
-          placeholder={context.pair ? 'Frag den Assistenten zum Chart…' : 'Erst ein Pair laden…'}
+          placeholder={context.pair ? 'Ask the assistant about the chart…' : 'Erst ein Pair laden…'}
           disabled={!context.pair}
           className="flex-1 resize-none bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-600 focus:outline-none focus:border-emerald-500 placeholder-gray-600 disabled:opacity-50"
         />

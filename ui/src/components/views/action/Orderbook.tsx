@@ -352,7 +352,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
         <div class="row"><div class="label">From</div><div class="value">${formatTs(getTradeStartAt(selectedEntry))}</div></div>
         <div class="row"><div class="label">To</div><div class="value">${formatTs(getTradeEndDisplay(selectedEntry))}</div></div>
         <div class="row"><div class="label">Close</div><div class="value">${getCloseDisplay(selectedEntry)}</div></div>
-        <div class="row"><div class="label">Laufzeit</div><div class="value">${tradeDuration(selectedEntry)}</div></div>
+        <div class="row"><div class="label">Runtime</div><div class="value">${tradeDuration(selectedEntry)}</div></div>
       </div>
       <div class="card">
         <h2>Execution</h2>
@@ -480,7 +480,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
 `
     try {
       await kbImport('Orderbook', md)
-      setKbMsg('✓ In Knowledgebase gespeichert')
+      setKbMsg('✓ Saved to the knowledgebase')
       setTimeout(() => setKbMsg(null), 2000)
     } catch (e) {
       setError(`KB Import failed: ${String(e)}`)
@@ -548,7 +548,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
             onClick={() => void handleKbImport()}
             disabled={!selectedEntry}
             className="px-3 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
-            title="In Knowledgebase [Import] speichern"
+            title="Save to knowledgebase [Import]"
           >
             <BookOpen className="w-4 h-4" />
             → KB
@@ -568,7 +568,7 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
                   <th className="px-3 py-2 text-left">Pair</th>
                   <th className="px-3 py-2 text-left">From</th>
                   <th className="px-3 py-2 text-left">To</th>
-                  <th className="px-3 py-2 text-right" title="Time held from entry to close (hh:mm)">Laufzeit</th>
+                  <th className="px-3 py-2 text-right" title="Time held from entry to close (hh:mm)">Runtime</th>
                   <th className="px-3 py-2 text-left">Id</th>
                   <th className="px-3 py-2 text-right">Units</th>
                   <th className="px-3 py-2 text-right">Stake</th>

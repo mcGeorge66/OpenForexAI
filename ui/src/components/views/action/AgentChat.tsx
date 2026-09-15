@@ -876,7 +876,7 @@ export function AgentChat() {
                           value={anchorDateTime}
                           onChange={e => setAnchorDateTime(e.target.value)}
                           className="bg-gray-900 border border-gray-700 rounded px-1 text-xs text-white"
-                          title="Kerzen/Indikatoren bis zu diesem Zeitpunkt laden statt live/jetzt"
+                          title="Load candles/indicators up to this point in time instead of live/now"
                         />
                         {anchorDateTime && (
                           <button

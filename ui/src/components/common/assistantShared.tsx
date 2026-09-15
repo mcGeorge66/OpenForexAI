@@ -61,7 +61,7 @@ export function applyPatch(source: string, patch: PatchBlock): { result: string;
 
   if (insert) {
     if (startLine < 0 || startLine > total) {
-      return { result: source, error: `INSERT AFTER L${startLine}: Zeile existiert nicht (${total} Zeilen)` }
+      return { result: source, error: `INSERT AFTER L${startLine}: line does not exist (${total} lines)` }
     }
     const newLines = code.endsWith('\n') ? code.slice(0, -1).split('\n') : code.split('\n')
     return { result: [...lines.slice(0, startLine), ...newLines, ...lines.slice(startLine)].join('\n') }

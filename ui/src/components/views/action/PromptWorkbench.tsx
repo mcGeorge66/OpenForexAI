@@ -888,7 +888,7 @@ ${transcript}`
 
     try {
       await kbImport('PromptWorkbenchChat', md)
-      setChatKbMsg('✓ In Knowledgebase gespeichert')
+      setChatKbMsg('✓ Saved to the knowledgebase')
       setTimeout(() => setChatKbMsg(null), 2000)
     } catch (e) {
       pushMessage('assistant', `KB Import failed: ${String(e)}`)
@@ -1016,7 +1016,7 @@ ${transcript}`
     if (current <= 0) return false
     const newPosition = Math.max(0, current - stepSize)
     const newVisibleCount = total - newPosition
-    pushMessage('user', `[Step] Sichtbares Fenster: Kerzen ${total}–${newPosition} (${newVisibleCount} von ${total}).`)
+    pushMessage('user', `[Step] Visible window: candles ${total}–${newPosition} (${newVisibleCount} of ${total}).`)
     setSimBusy(true)
     try {
       const question = [
@@ -1128,7 +1128,7 @@ ${transcript}`
   }
 
   const handlePreview = async () => {
-    if (total === 0) { setSimPreview({ kind: 'notice', text: 'Keine Kerzen geladen.' }); return }
+    if (total === 0) { setSimPreview({ kind: 'notice', text: 'No candles loaded.' }); return }
     if (toolBlocksState.length === 0) {
       setSimPreview({ kind: 'notice', text: 'No tool_blocks configured — load a profile or add a tool.' })
       return
@@ -1521,7 +1521,7 @@ ${transcript}`
           />
         ) : (
           <div className="flex items-center justify-center h-full text-xs text-white">
-            {loading ? 'Kerzen werden geladen…' : 'Keine Kerzen geladen.'}
+            {loading ? 'Loading candles…' : 'No candles loaded.'}
           </div>
         )}
       </div>
@@ -1586,7 +1586,7 @@ ${transcript}`
                       onClick={() => void handleChatKbImport()}
                       disabled={messages.length === 0}
                       className="px-2 py-1 rounded border border-gray-700 bg-gray-900 text-gray-300 hover:text-white text-xs flex items-center gap-1 disabled:opacity-40"
-                      title="Gesamten Chatverlauf in der Knowledgebase [Import] speichern"
+                      title="Save the entire chat history to the knowledgebase [Import]"
                     >
                       <BookOpen className="w-3 h-3" /> → KB
                     </button>
@@ -1643,10 +1643,10 @@ ${transcript}`
                         <details className="mt-1.5 pt-1.5 border-t border-gray-700 text-[10px] text-white font-mono">
                           <summary
                             className="cursor-pointer select-none text-gray-400 hover:text-white"
-                            title="Die geparste AA-Entscheidung dieses Schritts — 'Schema erzwungen' zeigt, ob response_schema aktiv war (native Provider-Garantie statt Prompt-Bitte)"
+                            title="The parsed AA decision of this step — 'schema enforced' shows whether response_schema was active (a native provider guarantee rather than a request in the prompt)"
                           >
                             Decision
-                            {msg.schemaEnforced && ' — Schema erzwungen'}
+                            {msg.schemaEnforced && ' — schema enforced'}
                             {msg.decisionValid === false && ' — INVALID'}
                           </summary>
                           <pre className="mt-1 whitespace-pre-wrap break-all">
@@ -2001,8 +2001,8 @@ ${transcript}`
                     className="text-white cursor-pointer select-none"
                     title="Optional JSON Schema (tool_config.response_schema) that structurally forces the AA agent's final answer — through the real provider mechanism (OpenAI response_format strict / Anthropic forced tool_choice), not by asking in the prompt. Test it here against the real LLM endpoint before putting it into an agent config."
                   >
-                    Response Schema — optional, erzwingt die JSON-Struktur der Antwort
-                    {responseSchemaText.trim() && ' (aktiv)'}
+                    Response schema — optional, forces the JSON structure of the answer
+                    {responseSchemaText.trim() && ' (active)'}
                   </summary>
                   <div className="mt-1 space-y-1">
                     <input
@@ -2150,10 +2150,10 @@ ${transcript}`
                     <details className="text-[11px] text-white font-mono bg-gray-900/60 border border-gray-800 rounded p-2" open>
                       <summary
                         className="cursor-pointer select-none text-gray-400 hover:text-white"
-                        title="Die geparste AA-Entscheidung des letzten Step/Run-Ticks — 'Schema erzwungen' zeigt, ob response_schema aktiv war (native Provider-Garantie statt Prompt-Bitte)"
+                        title="The parsed AA decision of the last Step/Run tick — 'schema enforced' shows whether response_schema was active (a native provider guarantee rather than a request in the prompt)"
                       >
                         Decision
-                        {lastStepResult.schemaEnforced && ' — Schema erzwungen'}
+                        {lastStepResult.schemaEnforced && ' — schema enforced'}
                         {lastStepResult.decisionValid === false && ' — INVALID'}
                       </summary>
                       {lastStepResult.decision ? (
@@ -2201,7 +2201,7 @@ ${transcript}`
                   aufzurufen. Kann also nie von der Realität abweichen.
                 </p>
                 {candles.length === 0 ? (
-                  <p className="text-white italic">Keine Kerzen geladen.</p>
+                  <p className="text-white italic">No candles loaded.</p>
                 ) : contextPreviewError ? (
                   <span className="text-red-400">Error: {contextPreviewError}</span>
                 ) : contextPreview ? (

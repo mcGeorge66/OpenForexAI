@@ -90,7 +90,7 @@ function summarizeEntry(entry: EntityHistoryEntry): string {
     else if (typeof out.order_start_signal === 'string') bits.push(String(out.order_start_signal))
     if (typeof out.confidence === 'number') bits.push(`conf ${out.confidence}`)
   }
-  const label = bits.length > 0 ? bits.join(' · ') : (entry.trigger ?? '(kein Trigger)')
+  const label = bits.length > 0 ? bits.join(' · ') : (entry.trigger ?? '(no trigger)')
   return `${entry.timestamp ?? '?'} — ${label}`
 }
 

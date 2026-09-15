@@ -5147,7 +5147,7 @@ async def save_notifications_config(req: NotificationsSaveRequest) -> dict[str, 
     prev_token = (previous.get("telegram") or {}).get("bot_token") if isinstance(previous.get("telegram"), dict) else None
     telegram = incoming.setdefault("telegram", {})
     if not isinstance(telegram, dict):
-        raise HTTPException(status_code=422, detail="telegram muss ein Objekt sein")
+        raise HTTPException(status_code=422, detail="telegram must be an object")
     if str(telegram.get("bot_token", "")) in ("", "<gesetzt>"):
         if prev_token is not None:
             telegram["bot_token"] = prev_token
@@ -5179,7 +5179,7 @@ async def save_notifications_config(req: NotificationsSaveRequest) -> dict[str, 
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Regeln gespeichert, aber Routing-Abgleich fehlgeschlagen: {exc}",
+                detail=f"Rules saved, but reconciling the routing failed: {exc}",
             )
 
     return {

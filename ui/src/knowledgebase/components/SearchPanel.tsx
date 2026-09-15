@@ -42,7 +42,7 @@ export function SearchPanel({ query, results, onQuery, onNavigate, onClose }: Pr
 
         <div className="max-h-96 overflow-y-auto">
           {query && results.length === 0 && (
-            <p className="px-4 py-6 text-sm text-gray-600 text-center">Keine Treffer</p>
+            <p className="px-4 py-6 text-sm text-gray-600 text-center">No matches</p>
           )}
           {results.map(r => (
             <button

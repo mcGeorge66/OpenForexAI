@@ -389,7 +389,7 @@ export function LlmChecker() {
       })
       setKbStatus('ok')
     } catch (err) {
-      setKbStatus(`Fehler: ${String(err)}`)
+      setKbStatus(`Error: ${String(err)}`)
     } finally {
       setKbPushing(false)
     }
@@ -512,7 +512,7 @@ export function LlmChecker() {
             <span className="text-xs text-white">LLM: {selectedLlm || '— none —'}</span>
             <div className="ml-auto flex items-center gap-2">
               {kbStatus === 'ok' && (
-                <span className="text-xs text-emerald-400">In KB gespeichert</span>
+                <span className="text-xs text-emerald-400">Saved to the KB</span>
               )}
               {kbStatus && kbStatus !== 'ok' && (
                 <span className="text-xs text-red-400">{kbStatus}</span>
@@ -520,7 +520,7 @@ export function LlmChecker() {
               <button
                 onClick={exportMarkdown}
                 disabled={messages.length === 0}
-                title="Verlauf als Markdown-Datei speichern"
+                title="Save the history as a Markdown file"
                 className="flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-blue-700 bg-blue-900/30 text-blue-300 hover:bg-blue-900/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Download className="w-3 h-3" />
@@ -529,11 +529,11 @@ export function LlmChecker() {
               <button
                 onClick={() => void pushToKnowledgeBase()}
                 disabled={messages.length === 0 || kbPushing}
-                title="Gesamten Verlauf in die Knowledge Base schieben"
+                title="Push the entire history into the knowledge base"
                 className="flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-violet-700 bg-violet-900/30 text-violet-300 hover:bg-violet-900/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Database className="w-3 h-3" />
-                {kbPushing ? 'Speichern...' : '→ KB'}
+                {kbPushing ? 'Saving...' : '→ KB'}
               </button>
               <button
                 onClick={clearChat}

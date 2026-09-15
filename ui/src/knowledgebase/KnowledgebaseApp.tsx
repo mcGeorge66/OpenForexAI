@@ -106,7 +106,7 @@ export function KnowledgebaseApp() {
 
   const createDoc = async (parentId: string | null = null, isFolder = false) => {
     const result = await api.kbCreateDocument({
-      title: isFolder ? 'Neuer Ordner' : 'Neues Dokument',
+      title: isFolder ? 'New folder' : 'New document',
       is_folder: isFolder ? 1 : 0,
       parent_id: parentId,
     })
@@ -120,14 +120,22 @@ export function KnowledgebaseApp() {
   }
 
   const deleteDoc = async (id: string) => {
-    if (!confirm('Really delete this document?')) return
-    if (activeId === id) {
+    // The backend deletes exactly the row it is given, so a folder has to be
+    // removed together with everything inside it — otherwise its documents
+    // keep pointing at a parent that no longer exists and disappear from the
+    // tree while still sitting in the database.
+    const ids = [id, ...descendantIds(id)]
+    const question = ids.length === 1
+      ? 'Really delete this document?'
+      : `Really delete this folder and the ${ids.length - 1} item(s) inside it?`
+    if (!confirm(question)) return
+    if (activeId && ids.includes(activeId)) {
       setActiveId(null)
       setActiveDoc(null)
       setInitialContent('')
       setTitle('')
     }
-    await api.kbDeleteDocument(id)
+    await Promise.all(ids.map(docId => api.kbDeleteDocument(docId)))
     await loadDocs()
   }
 
@@ -136,11 +144,34 @@ export function KnowledgebaseApp() {
     setSelectedIds(new Set())
   }
 
+  /** Every id below `rootId`, at any depth. */
+  const descendantIds = useCallback((rootId: string): string[] => {
+    const byParent = new Map<string | null, string[]>()
+    for (const d of docs) {
+      const key = d.parent_id ?? null
+      if (!byParent.has(key)) byParent.set(key, [])
+      byParent.get(key)!.push(d.id)
+    }
+    const out: string[] = []
+    const stack = [rootId]
+    while (stack.length) {
+      for (const child of byParent.get(stack.pop()!) ?? []) {
+        out.push(child)
+        stack.push(child)
+      }
+    }
+    return out
+  }, [docs])
+
+  /** Ticking a folder ticks everything inside it, at any depth. The bulk
+   *  actions work on ids, so a folder selected on its own would move or delete
+   *  the folder and leave its documents behind. */
   const toggleSelected = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      const group = [id, ...descendantIds(id)]
+      if (next.has(id)) group.forEach(x => next.delete(x))
+      else group.forEach(x => next.add(x))
       return next
     })
   }
@@ -151,7 +182,13 @@ export function KnowledgebaseApp() {
   }
 
   const bulkMove = async (newParentId: string | null) => {
-    const ids = Array.from(selectedIds)
+    // Only the top-most selected nodes are moved: a document whose folder is
+    // selected too travels with that folder. Moving both would reparent the
+    // documents to the target as well and flatten the tree.
+    const ids = Array.from(selectedIds).filter(id => {
+      const parent = docs.find(d => d.id === id)?.parent_id ?? null
+      return parent === null || !selectedIds.has(parent)
+    })
     if (ids.length === 0) return
     await Promise.all(ids.map(id => api.kbUpdateDocument(id, { parent_id: newParentId })))
     setBulkMoveOpen(false)
@@ -162,9 +199,11 @@ export function KnowledgebaseApp() {
   const bulkDelete = async () => {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
+    // Every selected id is deleted, folders included — the selection already
+    // contains their contents, which is what keeps them from being orphaned.
     const confirmText = ids.length === 1
       ? 'Really delete this document?'
-      : `Really delete ${ids.length} documents?`
+      : `Really delete ${ids.length} items?`
     if (!confirm(confirmText)) return
     if (activeId && ids.includes(activeId)) {
       setActiveId(null)
@@ -219,18 +258,18 @@ export function KnowledgebaseApp() {
         <div className="flex items-center gap-1 ml-2">
           <button onClick={() => createDoc(null, false)}
             className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
-            title="Neues Dokument">
-            <Plus className="w-3.5 h-3.5" /> Dokument
+            title="New document">
+            <Plus className="w-3.5 h-3.5" /> Document
           </button>
           <button onClick={() => createDoc(null, true)}
             className="flex items-center gap-1 text-xs px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors"
-            title="Neuer Ordner">
-            <FolderPlus className="w-3.5 h-3.5" /> Ordner
+            title="New folder">
+            <FolderPlus className="w-3.5 h-3.5" /> Folder
           </button>
           <button onClick={toggleSelectMode}
             className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${selectMode ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800'}`}
-            title="Mehrfachauswahl">
-            <CheckSquare className="w-3.5 h-3.5" /> Auswählen
+            title="Multi-select">
+            <CheckSquare className="w-3.5 h-3.5" /> Select
           </button>
         </div>
 
@@ -253,7 +292,7 @@ export function KnowledgebaseApp() {
 
         <button onClick={() => setSearchOpen(o => !o)}
           className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${searchOpen ? 'bg-emerald-900/40 text-emerald-300' : 'text-white hover:text-gray-200 hover:bg-gray-800'}`}
-          title="Suche (Ctrl+K)">
+          title="Search (Ctrl+K)">
           <Search className="w-3.5 h-3.5" />
         </button>
 
@@ -279,17 +318,17 @@ export function KnowledgebaseApp() {
             onClick={() => setBulkMoveOpen(true)}
             disabled={selectedIds.size === 0}
             className="flex items-center gap-1 px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <FolderInput className="w-3.5 h-3.5" /> Verschieben
+            <FolderInput className="w-3.5 h-3.5" /> Move
           </button>
           <button
             onClick={() => void bulkDelete()}
             disabled={selectedIds.size === 0}
             className="flex items-center gap-1 px-2 py-1 rounded text-red-400 hover:text-red-300 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <Trash2 className="w-3.5 h-3.5" /> Löschen
+            <Trash2 className="w-3.5 h-3.5" /> Delete
           </button>
           <button onClick={clearSelection}
             className="flex items-center gap-1 px-2 py-1 rounded text-white hover:text-gray-200 hover:bg-gray-800 transition-colors">
-            <X className="w-3.5 h-3.5" /> Abbrechen
+            <X className="w-3.5 h-3.5" /> Cancel
           </button>
         </div>
       )}
@@ -297,7 +336,7 @@ export function KnowledgebaseApp() {
       {bulkMoveOpen && (
         <MovePicker
           excludeIds={selectedIds}
-          title={`Verschieben nach… (${selectedIds.size} Elemente)`}
+          title={`Move to… (${selectedIds.size} item(s))`}
           docs={docs}
           onMove={newParentId => void bulkMove(newParentId)}
           onClose={() => setBulkMoveOpen(false)}
@@ -363,7 +402,7 @@ export function KnowledgebaseApp() {
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">
               {docs.length === 0
-                ? 'Kein Dokument vorhanden — erstelle eines mit "+ Dokument"'
+                ? 'No document yet — create one with "+ Document"'
                 : 'Select document'}
             </div>
           )}

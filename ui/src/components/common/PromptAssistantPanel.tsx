@@ -33,7 +33,7 @@ function summarizeEntry(entry: EntityHistoryEntry): string {
     else if (typeof out.order_start_signal === 'string') bits.push(String(out.order_start_signal))
     if (typeof out.confidence === 'number') bits.push(`conf ${out.confidence}`)
   }
-  const label = bits.length > 0 ? bits.join(' · ') : (entry.trigger ?? '(kein Trigger)')
+  const label = bits.length > 0 ? bits.join(' · ') : (entry.trigger ?? '(no trigger)')
   return `${entry.timestamp ?? '?'} — ${label}`
 }
 
@@ -171,7 +171,7 @@ export function PromptAssistantPanel({ chat }: { chat: PromptAssistantChat }) {
               className={lastInput?.available ? 'text-emerald-400' : 'text-gray-600'}
               title={
                 lastInput?.available
-                  ? `Zuletzt empfangener Input (${lastInput.timestamp}, Trigger: ${lastInput.trigger}) wird automatisch mitgegeben`
+                  ? `Most recently received input (${lastInput.timestamp}, trigger: ${lastInput.trigger}) is automatisch mitgegeben`
                   : 'This agent has not processed a cycle since the last start — no input available'
               }
             >

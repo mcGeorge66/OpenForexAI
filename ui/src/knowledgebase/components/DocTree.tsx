@@ -15,7 +15,7 @@ interface Props {
   onToggleSelect: (id: string) => void
 }
 
-export function MovePicker({ excludeIds, disabledId, title = 'Verschieben nachâ€¦', docs, onMove, onClose }: {
+export function MovePicker({ excludeIds, disabledId, title = 'Move toâ€¦', docs, onMove, onClose }: {
   excludeIds: Set<string>
   disabledId?: string | null
   title?: string
@@ -37,7 +37,7 @@ export function MovePicker({ excludeIds, disabledId, title = 'Verschieben nachâ€
             onClick={() => onMove(null)}
             className="w-full text-left flex items-center gap-2 px-3 py-2 rounded text-sm text-gray-300 hover:bg-gray-800 transition-colors"
           >
-            <Folder className="w-3.5 h-3.5 text-gray-500" /> Root (kein Ordner)
+            <Folder className="w-3.5 h-3.5 text-gray-500" /> Root (no folder)
           </button>
           {folders.map(f => (
             <button
@@ -50,7 +50,7 @@ export function MovePicker({ excludeIds, disabledId, title = 'Verschieben nachâ€
             </button>
           ))}
           {folders.length === 0 && (
-            <p className="px-3 py-2 text-xs text-white">Keine Ordner vorhanden</p>
+            <p className="px-3 py-2 text-xs text-white">No folders</p>
           )}
         </div>
       </div>
@@ -163,29 +163,29 @@ function TreeNode({
         >
           <button className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-gray-700 text-gray-300"
             onClick={() => { setRenaming(true); setMenuOpen(false) }}>
-            <Edit3 className="w-3 h-3" /> Umbenennen
+            <Edit3 className="w-3 h-3" /> Rename
           </button>
           {isFolder && (
             <>
               <button className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-gray-700 text-gray-300"
                 onClick={() => { onCreate(doc.id, false); setMenuOpen(false) }}>
-                <Plus className="w-3 h-3" /> Dokument hier
+                <Plus className="w-3 h-3" /> Document here
               </button>
               <button className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-gray-700 text-gray-300"
                 onClick={() => { onCreate(doc.id, true); setMenuOpen(false) }}>
-                <FolderPlus className="w-3 h-3" /> Ordner hier
+                <FolderPlus className="w-3 h-3" /> Folder here
               </button>
             </>
           )}
           <div className="border-t border-gray-700 my-1" />
           <button className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-gray-700 text-gray-300"
             onClick={() => { setMoveOpen(true); setMenuOpen(false) }}>
-            <FolderInput className="w-3 h-3" /> Verschieben
+            <FolderInput className="w-3 h-3" /> Move
           </button>
           <div className="border-t border-gray-700 my-1" />
           <button className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-gray-700 text-red-400"
             onClick={() => { onDelete(doc.id); setMenuOpen(false) }}>
-            <Trash2 className="w-3 h-3" /> LÃ¶schen
+            <Trash2 className="w-3 h-3" /> Delete
           </button>
         </div>
       )}
@@ -232,7 +232,7 @@ export function DocTree({
   return (
     <div className="py-2">
       {roots.length === 0 && (
-        <p className="px-4 py-2 text-xs text-white">Keine Dokumente</p>
+        <p className="px-4 py-2 text-xs text-white">No documents</p>
       )}
       {roots.map(doc => (
         <TreeNode

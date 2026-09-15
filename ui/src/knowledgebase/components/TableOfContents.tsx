@@ -34,7 +34,7 @@ export function TableOfContents({ content }: Props) {
   if (headings.length === 0) {
     return (
       <div className="p-3">
-        <p className="text-xs text-white">Keine Überschriften</p>
+        <p className="text-xs text-white">No headings</p>
       </div>
     )
   }

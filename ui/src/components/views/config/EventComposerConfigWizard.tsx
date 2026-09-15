@@ -629,7 +629,7 @@ export function EventComposerConfigWizard() {
                   ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
                   : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
                 }
-                <span className="font-semibold uppercase tracking-wide flex-1 text-left">Kickoff Triggers &amp; Session Filter</span>
+                <span className="font-semibold uppercase tracking-wide flex-1 text-left">Kickoff triggers &amp; session filter</span>
                 {!triggersOpen && (
                   <span className="text-gray-600 font-mono normal-case tracking-normal">
                     {editForm.event_triggers.join(', ') || '—'}
