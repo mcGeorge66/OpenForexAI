@@ -140,23 +140,6 @@ auch paketartigen Export/Import.
 | `GET` | `/config/information/readme` | Information-Seiteninhalt lesen |
 | `PUT` | `/config/information/readme` | Information-Seiteninhalt speichern |
 
-### Package-Manager-Unterstützung
-
-| Methode | Pfad | Zweck |
-|---|---|---|
-| `POST` | `/config/packages/export` | Ausgewählte Bereiche exportieren |
-| `POST` | `/config/packages/validate` | Importpaket validieren |
-| `POST` | `/config/packages/import` | Ausgewählte Bereiche importieren |
-
-Aktuell unterstützte Paketbereiche:
-
-- Agents
-- Snapshot Profiles
-- Decision Prompt Profiles
-- Bridge Tools
-- Event Routing
-- System Config
-
 ## Authentifizierung
 
 Die API kann über `X-API-Key` geschützt werden, wenn `MANAGEMENT_API_KEY`

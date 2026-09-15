@@ -18,7 +18,6 @@ Der Bereich `Config` ist die Hauptoberfläche für Profile, Routing und Modul-De
 | [AI-Assistant](ui.config.ai_assistant.de.md) | Kontext-Dateien für den eingebetteten AI-Assistant-Chat in den Config-Editoren |
 | [System Config](ui.config.system_config.de.md) | Zentrale config.json5 globale Parameter |
 | [Helper Config](ui.config.helper_config.de.md) | Python-Hilfsfunktionen für Snapshot-Transform-Scripts |
-| [Package Manager](ui.config.package_manager.de.md) | Konfigurationspakete exportieren und importieren |
 | [Broker Modules](ui.config.broker_modules.de.md) | Broker-Adapter-Verbindungen (MT5 / OANDA) |
 | [LLM Modules](ui.config.llm_modules.de.md) | LLM-Provider-Verbindungen (OpenAI-kompatibel: OpenAI, Azure AI Foundry, LM Studio, Ollama / Anthropic) |
 
@@ -34,9 +33,8 @@ Aktuelle Menü-Reihenfolge in der UI:
 8. `AI-Assistant`
 9. `System Config`
 10. `Helper Config`
-11. `Package Manager`
-12. `Broker Modules`
-13. `LLM Modules`
+11. `Broker Modules`
+12. `LLM Modules`
 
 Vorgesehener Screenshot:
 - [Config-Menüreihenfolge](image/ui-13-config-menu-overview.png)
@@ -255,45 +253,6 @@ def classify_trend(ema_fast, ema_slow):
 ```
 
 Siehe die Snapshot-Referenz: [Snapshot Config](ui.config.snapshot_config.de.md)
-
----
-
-## Package Manager
-
-`Package Manager` wird verwendet, wenn ausgewählte Teile der Runtime-Konfiguration exportiert oder importiert werden sollen.
-
-Aktuell unterstützte Paketbereiche:
-
-- Agents
-- Snapshot Profiles
-- Decision Prompt Profiles
-- Bridge Tools
-- Event Routing
-- System Config
-
-### Typische Einsatzfälle
-
-**Konfiguration zwischen Umgebungen übertragen**: eine getestete Konfiguration aus einer Staging-Umgebung exportieren und in die Produktion importieren.
-
-**Funktionierende Einstellungen sichern**: vor größeren Änderungen die aktuelle Konfiguration als Backup exportieren.
-
-**Konfigurationen teilen**: ein Konfigurationspaket exportieren, um es mit einer anderen OpenForexAI-Installation zu teilen.
-
-**Versionskontrolle**: Konfigurationen regelmäßig exportieren und zusammen mit dem Code in einem Versionskontrollsystem speichern.
-
-### Import-Verhalten
-
-Beim Importieren eines Pakets:
-- vorhandene Profile mit demselben Namen werden überschrieben (mit Bestätigung)
-- neue Profile werden hinzugefügt
-- Profile, die nicht im Paket enthalten sind, bleiben unverändert
-
-Immer den Paketinhalt prüfen, bevor in eine Live-Umgebung importiert wird.
-
-Vorgesehener Screenshot:
-- [Package Manager Export-Import-Workflow](image/ui-21-package-manager.png)
-
----
 
 ## Broker Modules
 

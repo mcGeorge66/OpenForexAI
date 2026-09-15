@@ -36,7 +36,6 @@ import { AgentConfigWizard } from '@/components/views/config/AgentConfigWizard'
 import { EventComposerConfigWizard } from '@/components/views/config/EventComposerConfigWizard'
 import { HelperConfigViewer } from '@/components/views/config/HelperConfigViewer'
 import { DecisionPromptConfigEditor, SnapshotConfigEditor } from '@/components/views/config/ProfileConfigEditors'
-import { PackageManager } from '@/components/views/config/PackageManager'
 import { LlmContextEditor } from '@/components/views/config/LlmContextEditor'
 import { ToolExecutor } from '@/components/views/test/ToolExecutor'
 import { LlmChecker } from '@/components/views/test/LlmChecker'
@@ -94,7 +93,6 @@ const HANDBOOK_FILE: Record<string, string> = {
   'config:event_routing':  'ui.config.event_routing',
   'config:system':         'ui.config.system_config',
   'config:helper_config':  'ui.config.helper_config',
-  'config:package_manager':'ui.config.package_manager',
   'config:broker':         'ui.config.broker_modules',
   'config:llm':            'ui.config.llm_modules',
   'config:ec_wizard':      'ui.config.entity_config',
@@ -314,7 +312,6 @@ function MainApp() {
         if (activeSub === 'event_routing') return <EventRoutingEditor key="event-routing" />
         if (activeSub === 'telegram') return <TelegramDesigner key="telegram-designer" />
         if (activeSub === 'helper_config') return <HelperConfigViewer key="helper-config" />
-        if (activeSub === 'package_manager') return <PackageManager key="package-manager" />
         if (activeSub === 'broker') return <ModuleConfigViewer moduleType="broker" key="broker" />
         if (activeSub === 'llm') return <ModuleConfigViewer moduleType="llm" key="llm" />
         if (activeSub === 'ai_assistant') return <LlmContextEditor />

@@ -18,7 +18,6 @@ The `Config` area is the main maintenance surface for profiles, routing, and mod
 | [AI-Assistant](ui.config.ai_assistant.en.md) | Context files for the embedded AI-Assistant chat found across the config editors |
 | [System Config](ui.config.system_config.en.md) | Central config.json5 global parameters |
 | [Helper Config](ui.config.helper_config.en.md) | Python helper functions for snapshot transform scripts |
-| [Package Manager](ui.config.package_manager.en.md) | Export and import selected configuration packages |
 | [Broker Modules](ui.config.broker_modules.en.md) | Broker adapter connections (MT5 / OANDA) |
 | [LLM Modules](ui.config.llm_modules.en.md) | LLM provider connections (OpenAI-compatible: OpenAI, Azure AI Foundry, LM Studio, Ollama / Anthropic) |
 
@@ -34,9 +33,8 @@ Current menu order in the UI:
 8. `AI-Assistant`
 9. `System Config`
 10. `Helper Config`
-11. `Package Manager`
-12. `Broker Modules`
-13. `LLM Modules`
+11. `Broker Modules`
+12. `LLM Modules`
 
 Suggested screenshot:
 - [Config menu order](image/ui-13-config-menu-overview.png)
@@ -255,45 +253,6 @@ def classify_trend(ema_fast, ema_slow):
 ```
 
 See the snapshot reference: [Snapshot Config](ui.config.snapshot_config.en.md)
-
----
-
-## Package Manager
-
-Use `Package Manager` when you want to export or import selected parts of the runtime configuration.
-
-Supported package areas currently include:
-
-- agents
-- snapshot profiles
-- decision prompt profiles
-- bridge tools
-- event routing
-- system config
-
-### Typical Use Cases
-
-**Moving config between environments**: export a tested configuration from a staging environment and import it into production.
-
-**Backing up working settings**: before making significant changes, export the current configuration as a backup.
-
-**Sharing configurations**: export a configuration package to share with another OpenForexAI installation.
-
-**Version control**: export configs regularly and store them in a version control system alongside your code.
-
-### Import Behaviour
-
-When importing a package:
-- existing profiles with the same name are overwritten (with confirmation)
-- new profiles are added
-- profiles not in the package are left unchanged
-
-Always review the package content before importing into a live environment.
-
-Suggested screenshot:
-- [Package Manager export import workflow](image/ui-21-package-manager.png)
-
----
 
 ## Broker Modules
 

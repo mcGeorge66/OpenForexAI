@@ -77,13 +77,6 @@ from openforexai.agents.analysis_snapshot import (
     preview_calculation_block,
 )
 from openforexai.config.json_loader import load_json_config, resolve_config_path
-from openforexai.management.package_io import (
-    apply_import_package,
-    build_export_package,
-    dump_json5_text,
-    parse_json5_text,
-    validate_package,
-)
 from openforexai.runtime import control as runtime_control
 from openforexai.tools.argument_templates import (
     build_agent_placeholder_values,
@@ -1679,40 +1672,6 @@ class UpdateStartRequest(BaseModel):
     version: str | None = None
 
 
-class PackageMappingRequest(BaseModel):
-    broker_map: dict[str, str] = Field(default_factory=dict)
-    llm_map: dict[str, str] = Field(default_factory=dict)
-    agent_id_map: dict[str, str] = Field(default_factory=dict)
-    agent_id_prefix: str = ""
-
-
-class PackageExportRequest(BaseModel):
-    include_agents: bool = True
-    agent_ids: list[str] = Field(default_factory=list)
-    include_snapshot_profiles: bool = True
-    include_decision_prompt_profiles: bool = True
-    include_bridge_tools: bool = True
-    include_event_routing: bool = True
-    include_system_config: bool = False
-    strict_dependencies: bool = False
-
-
-class PackageValidateRequest(BaseModel):
-    content: str
-    mapping: PackageMappingRequest = Field(default_factory=PackageMappingRequest)
-    replace_existing_agents: bool = False
-
-
-class PackageImportRequest(BaseModel):
-    content: str
-    mapping: PackageMappingRequest = Field(default_factory=PackageMappingRequest)
-    replace_existing_agents: bool = False
-    import_agents: bool = True
-    import_snapshot_profiles: bool = True
-    import_decision_prompt_profiles: bool = True
-    import_bridge_tools: bool = True
-    import_event_routing: bool = True
-    import_system_config: bool = False
 
 
 # â"€â"€ Routers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -4734,119 +4693,6 @@ async def save_snapshot_helpers_text(content: str = Body(..., embed=False)) -> d
     _write_text_file(helper_path, content)
     return {"status": "saved", "file": f"config/{helper_path.name}"}
 
-
-@router.post("/config/packages/export")
-async def export_agent_package(req: PackageExportRequest) -> dict[str, Any]:
-    """Export a portable multi-agent package as JSON5 text."""
-    project_root = _project_root()
-    package = build_export_package(
-        _system_config,
-        selected_agent_ids=req.agent_ids,
-        include_agents=req.include_agents,
-        include_snapshot_profiles=req.include_snapshot_profiles,
-        include_decision_prompt_profiles=req.include_decision_prompt_profiles,
-        include_bridge_tools=req.include_bridge_tools,
-        include_event_routing=req.include_event_routing,
-        include_system_config=req.include_system_config,
-        event_routing_path=project_root / "config" / "RunTime" / "event_routing.json5",
-        agent_tools_path=project_root / "config" / "RunTime" / "agent_tools.json5",
-        strict_dependencies=req.strict_dependencies,
-    )
-    return {
-        "package": package,
-        "text": dump_json5_text(package),
-    }
-
-
-@router.post("/config/packages/validate")
-async def validate_agent_package(req: PackageValidateRequest) -> dict[str, Any]:
-    """Validate a package against local modules/tools and mapping rules."""
-    package = parse_json5_text(req.content)
-    known_tools = set()
-    if _tool_registry is not None:
-        known_tools = {tool.name for tool in _tool_registry.all_tools()}
-    result = validate_package(
-        package,
-        current_system_config=_system_config,
-        known_tools=known_tools,
-        mapping=req.mapping.model_dump(),
-        replace_existing_agents=req.replace_existing_agents,
-    )
-    return result
-
-
-@router.post("/config/packages/import")
-async def import_agent_package(req: PackageImportRequest) -> dict[str, Any]:
-    """Import a validated package and apply runtime refresh/reload."""
-    global _system_config
-    package = parse_json5_text(req.content)
-    known_tools = set()
-    if _tool_registry is not None:
-        known_tools = {tool.name for tool in _tool_registry.all_tools()}
-
-    validation = validate_package(
-        package,
-        current_system_config=_system_config,
-        known_tools=known_tools,
-        mapping=req.mapping.model_dump(),
-        replace_existing_agents=req.replace_existing_agents,
-    )
-    if not validation.get("ok"):
-        return {
-            "status": "invalid",
-            **validation,
-        }
-
-    project_root = _project_root()
-    next_system, next_routing, next_agent_tools = apply_import_package(
-        package,
-        current_system_config=_system_config,
-        mapping=req.mapping.model_dump(),
-        replace_existing_agents=req.replace_existing_agents,
-        import_agents=req.import_agents,
-        import_snapshot_profiles=req.import_snapshot_profiles,
-        import_decision_prompt_profiles=req.import_decision_prompt_profiles,
-        import_bridge_tools=req.import_bridge_tools,
-        import_event_routing=req.import_event_routing,
-        import_system_config=req.import_system_config,
-        event_routing_path=project_root / "config" / "RunTime" / "event_routing.json5",
-        agent_tools_path=project_root / "config" / "RunTime" / "agent_tools.json5",
-    )
-
-    _write_json_file(resolve_config_path(project_root / "config"), next_system)
-    if req.import_event_routing:
-        _write_json_file(project_root / "config" / "RunTime" / "event_routing.json5", next_routing)
-    if req.import_bridge_tools:
-        _write_json_file(project_root / "config" / "RunTime" / "agent_tools.json5", next_agent_tools)
-
-    previous_system_config = copy.deepcopy(_system_config)
-    _system_config = next_system
-    _apply_event_log_tz()
-
-    if _config_service is not None and hasattr(_config_service, "update_config"):
-        _config_service.update_config(_system_config)
-    _apply_monitoring_detail_level()
-
-    runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
-    composer_apply = await _apply_runtime_composer_changes(previous_system_config)
-
-    if _routing_table is not None and req.import_event_routing:
-        try:
-            _routing_table.load(project_root / "config" / "RunTime" / "event_routing.json5")
-        except Exception as exc:
-            import logging as _logging
-            _logging.getLogger(__name__).error("Routing reload after config import failed: %s", exc)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Config imported but routing reload failed: {exc}",
-            )
-
-    return {
-        "status": "imported",
-        "runtime_apply": runtime_apply,
-        "composer_apply": composer_apply,
-        "validation": validation,
-    }
 
 async def _trigger_agent_config_refresh() -> dict[str, int]:
     """Ask ConfigService to resend config for all running enabled agents."""

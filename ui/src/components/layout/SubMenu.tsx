@@ -48,7 +48,6 @@ const SUB_ITEMS: Record<TopSection, SubItem[]> = {
     { id: 'system',          label: 'System Config'    },
     { id: 'helper_config',   label: 'Helper Config'    },
     { id: '__div2',          label: '', divider: true   },
-    { id: 'package_manager', label: 'Package Manager'  },
     { id: 'broker',          label: 'Broker Modules'   },
     { id: 'llm',             label: 'LLM Modules'      },
   ],

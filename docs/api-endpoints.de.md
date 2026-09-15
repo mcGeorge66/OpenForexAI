@@ -557,64 +557,6 @@ Modul-Config-Datei speichern.
 **Hinweis:** Speichert nur die Datei. Laufende LLM/Broker-Instanzen werden nicht automatisch neu initialisiert (erfordern Systemneuststart).  
 **Response:** `{ status: "saved", file }`
 
----
-
-## Config — Packages (Import/Export)
-
-### `POST /config/packages/export`
-Agent-Package als portables JSON5 exportieren.  
-**Body:**
-```json
-{
-  "agent_ids": ["OXS_T-EURUSD-AA-PTJ"],
-  "include_agents": true,
-  "include_snapshot_profiles": true,
-  "include_decision_prompt_profiles": true,
-  "include_bridge_tools": true,
-  "include_event_routing": true,
-  "include_system_config": false,
-  "strict_dependencies": false
-}
-```
-**Response:** `{ package: dict, text: string }`
-
----
-
-### `POST /config/packages/validate`
-Package vor dem Import validieren.  
-**Body:**
-```json
-{
-  "content": "{ ... }",
-  "mapping": { "llm": {}, "broker": {} },
-  "replace_existing_agents": false
-}
-```
-**Response:** `{ ok: bool, errors: [...], warnings: [...] }`
-
----
-
-### `POST /config/packages/import`
-Validiertes Package importieren und live anwenden.  
-**Body:**
-```json
-{
-  "content": "{ ... }",
-  "mapping": { "llm": { "source_name": "target_name" }, "broker": {} },
-  "replace_existing_agents": false,
-  "import_agents": true,
-  "import_snapshot_profiles": true,
-  "import_decision_prompt_profiles": true,
-  "import_bridge_tools": true,
-  "import_event_routing": true,
-  "import_system_config": false
-}
-```
-**Effekt:** Schreibt config.json5 / event_routing.json5 / agent_tools.json5, wendet alle Hot-Reload-Mechanismen an.  
-**Response:** `{ status: "imported"|"invalid", runtime_apply, composer_apply, validation }`
-
----
-
 ## Config — Information
 
 ### `GET /config/information/readme`

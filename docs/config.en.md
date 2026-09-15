@@ -43,8 +43,7 @@ Important current top-level sections include:
 - `agents`
 
 Depending on the deployment, additional top-level sections such as `system`,
-`database`, `data`, or import rules may also exist and are handled by the UI
-and package manager.
+`database`, `data`, or import rules may also exist and are handled by the UI.
 
 ### `system`
 
@@ -199,7 +198,7 @@ Important points:
 - sample files document required fields
 - meta files describe module structure and UI hints
 
-## UI and Package Manager Relationship
+## UI and Configuration Editors
 
 The current UI does not treat all configuration as one giant text blob.
 
@@ -212,20 +211,6 @@ Instead:
 - `Event Routing` edits routing rules
 - `System Config` edits the central system file
 - `Helper Config` edits `config/snapshot_helpers.py`
-- `Package Manager` exports/imports selected config areas
-
-## Package Export/Import Areas
-
-The current Package Manager supports selective export/import of:
-
-- agents
-- snapshot profiles
-- decision prompt profiles
-- bridge tools
-- event routing
-- system config
-
-This makes it possible to move a strategy setup without exporting everything.
 
 ## Environment Variables
 

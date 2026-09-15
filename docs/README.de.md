@@ -19,7 +19,7 @@ zwei Hauptperspektiven getrennt:
 - [UI-Handbuch](ui.de.md)
   - **Action**: [Initial](ui.action.initial.de.md) · [Agent Chat](ui.action.chat.de.md) · [Orderbook](ui.action.orderbook.de.md)
   - **Monitor**: [Event-Ansichten](ui.monitor.de.md)
-  - **Config**: [Information](ui.config.information.de.md) · [Agent Config](ui.config.agent_config.de.md) · [Snapshot Config](ui.config.snapshot_config.de.md) · [Decision Prompt](ui.config.decision_prompt.de.md) · [Bridge Tools](ui.config.bridge_tools.de.md) · [Event Routing](ui.config.event_routing.de.md) · [System Config](ui.config.system_config.de.md) · [Helper Config](ui.config.helper_config.de.md) · [Package Manager](ui.config.package_manager.de.md) · [Broker Modules](ui.config.broker_modules.de.md) · [LLM Modules](ui.config.llm_modules.de.md)
+  - **Config**: [Information](ui.config.information.de.md) · [Agent Config](ui.config.agent_config.de.md) · [Snapshot Config](ui.config.snapshot_config.de.md) · [Decision Prompt](ui.config.decision_prompt.de.md) · [Bridge Tools](ui.config.bridge_tools.de.md) · [Event Routing](ui.config.event_routing.de.md) · [System Config](ui.config.system_config.de.md) · [Helper Config](ui.config.helper_config.de.md) · [Broker Modules](ui.config.broker_modules.de.md) · [LLM Modules](ui.config.llm_modules.de.md)
   - **Test**: [LLM Checker](ui.test.llm_checker.de.md) · [Tool Executor](ui.test.tool_executor.de.md)
 
 #### Snapshot-Referenz

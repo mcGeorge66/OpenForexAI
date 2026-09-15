@@ -336,9 +336,6 @@ export const api = {
                      getText(`/config/modules/${moduleType}/${name}/raw_text`),
   saveModuleConfigRaw: (moduleType: string, name: string, content: Record<string, unknown> | string) =>
                      put<{ status: string; file: string }>(`/config/modules/${moduleType}/${name}/raw`, content),
-  exportAgentPackage: (body: PackageExportRequest) => post<PackageExportResponse>('/config/packages/export', body),
-  validateAgentPackage: (body: PackageValidateRequest) => post<PackageValidationResponse>('/config/packages/validate', body),
-  importAgentPackage: (body: PackageImportRequest) => post<PackageImportResponse>('/config/packages/import', body),
   injectEvent:     (body: EventInjectRequest) => post<{ message_id: string }>('/events', body),
   getPromptLibrary: (scope: string) => get<PromptLibrary>(`/config/prompt-library/${scope}`),
   savePromptLibrary: (scope: string, library: PromptLibrary) =>
@@ -1095,67 +1092,13 @@ export interface ScriptValidateResponse {
   errors: ScriptValidateError[]
 }
 
-export interface PackageMapping {
-  broker_map?: Record<string, string>
-  llm_map?: Record<string, string>
-  agent_id_map?: Record<string, string>
-  agent_id_prefix?: string
-}
 
-export interface PackageExportRequest {
-  include_agents?: boolean
-  agent_ids?: string[]
-  include_snapshot_profiles?: boolean
-  include_decision_prompt_profiles?: boolean
-  include_bridge_tools?: boolean
-  include_event_routing?: boolean
-  include_system_config?: boolean
-  strict_dependencies?: boolean
-}
 
-export interface PackageValidateRequest {
-  content: string
-  mapping?: PackageMapping
-  replace_existing_agents?: boolean
-}
 
-export interface PackageImportRequest {
-  content: string
-  mapping?: PackageMapping
-  replace_existing_agents?: boolean
-  import_agents?: boolean
-  import_snapshot_profiles?: boolean
-  import_decision_prompt_profiles?: boolean
-  import_bridge_tools?: boolean
-  import_event_routing?: boolean
-  import_system_config?: boolean
-}
 
-export interface PackageProblem {
-  level: 'error' | 'warning' | string
-  path: string
-  message: string
-}
 
-export interface PackageValidationResponse {
-  ok: boolean
-  problems: PackageProblem[]
-  preview?: Record<string, unknown>
-  status?: string
-}
 
-export interface PackageExportResponse {
-  package: Record<string, unknown>
-  text: string
-}
 
-export interface PackageImportResponse {
-  status: string
-  runtime_apply?: Record<string, unknown>
-  validation?: PackageValidationResponse
-  ok?: boolean
-  problems?: PackageProblem[]
-}
 
 
 

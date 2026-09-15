@@ -199,7 +199,7 @@ Wichtige Punkte:
 - Sample-Dateien dokumentieren Pflichtfelder
 - Meta-Dateien beschreiben Struktur und UI-Hinweise
 
-## Beziehung zu UI und Package Manager
+## Beziehung zu den UI-Editoren
 
 Die aktuelle UI behandelt Konfiguration nicht mehr als einen einzigen großen
 Textblock.
@@ -213,21 +213,6 @@ Stattdessen gilt:
 - `Event Routing` bearbeitet Routing-Regeln
 - `System Config` bearbeitet die zentrale Systemdatei
 - `Helper Config` bearbeitet `config/snapshot_helpers.py`
-- `Package Manager` exportiert/importiert ausgewählte Konfigurationsbereiche
-
-## Export-/Import-Bereiche des Package Managers
-
-Der aktuelle Package Manager unterstützt selektiven Export/Import von:
-
-- Agents
-- Snapshot Profiles
-- Decision Prompt Profiles
-- Bridge Tools
-- Event Routing
-- System Config
-
-So kann eine Strategiekonfiguration verschoben werden, ohne die komplette
-Installation exportieren zu müssen.
 
 ## Umgebungsvariablen
 

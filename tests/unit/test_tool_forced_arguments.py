@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from openforexai.management.package_io import validate_package
 from openforexai.ports.llm import ToolCall
 from openforexai.tools.base import BaseTool, ToolContext
 from openforexai.tools.dispatcher import ToolDispatcher
@@ -126,70 +125,6 @@ def test_visible_specs_hide_forced_arguments_from_llm_manifest() -> None:
     assert "level" not in schema["properties"]
     assert schema["required"] == ["message"]
     assert "Fixed by agent config: level." in specs[0]["description"]
-
-
-def test_validate_package_accepts_forced_arguments_for_known_tools() -> None:
-    package = {
-        "agents": {
-            "TEST1-EURUSD-AA-TEST": {
-                "llm": "mock",
-                "broker": "paper",
-                "tool_config": {
-                    "allowed_tools": ["echo"],
-                    "forced_arguments": {
-                        "echo": {"level": "warn"}
-                    },
-                },
-            }
-        }
-    }
-
-    result = validate_package(
-        package,
-        current_system_config={
-            "modules": {
-                "llm": {"mock": "config/modules/llm/mock.json5"},
-                "broker": {"paper": "config/modules/broker/paper.json5"},
-            }
-        },
-        known_tools={"echo"},
-    )
-
-    assert result["ok"] is True
-
-
-def test_validate_package_rejects_unknown_forced_argument_tool() -> None:
-    package = {
-        "agents": {
-            "TEST1-EURUSD-AA-TEST": {
-                "llm": "mock",
-                "broker": "paper",
-                "tool_config": {
-                    "allowed_tools": ["echo"],
-                    "forced_arguments": {
-                        "missing_tool": {"foo": "bar"}
-                    },
-                },
-            }
-        }
-    }
-
-    result = validate_package(
-        package,
-        current_system_config={
-            "modules": {
-                "llm": {"mock": "config/modules/llm/mock.json5"},
-                "broker": {"paper": "config/modules/broker/paper.json5"},
-            }
-        },
-        known_tools={"echo"},
-    )
-
-    assert result["ok"] is False
-    assert any(
-        problem["path"] == "agents.TEST1-EURUSD-AA-TEST.tool_config.forced_arguments.missing_tool"
-        for problem in result["problems"]
-    )
 
 
 async def test_tool_dispatcher_allows_per_call_broker_and_pair_overrides() -> None:

@@ -260,4 +260,3 @@ def example():
 - [System Config](ui.config.system_config.en.md) — Edit config.json5 directly
 - [Agent Config](ui.config.agent_config.en.md) — Agent definitions and settings
 - [Decision Prompt](ui.config.decision_prompt.en.md) — LLM system prompts
-- [Package Manager](ui.config.package_manager.en.md) — Export and import configuration packages

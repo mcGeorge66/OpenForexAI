@@ -26,7 +26,6 @@ The current API is broader than a simple health interface. It now covers:
 - direct tool execution
 - raw and structured config editing
 - snapshot preview
-- selective config package import/export
 
 ## System and Runtime Endpoints
 
@@ -118,8 +117,7 @@ execution review.
 
 ## Configuration Endpoints
 
-The current config surface supports both targeted editors and package-style
-export/import.
+The current config surface offers targeted editors per config area.
 
 ### Raw and structured config
 
@@ -139,23 +137,6 @@ export/import.
 | `PUT` | `/config/modules/{module_type}/{name}/raw` | Save raw module config |
 | `GET` | `/config/information/readme` | Read Information page content |
 | `PUT` | `/config/information/readme` | Save Information page content |
-
-### Package manager support
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/config/packages/export` | Export selected config areas |
-| `POST` | `/config/packages/validate` | Validate import package |
-| `POST` | `/config/packages/import` | Import selected config areas |
-
-Current package operations support:
-
-- agents
-- snapshot profiles
-- decision prompt profiles
-- bridge tools
-- event routing
-- system config
 
 ## Authentication
 
