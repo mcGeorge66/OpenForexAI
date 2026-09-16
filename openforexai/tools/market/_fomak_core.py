@@ -41,6 +41,11 @@ BINS_PERSIST = [0.43, 0.52]
 BINS_IMPULSE = [2.23, 3.03]
 BINS_NOISE = [0.50, 0.59]
 
+# Vorgaben, keine Konstanten: compute_fomak kann sie ueberschreiben.
+# ACHTUNG — die Bin-Grenzen oben haengen daran. `strength` ist
+# Bewegung/atr_short, `vola_ratio` ist atr_short/atr_long. Wer diese
+# Perioden aendert, verschiebt beide Verteilungen und muss die
+# Perzentile neu bestimmen, sonst faellt alles in einen Bin.
 ATR_SHORT_PERIOD = 14
 ATR_LONG_PERIOD = 50
 IMPULSE_SHIFT = 4
@@ -50,6 +55,12 @@ EMA_MIN_MOVE_PIPS = 1.0
 # Warmup candles needed before the window so the rolling ATR series is settled
 # by the time the window itself starts — mirrors fomak_engine5.py's warmup_bars().
 WARMUP_CANDLES = max(ATR_SHORT_PERIOD, ATR_LONG_PERIOD)
+
+
+def warmup_for(atr_short_period: int = ATR_SHORT_PERIOD,
+               atr_long_period: int = ATR_LONG_PERIOD) -> int:
+    """Aufwaermkerzen fuer diese Perioden — die laengere bestimmt sie."""
+    return max(atr_short_period, atr_long_period)
 
 
 class FomakInputError(ValueError):
@@ -116,6 +127,9 @@ def compute_fomak(
     window_candles: list[dict[str, Any]],
     warmup_candles: list[dict[str, Any]],
     higher_tf_candles: list[dict[str, Any]],
+    *,
+    atr_short_period: int = ATR_SHORT_PERIOD,
+    atr_long_period: int = ATR_LONG_PERIOD,
 ) -> dict[str, Any]:
     """Compute one FOMAK code for `window_candles` (the block itself, oldest-first).
 
@@ -143,8 +157,8 @@ def compute_fomak(
         [pip_high - pip_low, (pip_high - prev_close).abs(), (pip_low - prev_close).abs()],
         axis=1,
     ).max(axis=1)
-    atr_short = true_range.rolling(ATR_SHORT_PERIOD).mean()
-    atr_long = true_range.rolling(ATR_LONG_PERIOD).mean()
+    atr_short = true_range.rolling(atr_short_period).mean()
+    atr_long = true_range.rolling(atr_long_period).mean()
 
     n = len(window_candles)
     block = df.iloc[-n:]
@@ -208,6 +222,8 @@ def compute_fomak(
             "persist_score": _round_or_none(persist_score),
             "noise_score": _round_or_none(noise_score),
             "impulse_score": _round_or_none(impulse_score),
+            "atr_short_period": atr_short_period,
+            "atr_long_period": atr_long_period,
             "atr_short": _round_or_none(atr_short_med),
             "atr_long": _round_or_none(atr_long_med),
             "S_bin": s_bin, "V_bin": v_bin, "P_bin": p_bin, "I_bin": i_bin, "N_bin": n_bin,

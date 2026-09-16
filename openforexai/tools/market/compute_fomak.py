@@ -20,6 +20,7 @@ from openforexai.tools.base import BaseTool, ToolContext, bus_request
 from openforexai.tools.market._fomak_core import (
     EMA_STATE_PERIOD,
     WARMUP_CANDLES,
+    warmup_for,
     FomakInputError,
     compute_fomak,
 )
@@ -80,6 +81,28 @@ class ComputeFomakTool(BaseTool):
                 "type": "boolean",
                 "description": "Include the underlying continuous values (strength, vola_ratio, persist_score, ...) and bins. Default false.",
             },
+            "atr_short_period": {
+                "type": "integer",
+                "description": (
+                    "ATR period the move is measured against (default 14). Changing it moves "
+                    "the strength and volatility distributions, so the binning thresholds — "
+                    "calibrated from percentiles of ~12,000 real windows — no longer hold and "
+                    "have to be re-derived."
+                ),
+                "minimum": 2,
+                "maximum": 200,
+                "default": 14,
+            },
+            "atr_long_period": {
+                "type": "integer",
+                "description": (
+                    "The slower ATR the faster one is compared against for the volatility "
+                    "ratio (default 50). Same caveat as atr_short_period."
+                ),
+                "minimum": 3,
+                "maximum": 500,
+                "default": 50,
+            },
             "include_explanation": {
                 "type": "boolean",
                 "description": "Include a plain-language explanation of the code. Default false.",
@@ -111,7 +134,11 @@ class ComputeFomakTool(BaseTool):
         if not context.broker_name:
             return {"error": "broker_name not set in tool context."}
 
-        total_needed = lookback_candles + WARMUP_CANDLES
+        atr_short_period = int(arguments.get("atr_short_period") or 14)
+        atr_long_period = int(arguments.get("atr_long_period") or 50)
+        # Die Aufwaermlaenge folgt der laengeren Periode, sonst ist die
+        # rollende ATR beim Fensterstart noch nicht eingelaufen.
+        total_needed = lookback_candles + warmup_for(atr_short_period, atr_long_period)
         try:
             candles = await self._fetch_candles(context, pair, timeframe, total_needed, anchor)
             higher_tf_candles = await self._fetch_candles(
@@ -133,7 +160,11 @@ class ComputeFomakTool(BaseTool):
         window_candles = candles[-lookback_candles:]
 
         try:
-            result = compute_fomak(window_candles, warmup_candles, higher_tf_candles)
+            result = compute_fomak(
+                window_candles, warmup_candles, higher_tf_candles,
+                atr_short_period=atr_short_period,
+                atr_long_period=atr_long_period,
+            )
         except FomakInputError as exc:
             return {"error": str(exc)}
 

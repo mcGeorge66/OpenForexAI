@@ -18,7 +18,10 @@ from openforexai.data.container import DATA_CONTAINER_ID
 from openforexai.models.messaging import EventType
 from openforexai.tools.base import BaseTool, ToolContext, bus_request
 
-_ATR_PERIOD = 14
+# Vorgabe, nicht Gesetz: als Argument ueberschreibbar. 14 ist der uebliche
+# Wert, aber der Indikator-Baustein im PTJ-Profil rechnet mit 7 — wer die
+# beiden vergleichen will, muss dieselbe Periode einstellen koennen.
+_ATR_PERIOD_DEFAULT = 14
 _PRE_LOOKBACK = 60          # Kerzen vor dem Impuls, in denen das Level gesucht wird
 
 
@@ -61,6 +64,17 @@ class DetectImpulsePullbackTool(BaseTool):
                 "maximum": 30,
                 "default": 8,
             },
+            "atr_period": {
+                "type": "integer",
+                "description": (
+                    "ATR period the impulse size is measured against. Default 14. "
+                    "Set it to match whatever other block you want to compare against — "
+                    "the snapshot's own atr_m15 block uses 7."
+                ),
+                "minimum": 2,
+                "maximum": 200,
+                "default": 14,
+            },
             "wait_candles": {
                 "type": "integer",
                 "description": "How many candles after the extreme the setup stays valid. Default 24.",
@@ -77,10 +91,11 @@ class DetectImpulsePullbackTool(BaseTool):
         impulse_atr = float(arguments.get("impulse_atr") or 3.0)
         impulse_candles = int(arguments.get("impulse_candles") or 8)
         wait_candles = int(arguments.get("wait_candles") or 24)
+        atr_period = int(arguments.get("atr_period") or _ATR_PERIOD_DEFAULT)
 
-        need = _PRE_LOOKBACK + impulse_candles + wait_candles + _ATR_PERIOD + 5
+        need = _PRE_LOOKBACK + impulse_candles + wait_candles + atr_period + 5
         candles = await self._fetch_candles(context, context.pair or "", timeframe, min(need, 500))
-        if len(candles) < _PRE_LOOKBACK + impulse_candles + _ATR_PERIOD:
+        if len(candles) < _PRE_LOOKBACK + impulse_candles + atr_period:
             return {"state": "none", "reason": "not enough candles", "candles": len(candles)}
 
         import pandas as pd
@@ -96,7 +111,7 @@ class DetectImpulsePullbackTool(BaseTool):
             (df["high"] - df["close"].shift()).abs(),
             (df["low"] - df["close"].shift()).abs(),
         ], axis=1).max(axis=1)
-        atr = float(tr.rolling(_ATR_PERIOD).mean().iloc[-1])
+        atr = float(tr.rolling(atr_period).mean().iloc[-1])
         if not atr or atr != atr:
             return {"state": "none", "reason": "atr unavailable"}
 
@@ -161,6 +176,7 @@ class DetectImpulsePullbackTool(BaseTool):
             "target_50_percent": round(target_50, 5),
             "retraced_percent": round(retraced * 100, 1),
             "atr_pips": round(atr / pip, 1),
+            "atr_period": atr_period,
             "current_price": price,
         }
 
