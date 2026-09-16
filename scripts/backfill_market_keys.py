@@ -118,10 +118,16 @@ def as_candles(rows: list[dict], timeframe: str) -> list:
 
 
 def fopok_at(levels_tf: list, levels_higher: list, price: float) -> tuple:
-    """(code, raw) or (None, None) when a barrier is missing.
+    """(code, raw, reason). Exactly one of code / reason is set.
 
     Runs the tool's own computation — compute_swing_levels is the function
     GetSwingLevelsTool calls, not a copy of it.
+
+    A row without a code carries the reason instead, because a field that is
+    merely empty cannot be told apart from a bug: the first version of this
+    backfill left 78 rows blank and they looked like a market state, while
+    they were in fact this script skipping the start of the series for want of
+    higher-timeframe bars.
     """
     own = compute_swing_levels(
         levels_tf, timeframe=FOPOK_TF, lookback=FOPOK_LOOKBACK,
@@ -142,9 +148,9 @@ def fopok_at(levels_tf: list, levels_higher: list, price: float) -> tuple:
             higher_resistance=hi.get("nearest_resistance"),
             higher_support=hi.get("nearest_support"),
         )
-    except FopokInputError:
-        return None, None
-    return res.get("fopok"), res.get("raw_values")
+    except FopokInputError as exc:
+        return None, None, f"not computed: {exc}"
+    return res.get("fopok"), res.get("raw_values"), None
 
 
 def backfill(con: sqlite3.Connection, broker: str, pair: str, timeframe: str,
@@ -221,7 +227,7 @@ def backfill(con: sqlite3.Connection, broker: str, pair: str, timeframe: str,
         ).isoformat()
         # FOPOK on the same moment: only bars closed by end_t, same rule as
         # everything else here.
-        fopok = fopok_raw = None
+        fopok = fopok_raw = fopok_reason = None
         a = bisect.bisect_right(f_tf_times, end_t)
         if a and f_tf_times[a - 1] + TF_MINUTES[FOPOK_TF] * 60 > end_t + 300:
             a -= 1
@@ -229,15 +235,23 @@ def backfill(con: sqlite3.Connection, broker: str, pair: str, timeframe: str,
         if b and f_hi_times[b - 1] + TF_MINUTES[FOPOK_HIGHER] * 60 > end_t + 300:
             b -= 1
         if a >= 20 and b >= 20:
-            fopok, fopok_raw = fopok_at(
+            fopok, fopok_raw, fopok_reason = fopok_at(
                 f_tf_c[max(0, a - FOPOK_LOOKBACK):a],
                 f_hi_c[max(0, b - FOPOK_LOOKBACK):b],
                 float(window[-1]["close"]),
             )
+        else:
+            # Start of the series: the level search needs history of its own.
+            # Say so in the row instead of leaving a blank that reads like a
+            # market state.
+            fopok_reason = (
+                f"not computed: only {a} {FOPOK_TF} and {b} {FOPOK_HIGHER} bars "
+                f"available before this point, 20 of each are needed"
+            )
         out.append(row_for(
             timestamp=valid_from, params=params, fomak=res["fomak"],
             raw_values=res.get("raw_values"), computed_at=datetime.now(UTC).isoformat(),
-            fopok=fopok, fopok_raw=fopok_raw,
+            fopok=fopok, fopok_raw=fopok_raw, fopok_reason=fopok_reason,
         ))
         if len(out) >= 5000:
             con.executemany(INSERT_SQL.format(table=table), out)

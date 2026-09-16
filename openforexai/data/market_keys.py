@@ -32,6 +32,7 @@ import hashlib
 from typing import Any
 
 from openforexai.tools.market import _fomak_core as fomak_core
+from openforexai.tools.market import _fopok_core as fopok_core
 
 # Bumped by hand only when the stored *shape* changes (new column, different
 # meaning of an existing one) — not for threshold changes, which the checksum
@@ -68,12 +69,15 @@ def param_set(
 ) -> str:
     """Everything that changes the resulting code, as one comparable string.
 
-    Example: ``M5-24-M30-14-50-b3f9a1c2``. Readable on purpose — a stored row
-    should say what it is without a lookup table.
+    Example: ``M5-24-M30-14-50-b3f9a1c2-p2``. Readable on purpose — a stored
+    row should say what it is without a lookup table. The trailing ``p`` is
+    the FOPOK format version: a character that changes meaning must not be
+    readable as if it never had.
     """
     return (
         f"{timeframe.upper()}-{int(lookback_candles)}-{higher_timeframe.upper()}"
         f"-{int(atr_short_period)}-{int(atr_long_period)}-{bins_checksum()}"
+        f"-p{fopok_core.FOPOK_FORMAT_VERSION}"
     )
 
 
@@ -120,6 +124,7 @@ def row_for(
     computed_at: str,
     fopok: str | None = None,
     fopok_raw: dict[str, Any] | None = None,
+    fopok_reason: str | None = None,
 ) -> tuple:
     """One row in the order COLUMNS declares.
 
@@ -127,6 +132,9 @@ def row_for(
     works on text and the agent reads text — recomputing a sentence that never
     changes for a given code would be work done a million times for nothing.
     They are derived here, so a code and its text can never drift apart.
+
+    `fopok_text` is never empty: without a code it holds the reason there is
+    none. An empty field cannot be told apart from a bug.
     """
     import json
     from openforexai.tools.market._fomak_text import explain_fomak
@@ -136,10 +144,16 @@ def row_for(
         fomak_text = explain_fomak(fomak) if fomak else None
     except Exception:
         fomak_text = None
-    try:
-        fopok_text = explain_fopok(fopok, fopok_raw) if fopok else None
-    except Exception:
-        fopok_text = None
+    if fopok:
+        try:
+            fopok_text = explain_fopok(fopok, fopok_raw)
+        except Exception as exc:
+            fopok_text = f"code {fopok} could not be read out: {exc}"
+    else:
+        # Never blank. A row with no code says why it has none — otherwise a
+        # skipped computation and a genuine market state look identical, and
+        # 78 rows of the first backfill did exactly that.
+        fopok_text = fopok_reason or "not computed: no reason recorded"
 
     return (
         timestamp,
