@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCcw } from 'lucide-react'
 import {
+  CrosshairMode,
   LineSeries,
   LineStyle,
   createChart,
@@ -43,9 +44,22 @@ interface CurvePoint {
   value: number
 }
 
+/** What the cursor is standing on: not just the height of the curve, but the
+ *  trade that moved it to there. Kept beside the curve rather than inside the
+ *  chart data, because lightweight-charts only ever reads time and value. */
+interface PointMeta {
+  pnl: number
+  pips: number | null
+  cumulative: number
+  merged: number
+  direction: string | null
+  orderId: string | null
+}
+
 interface PairCurve {
   pair: string
   points: CurvePoint[]
+  meta: Map<number, PointMeta>
   trades: number
   withoutResult: number
   total: number
@@ -113,6 +127,7 @@ function buildCurves(entries: OrderbookEntrySummary[], days: number | null): Pai
       (a, b) => new Date(realisedAt(a)!).getTime() - new Date(realisedAt(b)!).getTime(),
     )
     const points: CurvePoint[] = []
+    const meta = new Map<number, PointMeta>()
     let running = 0
     let peak = 0
     let maxDrawdown = 0
@@ -133,16 +148,38 @@ function buildCurves(entries: OrderbookEntrySummary[], days: number | null): Pai
 
       const time = Math.floor(new Date(realisedAt(entry)!).getTime() / 1000) as UTCTimestamp
       const last = points[points.length - 1]
+      const previous = meta.get(time)
       // Two trades closed in the same second would be a duplicate time, which
       // lightweight-charts rejects. Both belong in the sum, so the second one
-      // just overwrites the point instead of adding one.
-      if (last && last.time === time) last.value = running
-      else points.push({ time, value: running })
+      // joins the point instead of adding one — and the readout then says so
+      // instead of naming one of the two trades as if it were alone.
+      if (last && last.time === time && previous) {
+        last.value = running
+        meta.set(time, {
+          pnl: previous.pnl + pnl,
+          pips: null,
+          cumulative: running,
+          merged: previous.merged + 1,
+          direction: null,
+          orderId: null,
+        })
+      } else {
+        points.push({ time, value: running })
+        meta.set(time, {
+          pnl,
+          pips: typeof entry.pnl_pips === 'number' ? entry.pnl_pips : null,
+          cumulative: running,
+          merged: 1,
+          direction: entry.direction || null,
+          orderId: entry.broker_order_id ?? null,
+        })
+      }
     }
 
     curves.push({
       pair,
       points,
+      meta,
       trades: sorted.length,
       withoutResult: withoutResult.get(pair) ?? 0,
       total: running,
@@ -160,10 +197,32 @@ function buildCurves(entries: OrderbookEntrySummary[], days: number | null): Pai
   return curves
 }
 
-function EquityChart({ points, positive }: { points: CurvePoint[]; positive: boolean }) {
+interface HoverState {
+  x: number
+  y: number
+  meta: PointMeta
+  time: number
+}
+
+function EquityChart({
+  points,
+  meta,
+  positive,
+  pair,
+}: {
+  points: CurvePoint[]
+  meta: Map<number, PointMeta>
+  positive: boolean
+  pair: string
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  // The crosshair subscription is set up once, but it has to read the current
+  // period's trades — hence a ref, not the captured prop.
+  const metaRef = useRef(meta)
+  metaRef.current = meta
+  const [hover, setHover] = useState<HoverState | null>(null)
 
   useEffect(() => {
     const el = hostRef.current
@@ -193,6 +252,13 @@ function EquityChart({ points, positive }: { points: CurvePoint[]; positive: boo
       rightPriceScale: { borderColor: '#9ca3af' },
       handleScroll: { mouseWheel: false, pressedMouseMove: true },
       handleScale: { mouseWheel: true, pinch: true, axisDoubleClickReset: true },
+      // Magnet: the crosshair sits on the trade nearest to the pointer, so the
+      // readout below always belongs to a real trade and not to empty space.
+      crosshair: {
+        mode: CrosshairMode.Magnet,
+        vertLine: { color: '#6b7280', labelBackgroundColor: '#111827' },
+        horzLine: { color: '#6b7280', labelBackgroundColor: '#111827' },
+      },
     })
     const series = chart.addSeries(LineSeries, {
       color: '#059669',
@@ -213,6 +279,21 @@ function EquityChart({ points, positive }: { points: CurvePoint[]; positive: boo
     })
     chartRef.current = chart
     seriesRef.current = series
+
+    chart.subscribeCrosshairMove(param => {
+      const point = param.point
+      if (!point || param.time === undefined || point.x < 0 || point.y < 0) {
+        setHover(null)
+        return
+      }
+      const time = Number(param.time)
+      const found = metaRef.current.get(time)
+      if (!found) {
+        setHover(null)
+        return
+      }
+      setHover({ x: point.x, y: point.y, meta: found, time })
+    })
 
     const observer = new ResizeObserver(() => {
       if (!hostRef.current) return
@@ -237,9 +318,58 @@ function EquityChart({ points, positive }: { points: CurvePoint[]; positive: boo
     series.applyOptions({ color: positive ? '#059669' : '#dc2626' })
     series.setData(points)
     chartRef.current?.timeScale().fitContent()
+    setHover(null)
   }, [points, positive])
 
-  return <div ref={hostRef} className="h-[220px] w-full" />
+  // Flipped to the left of the pointer near the right edge, and pushed down
+  // when the curve runs along the top — otherwise the readout would cover the
+  // very spot it describes.
+  const hostWidth = hostRef.current?.clientWidth ?? 0
+  const flipLeft = hover !== null && hostWidth > 0 && hover.x > hostWidth - 190
+  const tooltipStyle = hover
+    ? {
+        left: flipLeft ? undefined : `${hover.x + 14}px`,
+        right: flipLeft ? `${Math.max(hostWidth - hover.x + 14, 0)}px` : undefined,
+        top: `${Math.min(Math.max(hover.y - 12, 4), 220 - 92)}px`,
+      }
+    : undefined
+
+  return (
+    <div ref={hostRef} className="relative h-[220px] w-full">
+      {hover && (
+        <div
+          className="pointer-events-none absolute z-10 rounded border border-gray-700 bg-gray-950/95 px-2.5 py-1.5 text-xs shadow-lg"
+          style={tooltipStyle}
+        >
+          <div className="text-gray-400 tabular-nums">{chartDateTime(hover.time)}</div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span className="text-gray-500">
+              {hover.meta.merged > 1
+                ? `${hover.meta.merged} trades`
+                : `${pair} ${hover.meta.direction ?? ''}`.trim()}
+            </span>
+            <span
+              className={[
+                'font-semibold tabular-nums',
+                hover.meta.pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
+              ].join(' ')}
+            >
+              {money(hover.meta.pnl)}
+            </span>
+            {hover.meta.pips !== null && (
+              <span className="text-gray-500 tabular-nums">
+                {hover.meta.pips > 0 ? '+' : ''}{hover.meta.pips.toFixed(1)} Pips
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-gray-400 tabular-nums">
+            Sum <span className="text-gray-200">{money(hover.meta.cumulative)}</span>
+            {hover.meta.orderId && <span className="ml-2 text-gray-600">#{hover.meta.orderId}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function OrderbookPerformance() {
@@ -369,7 +499,12 @@ export function OrderbookPerformance() {
               </div>
             </div>
             <div className="px-2 py-2">
-              <EquityChart points={curve.points} positive={curve.total >= 0} />
+              <EquityChart
+                points={curve.points}
+                meta={curve.meta}
+                positive={curve.total >= 0}
+                pair={curve.pair}
+              />
             </div>
             <div className="px-4 py-2 border-t border-gray-800 text-[11px] text-gray-500">
               {curve.firstAt > 0 && (
