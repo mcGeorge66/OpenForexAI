@@ -130,9 +130,24 @@ class GetSwingLevelsTool(BaseTool):
             "prominence": {
                 "type": "number",
                 "description": (
-                    "Minimum price prominence for a swing to qualify. "
-                    "0.0 = all local extremes (noisy). Higher values filter out minor wiggles. "
-                    "Typical starting points: 0.0005 for M5, 0.001–0.003 for H1."
+                    "Minimum price prominence for a swing to qualify, as an absolute price "
+                    "distance. 0.0 = all local extremes (noisy). Higher values filter out minor "
+                    "wiggles. Typical starting points: 0.0005 for M5, 0.001–0.003 for H1. "
+                    "Because it is absolute, the same intent needs a different number per pair — "
+                    "prefer prominence_atr unless you specifically want a fixed price distance."
+                ),
+                "minimum": 0.0,
+                "default": 0.0,
+            },
+            "prominence_atr": {
+                "type": "number",
+                "description": (
+                    "Minimum prominence expressed in ATR instead of price units — multiplied by "
+                    "this timeframe's ATR internally, so one value holds for every pair and every "
+                    "volatility regime. 0.0 disables it. Measured on 1647 real M15 windows, "
+                    "prominence 0 leaves the next level a median 0.33 ATR away, which is a wiggle "
+                    "rather than a zone; around 0.25 gave the widest usable corridors. When both "
+                    "this and prominence are set, the larger of the two resulting distances wins."
                 ),
                 "minimum": 0.0,
                 "default": 0.0,
@@ -226,6 +241,7 @@ class GetSwingLevelsTool(BaseTool):
         timeframe    = str(arguments.get("timeframe")   or _D("timeframe",   "H1")).upper()
         lookback     = max(10, min(int(arguments.get("lookback")    or _D("lookback",    100)), 500))
         prominence   = float(arguments.get("prominence")  or _D("prominence",  0.0))
+        prominence_atr = float(arguments.get("prominence_atr") or _D("prominence_atr", 0.0))
         atr_period   = max(1,  min(int(arguments.get("atr_period")  or _D("atr_period",  14)),  200))
         min_gap_atr  = float(arguments.get("min_gap_atr") or _D("min_gap_atr", 0.3))
         max_levels   = max(1, min(int(arguments.get("max_levels")   or _D("max_levels",  5)),   20))
@@ -286,6 +302,10 @@ class GetSwingLevelsTool(BaseTool):
         # ATR for adaptive clustering gap
         atr_value = atr(candles, period=atr_period)
         min_gap = round(atr_value * min_gap_atr, 6) if (atr_value and min_gap_atr > 0) else 0.0
+        # prominence_atr wird hier zum absoluten Abstand, weil die Peak-Erkennung
+        # nur Preiseinheiten kennt. Der groessere der beiden Werte gewinnt.
+        if prominence_atr > 0 and atr_value:
+            prominence = max(prominence, atr_value * prominence_atr)
 
         if use_oc:
             import numpy as np
@@ -375,6 +395,7 @@ class GetSwingLevelsTool(BaseTool):
             "current_price_source": current_price_source,
             "atr":                  round(atr_value, 6) if atr_value else None,
             "min_gap":              min_gap,
+            "prominence_used":      round(prominence, 6),
             "highs":                highs,
             "lows":                 lows,
             "confluence":           confluence,

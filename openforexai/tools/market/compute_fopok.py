@@ -75,6 +75,17 @@ class ComputeFopokTool(BaseTool):
                 "minimum": 0.0,
                 "default": 0.0,
             },
+            "prominence_atr": {
+                "type": "number",
+                "description": (
+                    "Minimum swing prominence in ATR, passed through to get_swing_levels. "
+                    "Preferable to `prominence`, which is an absolute price distance and so "
+                    "needs a different number for every pair. Around 0.25 gave the widest "
+                    "usable corridors on real M15 windows."
+                ),
+                "minimum": 0.0,
+                "default": 0.0,
+            },
             "atr_period": {
                 "type": "number",
                 "description": (
@@ -100,13 +111,14 @@ class ComputeFopokTool(BaseTool):
         lookback = int(arguments.get("lookback") or 100)
         prominence = float(arguments.get("prominence") or 0.0)
         atr_period = int(arguments.get("atr_period") or 14)
+        prominence_atr = float(arguments.get("prominence_atr") or 0.0)
 
         levels_tool = GetSwingLevelsTool()
 
         async def levels(tf: str) -> dict[str, Any]:
             result = await levels_tool.execute(
                 {"timeframe": tf, "lookback": lookback, "prominence": prominence,
-                 "atr_period": atr_period},
+                 "prominence_atr": prominence_atr, "atr_period": atr_period},
                 context,
             )
             if not isinstance(result, dict):
