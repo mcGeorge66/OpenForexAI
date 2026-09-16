@@ -2947,6 +2947,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
         tool_context = ToolContext(
             agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
             monitoring_bus=_monitoring_bus, event_bus=_bus,
+            as_of=(last_visible.timestamp.isoformat() if last_visible is not None else None),
             extra={
                 "candle_index_map": candle_index_map,
                 "workbench_annotations": [],
@@ -2968,22 +2969,13 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
                 },
             },
         )
-        # Force (not just default) `start` on candle-consuming tools the agent can call
-        # directly during chat — forced_arguments overrides whatever the LLM supplies
-        # and is hidden from its tool spec (ToolDispatcher._merged_arguments /
-        # _spec_with_forced_arguments_hidden), so there's no way for it to accidentally
-        # or deliberately pull live/future data outside the frozen, visible window.
-        pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
-        forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
+        # The anchor sits on tool_context.as_of (set above), so EVERY candle read
+        # during this chat returns the market as of the frozen position — whatever
+        # the tool calls its parameters, and with no per-tool list to maintain.
+        # base.fetch_candles() lets the context win over any `start` the LLM supplies,
+        # so it cannot pull live data out of a frozen window either.
         agent._tool_dispatcher = ToolDispatcher(
-            DEFAULT_REGISTRY, tool_context, {
-                "allowed_tools": req.allowed_tools,
-                "forced_arguments": {
-                    "calculate_indicator": forced_start_args,
-                    "get_candles": forced_start_args,
-                    "get_swing_levels": forced_start_args,
-                },
-            },
+            DEFAULT_REGISTRY, tool_context, {"allowed_tools": req.allowed_tools},
         )
         history = [{"role": m.role, "content": m.content} for m in req.history]
         final_text, total_tokens, executed_tool_names = await asyncio.wait_for(
@@ -3153,18 +3145,15 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
     # elsewhere (a stale view here would repeat the AA/BA trade-id bug fixed earlier).
     effective_existing_annotations = req.existing_annotations
 
-    # Anchor every candle-consuming tool (get_candles/calculate_indicator/get_swing_levels) to
-    # the frozen simulation position, for ALL script/agent phases below — EC (Step 1), the
-    # AA's own tool loop, and the BA decision script. Without this, a script calling
-    # get_candles would silently receive LIVE data instead of the static window the user is
-    # looking at, violating "PWB candles must be static" for every non-agent code path.
+    # The frozen simulation position. It goes on every ToolContext below as `as_of`,
+    # which base.fetch_candles() applies to every candle read — EC (Step 1), the AA's
+    # own tool loop and the BA decision script alike. It used to be forced into the
+    # arguments of three tools by name, and the three newest ones were not on that
+    # list: compute_fomak spells the parameter `anchor`, compute_fopok and
+    # detect_impulse_pullback have none, so all three read LIVE candles while the
+    # chart showed a position in the past — "PWB candles must be static" violated in
+    # silence. On the context there is no list to forget.
     pwb_candle_anchor = last_visible.timestamp.isoformat() if last_visible is not None else None
-    forced_start_args = {"start": pwb_candle_anchor} if pwb_candle_anchor is not None else {}
-    forced_candle_arguments = {
-        "calculate_indicator": forced_start_args,
-        "get_candles": forced_start_args,
-        "get_swing_levels": forced_start_args,
-    }
 
     try:
         if req.step1_mode == "ec":
@@ -3172,7 +3161,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             # trigger (event_routing.json5's m5_candle_trigger_to_*_ec rules), no LLM/AA at all.
             ec_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
-                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3185,7 +3174,6 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             ec_dispatcher = ToolDispatcher(
                 DEFAULT_REGISTRY, ec_tool_context, {
                     "allowed_tools": req.ec_script_allowed_tools,
-                    "forced_arguments": forced_candle_arguments,
                 },
             )
             ec_tools_proxy = ToolsProxy(ec_dispatcher, [])
@@ -3224,13 +3212,12 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             # agents use, see tools/dispatcher.py), the exact production behavior, not a special case.
             aa_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
-                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
                 extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
             )
             agent._tool_dispatcher = ToolDispatcher(
                 DEFAULT_REGISTRY, aa_tool_context, {
                     "allowed_tools": req.allowed_tools,
-                    "forced_arguments": forced_candle_arguments,
                 },
             )
             final_text, total_tokens, _executed = await asyncio.wait_for(
@@ -3243,7 +3230,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
         if req.decision_script.strip():
             script_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
-                monitoring_bus=_monitoring_bus, event_bus=_bus,
+                monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3256,7 +3243,6 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             script_dispatcher = ToolDispatcher(
                 DEFAULT_REGISTRY, script_tool_context, {
                     "allowed_tools": req.decision_script_allowed_tools,
-                    "forced_arguments": forced_candle_arguments,
                 },
             )
             tools_proxy = ToolsProxy(script_dispatcher, [])

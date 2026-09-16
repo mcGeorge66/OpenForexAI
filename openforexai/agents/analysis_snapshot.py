@@ -416,12 +416,20 @@ async def _execute_tool_blocks(
     start: str | None = None,
     blocklist: str = "snapshot_designer",
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    # *start* is the historical anchor (the Prompt Workbench's frozen position,
+    # or a backtest step). It goes on the context, not into the block arguments:
+    # injected as an argument it only reached tools whose parameter happens to be
+    # spelled "start" — compute_fomak calls it `anchor`, compute_fopok and
+    # detect_impulse_pullback have none, so those three read LIVE candles while
+    # the simulation showed a position weeks in the past. On the context every
+    # candle read goes through it, whatever the tool calls its parameters.
     context = ToolContext(
         agent_id=agent_id,
         broker_name=broker_name,
         pair=pair,
         monitoring_bus=monitoring_bus,
         event_bus=event_bus,
+        as_of=start,
     )
     errors: list[str] = []
     blocked_tools = _snapshot_tool_blocklist(blocklist)
@@ -444,12 +452,6 @@ async def _execute_tool_blocks(
             arguments["timeframe"] = short_timeframe
         elif tf == "LONG_TF":
             arguments["timeframe"] = long_timeframe
-
-        # Historical anchor (e.g. Prompt Workbench simulation position) — only
-        # injected when the block doesn't already set its own start, so an
-        # explicit per-block override always wins.
-        if start and not arguments.get("start"):
-            arguments["start"] = start
 
         if not tool_name:
             errors.append(f"{block_id}:missing_tool_name")

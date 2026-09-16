@@ -4,9 +4,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
-from openforexai.models.messaging import EventType
-from openforexai.tools.base import BaseTool, ToolContext, bus_request, candle_dicts_to_objects, get_tool_default
+from openforexai.tools.base import (
+    BaseTool,
+    ToolContext,
+    candle_dicts_to_objects,
+    fetch_candles,
+    get_tool_default,
+)
 
 
 class CalculateIndicatorTool(BaseTool):
@@ -115,19 +119,9 @@ class CalculateIndicatorTool(BaseTool):
             candle_limit = history + 300
         else:
             candle_limit = warmup + history
-        response = await bus_request(
-            context=context,
-            event_type=EventType.CANDLES_REQUEST,
-            target_id=DATA_CONTAINER_ID,
-            instrument=context.pair,
-            payload={"broker_name": context.broker_name,
-                     "timeframe": timeframe, "limit": candle_limit,
-                     **({"start": start} if start else {})},
+        candles = candle_dicts_to_objects(
+            await fetch_candles(context, timeframe, candle_limit, start=start)
         )
-        if response.get("error"):
-            raise RuntimeError(f"DataContainer error: {response['error']}")
-
-        candles = candle_dicts_to_objects(response.get("candles", []))
         if not candles:
             return {"values": None, "reason": "Not enough candle data"}
 
@@ -177,16 +171,12 @@ class CalculateIndicatorTool(BaseTool):
 
         component_candles: dict[str, list] = {}
         for comp_pair in getattr(plugin, "DXY_COMPONENTS", []):
-            resp = await bus_request(
-                context=context,
-                event_type=EventType.CANDLES_REQUEST,
-                target_id=DATA_CONTAINER_ID,
-                instrument=comp_pair,
-                payload={"broker_name": context.broker_name,
-                         "timeframe": timeframe, "limit": warmup + history,
-                         **({"start": start} if start else {})},
+            candles = candle_dicts_to_objects(
+                await fetch_candles(
+                    context, timeframe, warmup + history,
+                    pair=comp_pair, start=start,
+                )
             )
-            candles = candle_dicts_to_objects(resp.get("candles", []))
             if candles:
                 component_candles[comp_pair] = candles
 

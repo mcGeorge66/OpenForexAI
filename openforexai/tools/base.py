@@ -80,6 +80,64 @@ class ToolContext:
     event_bus: Any = None            # EventBus — the only inter-module channel
     extra: dict[str, Any] = field(default_factory=dict)
     triggering_message: Any = None   # AgentMessage that triggered the current agent cycle
+    # ISO timestamp the whole tool call is frozen at: every candle read through
+    # fetch_candles() returns the market AS OF this moment and nothing after it.
+    # Empty in live trading (there "now" is the truth). Set by the simulator and
+    # the backtest, where reading a single candle past this point would be a lie.
+    # It lives here and not in the tool arguments on purpose: an argument has to
+    # be named per tool, and one tool whose parameter is spelled differently —
+    # or that has none — silently reads live data instead. That is exactly what
+    # happened to compute_fomak (`anchor`), compute_fopok and
+    # detect_impulse_pullback (no parameter at all).
+    as_of: str | None = None
+
+
+async def fetch_candles(
+    context: ToolContext,
+    timeframe: str,
+    count: int,
+    *,
+    pair: str | None = None,
+    start: str | None = None,
+    timeout: float = 30.0,
+) -> list[dict[str, Any]]:
+    """The only way a tool may read candles.
+
+    Every tool that needs candles goes through here, so the time anchor cannot
+    be forgotten. ``context.as_of`` wins over an explicitly passed *start*:
+    inside a simulation the frozen position is not negotiable, and a prompt
+    must not be able to widen its own window into live data. Fail-closed, same
+    reasoning as the EventComposer guards.
+
+    *start* / ``as_of`` are sent as the DataContainer's ``start`` field, which
+    despite its name means ``WHERE timestamp <= ?`` — the state as of that
+    moment, looking backwards. Nothing after it is returned.
+
+    Returns the newest *count* candles as dicts (oldest first).
+
+    Raises:
+        RuntimeError: if the DataContainer answers with an error.
+    """
+    from openforexai.data.container import DATA_CONTAINER_ID
+    from openforexai.models.messaging import EventType
+
+    anchor = context.as_of or start
+    response = await bus_request(
+        context=context,
+        event_type=EventType.CANDLES_REQUEST,
+        target_id=DATA_CONTAINER_ID,
+        instrument=pair or context.pair or "",
+        payload={
+            "broker_name": context.broker_name,
+            "timeframe": timeframe,
+            "limit": count,
+            **({"start": anchor} if anchor else {}),
+        },
+        timeout=timeout,
+    )
+    if response.get("error"):
+        raise RuntimeError(f"DataContainer error: {response['error']}")
+    return (response.get("candles") or [])[-count:]
 
 
 def candle_dicts_to_objects(raw: list) -> list:

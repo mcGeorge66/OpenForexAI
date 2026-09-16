@@ -37,14 +37,14 @@ def fake_bus_request(monkeypatch):
     the higher-timeframe EMA — mirrors what DataContainer would actually return."""
     calls: list[dict] = []
 
-    async def _fake(context, event_type, target_id, payload, instrument=None):
+    async def _fake(context, event_type, target_id, payload, instrument=None, timeout=30.0):
         calls.append({"payload": payload, "instrument": instrument})
         timeframe = payload["timeframe"]
         limit = payload["limit"]
         minutes = 5 if timeframe == "M5" else 15
         return {"candles": _synthetic_candles(limit, minutes), "error": None}
 
-    monkeypatch.setattr("openforexai.tools.market.compute_fomak.bus_request", _fake)
+    monkeypatch.setattr("openforexai.tools.base.bus_request", _fake)
     return calls
 
 
@@ -117,10 +117,10 @@ async def test_no_pair_available_rejected(tool, fake_bus_request):
 
 @pytest.mark.asyncio
 async def test_insufficient_candle_history_reported_clearly(tool, monkeypatch):
-    async def _fake_short(context, event_type, target_id, payload, instrument=None):
+    async def _fake_short(context, event_type, target_id, payload, instrument=None, timeout=30.0):
         return {"candles": _synthetic_candles(5, 5), "error": None}  # far fewer than needed
 
-    monkeypatch.setattr("openforexai.tools.market.compute_fomak.bus_request", _fake_short)
+    monkeypatch.setattr("openforexai.tools.base.bus_request", _fake_short)
     result = await tool.execute({"timeframe": "M5", "lookback_candles": 24}, _context())
     assert "error" in result
     assert "history" in result["error"].lower()
@@ -128,10 +128,10 @@ async def test_insufficient_candle_history_reported_clearly(tool, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_data_container_error_propagated(tool, monkeypatch):
-    async def _fake_error(context, event_type, target_id, payload, instrument=None):
+    async def _fake_error(context, event_type, target_id, payload, instrument=None, timeout=30.0):
         return {"candles": [], "error": "boom"}
 
-    monkeypatch.setattr("openforexai.tools.market.compute_fomak.bus_request", _fake_error)
+    monkeypatch.setattr("openforexai.tools.base.bus_request", _fake_error)
     result = await tool.execute({"timeframe": "M5", "lookback_candles": 24}, _context())
     assert "error" in result
     assert "boom" in result["error"]

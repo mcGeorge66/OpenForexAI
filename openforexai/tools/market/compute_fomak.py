@@ -14,9 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
-from openforexai.models.messaging import EventType
-from openforexai.tools.base import BaseTool, ToolContext, bus_request
+from openforexai.tools.base import BaseTool, ToolContext, fetch_candles
 from openforexai.tools.market._fomak_core import (
     EMA_STATE_PERIOD,
     WARMUP_CANDLES,
@@ -140,9 +138,11 @@ class ComputeFomakTool(BaseTool):
         # rollende ATR beim Fensterstart noch nicht eingelaufen.
         total_needed = lookback_candles + warmup_for(atr_short_period, atr_long_period)
         try:
-            candles = await self._fetch_candles(context, pair, timeframe, total_needed, anchor)
-            higher_tf_candles = await self._fetch_candles(
-                context, pair, higher_timeframe, EMA_STATE_PERIOD + 10, anchor,
+            candles = await fetch_candles(
+                context, timeframe, total_needed, pair=pair, start=anchor,
+            )
+            higher_tf_candles = await fetch_candles(
+                context, higher_timeframe, EMA_STATE_PERIOD + 10, pair=pair, start=anchor,
             )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -186,23 +186,3 @@ class ComputeFomakTool(BaseTool):
             )
         return response
 
-    @staticmethod
-    async def _fetch_candles(
-        context: ToolContext, pair: str, timeframe: str, count: int, start: str | None,
-    ) -> list[dict[str, Any]]:
-        response = await bus_request(
-            context=context,
-            event_type=EventType.CANDLES_REQUEST,
-            target_id=DATA_CONTAINER_ID,
-            instrument=pair,
-            payload={
-                "broker_name": context.broker_name,
-                "timeframe": timeframe,
-                "limit": count,
-                **({"start": start} if start else {}),
-            },
-        )
-        if response.get("error"):
-            raise RuntimeError(f"DataContainer error: {response['error']}")
-        candles = response.get("candles", [])
-        return candles[-count:]

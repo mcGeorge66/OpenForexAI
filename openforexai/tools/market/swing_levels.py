@@ -4,9 +4,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
-from openforexai.models.messaging import EventType
-from openforexai.tools.base import BaseTool, ToolContext, bus_request, candle_dicts_to_objects, get_tool_default
+from openforexai.tools.base import (
+    BaseTool,
+    ToolContext,
+    candle_dicts_to_objects,
+    fetch_candles,
+    get_tool_default,
+)
 
 
 def _detect_confluence(
@@ -214,20 +218,10 @@ class GetSwingLevelsTool(BaseTool):
 
     async def _get_candles(self, context: ToolContext, timeframe: str, limit: int, start: str | None = None):
         try:
-            response = await bus_request(
-                context=context,
-                event_type=EventType.CANDLES_REQUEST,
-                target_id=DATA_CONTAINER_ID,
-                instrument=context.pair,
-                payload={"broker_name": context.broker_name,
-                         "timeframe": timeframe, "limit": limit,
-                         **({"start": start} if start else {})},
-            )
+            raw = await fetch_candles(context, timeframe, limit, start=start)
         except Exception:
             return []
-        if response.get("error"):
-            return []
-        return candle_dicts_to_objects(response.get("candles", []))
+        return candle_dicts_to_objects(raw)
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
         from openforexai.data.indicators import atr, swing_highs, swing_lows

@@ -14,9 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
-from openforexai.models.messaging import EventType
-from openforexai.tools.base import BaseTool, ToolContext, bus_request
+from openforexai.tools.base import BaseTool, ToolContext, fetch_candles
 
 # Vorgabe, nicht Gesetz: als Argument ueberschreibbar. 14 ist der uebliche
 # Wert, aber der Indikator-Baustein im PTJ-Profil rechnet mit 7 — wer die
@@ -94,7 +92,7 @@ class DetectImpulsePullbackTool(BaseTool):
         atr_period = int(arguments.get("atr_period") or _ATR_PERIOD_DEFAULT)
 
         need = _PRE_LOOKBACK + impulse_candles + wait_candles + atr_period + 5
-        candles = await self._fetch_candles(context, context.pair or "", timeframe, min(need, 500))
+        candles = await fetch_candles(context, timeframe, min(need, 500))
         if len(candles) < _PRE_LOOKBACK + impulse_candles + atr_period:
             return {"state": "none", "reason": "not enough candles", "candles": len(candles)}
 
@@ -179,18 +177,3 @@ class DetectImpulsePullbackTool(BaseTool):
             "atr_period": atr_period,
             "current_price": price,
         }
-
-    @staticmethod
-    async def _fetch_candles(
-        context: ToolContext, pair: str, timeframe: str, count: int,
-    ) -> list[dict[str, Any]]:
-        response = await bus_request(
-            context=context,
-            event_type=EventType.CANDLES_REQUEST,
-            target_id=DATA_CONTAINER_ID,
-            instrument=pair,
-            payload={"broker_name": context.broker_name, "timeframe": timeframe, "limit": count},
-        )
-        if response.get("error"):
-            raise RuntimeError(f"DataContainer error: {response['error']}")
-        return (response.get("candles") or [])[-count:]

@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
-from openforexai.models.messaging import EventType
-from openforexai.tools.base import BaseTool, ToolContext, bus_request, get_tool_default
+from openforexai.tools.base import BaseTool, ToolContext, fetch_candles, get_tool_default
 
 _VALID_TIMEFRAMES = {"M5", "M15", "M30", "H1", "H4", "D1"}
 
@@ -62,21 +60,4 @@ class GetCandlesTool(BaseTool):
         if not context.pair:
             raise RuntimeError("pair not set in tool context")
 
-        response = await bus_request(
-            context=context,
-            event_type=EventType.CANDLES_REQUEST,
-            target_id=DATA_CONTAINER_ID,
-            instrument=context.pair,
-            payload={
-                "broker_name": context.broker_name,
-                "timeframe": timeframe,
-                "limit": count,
-                **({"start": start} if start else {}),
-            },
-        )
-
-        if response.get("error"):
-            raise RuntimeError(f"DataContainer error: {response['error']}")
-
-        candles = response.get("candles", [])
-        return candles[-count:]
+        return await fetch_candles(context, timeframe, count, start=start)

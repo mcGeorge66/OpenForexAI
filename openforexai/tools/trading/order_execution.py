@@ -7,11 +7,16 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from openforexai.data.container import DATA_CONTAINER_ID
 from openforexai.data.indicators import atr
 from openforexai.models.messaging import EventType
 from openforexai.models.trade import CloseReason, OrderBookEntry, OrderStatus
-from openforexai.tools.base import ToolContext, bus_request, candle_dicts_to_objects, repo_request
+from openforexai.tools.base import (
+    ToolContext,
+    bus_request,
+    candle_dicts_to_objects,
+    fetch_candles,
+    repo_request,
+)
 from openforexai.utils.logging import get_logger
 from openforexai.utils.time_utils import is_market_open, utcnow
 from openforexai.utils.sync_keys import generate_sync_key
@@ -158,17 +163,10 @@ def _build_market_context_snapshot(
 
 async def _get_candles_via_bus(context: ToolContext, count: int, timeframe: str = "M5", pair: str | None = None) -> list[dict]:
     """Fetch candles from DataContainer via bus. Uses context.pair when pair is omitted."""
-    response = await bus_request(
-        context=context,
-        event_type=EventType.CANDLES_REQUEST,
-        target_id=DATA_CONTAINER_ID,
-        instrument=pair or context.pair,
-        payload={"broker_name": context.broker_name,
-                 "timeframe": timeframe, "limit": count},
-    )
-    if response.get("error"):
+    try:
+        return await fetch_candles(context, timeframe, count, pair=pair)
+    except Exception:
         return []
-    return response.get("candles", [])
 
 
 async def _get_m5_candles_via_bus(context: ToolContext, count: int) -> list[dict]:
