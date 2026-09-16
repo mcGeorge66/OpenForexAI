@@ -165,3 +165,76 @@ def row_for(
         json.dumps(raw_values, separators=(",", ":")) if raw_values else None,
         computed_at,
     )
+
+
+# ── Computing one row ──────────────────────────────────────────────────────
+# Shared by the backfill script and the DataContainer's live maintenance, so
+# there is one implementation rather than two that drift. Drift is not a
+# theoretical worry here: reimplementing the FOMAK windowing produced a
+# one-candle shift and a wrong higher-timeframe bar count in the same evening,
+# and both stayed invisible until a spot check against the tool caught them.
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    # Mirrors the live snapshot profile Paul_Tudor_Jones_V1. A value changed
+    # here but not there stores a key the agent never sees — which the
+    # parameter set in the row makes visible rather than harmless.
+    "timeframe": "M5",
+    "lookback_candles": 24,
+    "higher_timeframe": "M30",
+    "fopok_timeframe": "M15",
+    "fopok_higher_timeframe": "H1",
+    "fopok_lookback": 100,
+    "fopok_prominence_atr": 0.25,
+    "fopok_atr_period": 14,
+}
+
+# The level search needs history of its own before it can find anything.
+FOPOK_MIN_BARS = 20
+
+
+def fopok_from_levels(
+    own_bars: list,
+    higher_bars: list,
+    price: float,
+    settings: dict[str, Any],
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """(code, raw, reason) — exactly one of code / reason is set.
+
+    Calls compute_swing_levels, the function GetSwingLevelsTool itself calls,
+    not a copy of it.
+    """
+    from openforexai.tools.market._fopok_core import FopokInputError, compute_fopok
+    from openforexai.tools.market.swing_levels import compute_swing_levels
+
+    if len(own_bars) < FOPOK_MIN_BARS or len(higher_bars) < FOPOK_MIN_BARS:
+        return None, None, (
+            f"not computed: only {len(own_bars)} {settings['fopok_timeframe']} and "
+            f"{len(higher_bars)} {settings['fopok_higher_timeframe']} bars available "
+            f"before this point, {FOPOK_MIN_BARS} of each are needed"
+        )
+
+    def levels(bars: list, timeframe: str) -> dict[str, Any]:
+        return compute_swing_levels(
+            bars,
+            timeframe=timeframe,
+            lookback=int(settings["fopok_lookback"]),
+            current_price=price,
+            current_price_source="M5",
+            prominence_atr=float(settings["fopok_prominence_atr"]),
+            atr_period=int(settings["fopok_atr_period"]),
+        )
+
+    own = levels(own_bars, str(settings["fopok_timeframe"]))
+    high = levels(higher_bars, str(settings["fopok_higher_timeframe"]))
+    try:
+        res = compute_fopok(
+            current_price=price,
+            nearest_resistance=own.get("nearest_resistance"),
+            nearest_support=own.get("nearest_support"),
+            atr=own.get("atr") or 0.0,
+            higher_resistance=high.get("nearest_resistance"),
+            higher_support=high.get("nearest_support"),
+        )
+    except Exception as exc:
+        return None, None, f"not computed: {exc}"
+    return res.get("fopok"), res.get("raw_values"), None

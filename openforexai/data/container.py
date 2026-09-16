@@ -87,6 +87,7 @@ class DataContainer:
         event_bus=None,
         monitoring_bus=None,
         resample_bucket_offset_hours: int = 0,
+        market_key_settings: list[dict] | None = None,
     ) -> None:
         if store is None:
             raise ValueError(
@@ -97,6 +98,13 @@ class DataContainer:
         self._event_bus = event_bus
         self._monitoring = monitoring_bus
         self._resample_bucket_offset_hours = int(resample_bucket_offset_hours)
+        # Parameter sets whose keys are kept current. Empty list switches the
+        # maintenance off; None takes the one the live snapshot profile uses.
+        from openforexai.data.market_keys import DEFAULT_SETTINGS
+        self._market_key_settings: list[dict] = (
+            [dict(DEFAULT_SETTINGS)] if market_key_settings is None
+            else [dict(s) for s in market_key_settings]
+        )
         self._registered: set[tuple[str, str]] = set()
         self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
@@ -260,6 +268,9 @@ class DataContainer:
             timeframe="M5",
             timestamp=candle.timestamp.isoformat(),
         )
+
+        # After the candle is safely stored, never before.
+        await self._maintain_market_keys(broker_name, pair)
 
     async def _on_gap_detected(self, message: AgentMessage) -> None:
         """Forward gap notification to the appropriate broker adapter."""
@@ -441,6 +452,160 @@ class DataContainer:
             _log.exception("Candle repair failed", broker=broker_name, pair=pair, error=str(exc))
             self._emit("data_container", MonitoringEventType.CANDLE_REPAIR_FAILED,
                        broker_name=broker_name, pair=pair, error=str(exc))
+
+    # ── Market keys ───────────────────────────────────────────────────────────
+
+    async def _maintain_market_keys(self, broker_name: str, pair: str) -> None:
+        """Write the key for every closed candle that has none yet.
+
+        Runs after candles are stored, never before: a key is a statement about
+        a finished candle, and the newest row in the candle table is the one
+        still being built.
+
+        Gap-filling rather than "compute the latest": a restart, a pause or a
+        repaired candle would otherwise leave holes that only a manual backfill
+        run could close. Bounded per call so the container's single message
+        loop keeps moving — anything left over is picked up by the next candle.
+
+        Failures never reach the caller. Candle storage must not depend on a
+        derived value. They are reported, though: a silently empty key table
+        would look exactly like a quiet market.
+        """
+        from openforexai.data.market_keys import (
+            fopok_from_levels,
+            keys_table,
+            param_set,
+            row_for,
+        )
+        from openforexai.tools.market._fomak_core import (
+            EMA_STATE_PERIOD,
+            compute_fomak,
+            warmup_for,
+        )
+
+        if not self._market_key_settings:
+            return
+        if not hasattr(self._store, "save_market_keys"):
+            return
+
+        for settings in self._market_key_settings:
+            try:
+                await self._maintain_one_param_set(
+                    broker_name, pair, settings,
+                    compute_fomak=compute_fomak, warmup_for=warmup_for,
+                    ema_state_period=EMA_STATE_PERIOD, param_set=param_set,
+                    row_for=row_for, keys_table=keys_table,
+                    fopok_from_levels=fopok_from_levels,
+                )
+            except Exception as exc:
+                _log.exception("Market key maintenance failed",
+                               broker=broker_name, pair=pair, error=str(exc))
+                self._emit("data_container", MonitoringEventType.SYSTEM_ERROR,
+                           broker_name=broker_name, pair=pair,
+                           reason="market_key_maintenance_failed", error=str(exc))
+
+    #: At most this many missing keys are written per incoming candle. One key
+    #: costs ~10 ms and the container's loop is sequential, so a long backlog
+    #: is drained over several candles instead of blocking candle intake once.
+    _MARKET_KEY_MAX_PER_CALL = 20
+
+    async def _maintain_one_param_set(
+        self, broker_name: str, pair: str, settings: dict, **fns,
+    ) -> None:
+        timeframe = str(settings["timeframe"]).upper()
+        lookback = int(settings["lookback_candles"])
+        higher = str(settings["higher_timeframe"]).upper()
+        params = fns["param_set"](
+            timeframe=timeframe, lookback_candles=lookback, higher_timeframe=higher,
+        )
+        warm = fns["warmup_for"]()
+        need = lookback + warm
+
+        # Enough M5 history for the window, the warmup, and the two
+        # FOPOK timeframes' own lookback.
+        span = max(
+            need + self._MARKET_KEY_MAX_PER_CALL,
+            _TF_M5_MULTIPLIER.get(str(settings["fopok_higher_timeframe"]).upper(), 12) * 40,
+        )
+        raw = await self._store.get_candles(broker_name, pair, "M5", limit=span)
+        m5 = self._drop_null_candles(list(reversed(raw)))
+        if len(m5) < need + 1:
+            return
+
+        # The newest candle may still be forming — a key for it would change
+        # with the next tick. Judged by the clock, as the tools do.
+        now = datetime.now(UTC)
+        closed = [c for c in m5 if c.timestamp + _M5_STEP <= now]
+        if len(closed) < need:
+            return
+
+        existing = {
+            r["timestamp"]
+            for r in await self._store.get_market_keys(
+                broker_name, pair, timeframe, params,
+                start=closed[max(0, len(closed) - self._MARKET_KEY_MAX_PER_CALL - 1)].timestamp,
+            )
+        }
+
+        def as_dict(c) -> dict:
+            return {
+                "timestamp": c.timestamp.isoformat(), "open": str(c.open),
+                "high": str(c.high), "low": str(c.low), "close": str(c.close),
+                "tick_volume": int(c.tick_volume or 0),
+            }
+
+        rows = []
+        for end in range(len(closed), max(need - 1, len(closed) - self._MARKET_KEY_MAX_PER_CALL), -1):
+            window = closed[end - lookback:end]
+            warmup = closed[end - need:end - lookback]
+            if len(window) < lookback or len(warmup) < warm:
+                continue
+            valid_from = (window[-1].timestamp + _M5_STEP).isoformat()
+            if valid_from in existing:
+                continue
+
+            higher_bars = resample_candles(
+                closed[:end], higher,
+                bucket_offset_hours=self._resample_bucket_offset_hours,
+            )[-(fns["ema_state_period"] + 10):]
+            if len(higher_bars) < 25:
+                continue
+            try:
+                res = fns["compute_fomak"](
+                    [as_dict(c) for c in window],
+                    [as_dict(c) for c in warmup],
+                    [as_dict(c) for c in higher_bars],
+                )
+            except Exception as exc:
+                _log.warning("FOMAK not computable", pair=pair,
+                             at=valid_from, error=str(exc))
+                continue
+
+            price = float(window[-1].close)
+            own_bars = resample_candles(
+                closed[:end], str(settings["fopok_timeframe"]).upper(),
+                bucket_offset_hours=self._resample_bucket_offset_hours,
+            )[-int(settings["fopok_lookback"]):]
+            hi_bars = resample_candles(
+                closed[:end], str(settings["fopok_higher_timeframe"]).upper(),
+                bucket_offset_hours=self._resample_bucket_offset_hours,
+            )[-int(settings["fopok_lookback"]):]
+            fopok, fopok_raw, reason = fns["fopok_from_levels"](
+                own_bars, hi_bars, price, settings,
+            )
+
+            rows.append(fns["row_for"](
+                timestamp=valid_from, params=params, fomak=res["fomak"],
+                raw_values=res.get("raw_values"),
+                computed_at=datetime.now(UTC).isoformat(),
+                fopok=fopok, fopok_raw=fopok_raw, fopok_reason=reason,
+            ))
+
+        if rows:
+            written = await self._store.save_market_keys(broker_name, pair, timeframe, rows)
+            self._emit("data_container", MonitoringEventType.M5_CANDLE_SAVED,
+                       broker_name=broker_name, pair=pair, timeframe=timeframe,
+                       reason="market_keys_written", count=written)
 
     # ── Data access API ───────────────────────────────────────────────────────
 

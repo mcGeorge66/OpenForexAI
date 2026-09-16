@@ -267,6 +267,12 @@ async def bootstrap(
         event_bus=bus,
         monitoring_bus=monitoring_bus,
         resample_bucket_offset_hours=int(data_cfg.get("resample_bucket_offset_hours", 0)),
+        # Which market-key parameter sets are kept current. Omitted entirely,
+        # the DataContainer uses the one the live snapshot profile computes
+        # with; an empty list switches the maintenance off. Config rather than
+        # code because comparing two parameterisations on the same history is
+        # the point of having the set in the row key at all.
+        market_key_settings=data_cfg.get("market_key_settings"),
     )
 
     # Register each unique broker + its pairs (derived from agent configs)
