@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Bot, Check, Copy, FileText, GitBranch, LineChart, Loader2, Printer, RefreshCcw, BookOpen, X } from 'lucide-react'
+import { AlertCircle, Bot, Check, Copy, FileText, GitBranch, LineChart, Loader2, Printer, RefreshCcw, BookOpen, TrendingUp, X } from 'lucide-react'
 import { TraceViewer } from '@/components/views/events/TraceViewer'
 import { OrderInvestigateModal } from '@/components/views/action/OrderInvestigateModal'
+import { OrderbookPerformance } from '@/components/views/action/OrderbookPerformance'
 import { kbImport } from '@/knowledgebase/kbImport'
 import { formatTs as formatTsCentral } from '@/utils/time'
 
@@ -25,6 +26,7 @@ import {
 
 type StatusFilter = 'all' | 'open' | 'closed' | 'pending' | 'partially_filled' | 'rejected' | 'cancelled'
 type ChartTimeframe = 'M5' | 'M15' | 'M30' | 'H1'
+type OrderbookView = 'orders' | 'performance'
 
 function CopyButton({ getText }: { getText: () => string }) {
   const [copied, setCopied] = useState(false)
@@ -136,6 +138,7 @@ export function Orderbook({ onOpenInChartAnalysis }: OrderbookProps) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [kbMsg, setKbMsg] = useState<string | null>(null)
+  const [view, setView] = useState<OrderbookView>('orders')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [maxOrders, setMaxOrders] = useState(7)          // applied limit (triggers fetch)
   const [maxOrdersInput, setMaxOrdersInput] = useState('7') // raw input string
@@ -489,12 +492,49 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
 
   return (
     <div className="h-full flex flex-col bg-gray-950 text-gray-100">
-      <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
-        <div>
+      {/* flex-wrap, and the subtitle never breaks: in a narrow window the two
+          view tabs plus the filters no longer fit on one line, and without the
+          wrap the buttons ended up on top of the heading. */}
+      <div className="px-6 py-4 border-b border-gray-800 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="mr-auto">
           <h2 className="text-lg font-semibold">Orderbook</h2>
-          <p className="text-sm text-gray-400">Top half table, bottom half chart with entry, exit, and analysis lines.</p>
+          <p className="text-sm text-gray-400 whitespace-nowrap">
+            {view === 'orders'
+              ? 'Top half table, bottom half chart with entry, exit, and analysis lines.'
+              : 'Every realised trade of the period added up, per currency pair.'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setView('orders')}
+            className={[
+              'px-3 py-1 rounded border text-sm flex items-center gap-1',
+              view === 'orders'
+                ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
+                : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+            ].join(' ')}
+            title="Order list with chart"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Orders
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('performance')}
+            className={[
+              'px-3 py-1 rounded border text-sm flex items-center gap-1',
+              view === 'performance'
+                ? 'border-emerald-500 bg-emerald-900/30 text-emerald-300'
+                : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-200',
+            ].join(' ')}
+            title="Cumulative result per currency pair over a period"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            Performance
+          </button>
+        </div>
+        <div className={view === 'orders' ? 'flex items-center gap-2' : 'hidden'}>
           {(['all', 'open', 'closed', 'rejected'] as StatusFilter[]).map(filter => (
             <button
               key={filter}
@@ -559,7 +599,11 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
 
       {error && <div className="px-6 py-2 text-sm text-red-400 border-b border-red-900/40">{error}</div>}
 
-      <div ref={splitRootRef} className="flex-1 min-h-0 flex flex-col">
+      {/* Kept mounted while the Performance tab is open, only hidden — otherwise
+          the candle chart loses its zoom and reloads its candles on every tab
+          switch. The Performance view is mounted on demand instead, so it
+          measures its own width correctly and only fetches when it is looked at. */}
+      <div ref={splitRootRef} className={view === 'orders' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <section className="min-h-0 overflow-hidden" style={{ flexBasis: tableBasis }}>
           <div className="h-full overflow-auto">
             <table className="w-full text-sm">
@@ -785,6 +829,12 @@ ${formatAnalysisAsMarkdown(selectedEntry)}
           </div>
         </section>
       </div>
+
+      {view === 'performance' && (
+        <div className="flex-1 min-h-0">
+          <OrderbookPerformance />
+        </div>
+      )}
 
       {analysisOpen && selectedEntry && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
