@@ -31,8 +31,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from openforexai.tools.market import _fomak_core as fomak_core
-from openforexai.tools.market import _fopok_core as fopok_core
+# Imported inside the functions on purpose. `openforexai.tools.__init__`
+# pulls in compute_fomak, which reads the stored key and therefore imports
+# this module — at module level that is a cycle, and which side breaks
+# depends on who is imported first. The backfill script (which starts at
+# data.market_keys) hit it; the tests did not, because pytest loads the
+# tools package first.
 
 # Bumped by hand only when the stored *shape* changes (new column, different
 # meaning of an existing one) — not for threshold changes, which the checksum
@@ -46,6 +50,8 @@ def bins_checksum() -> str:
     The bin edges are module constants, so a recalibration would otherwise
     leave every stored value looking valid while meaning something different.
     """
+    from openforexai.tools.market import _fomak_core as fomak_core
+
     payload = repr([
         fomak_core.BINS_STRENGTH,
         fomak_core.BINS_VOLA,
@@ -64,8 +70,8 @@ def param_set(
     timeframe: str,
     lookback_candles: int,
     higher_timeframe: str,
-    atr_short_period: int = fomak_core.ATR_SHORT_PERIOD,
-    atr_long_period: int = fomak_core.ATR_LONG_PERIOD,
+    atr_short_period: int | None = None,
+    atr_long_period: int | None = None,
 ) -> str:
     """Everything that changes the resulting code, as one comparable string.
 
@@ -74,6 +80,13 @@ def param_set(
     the FOPOK format version: a character that changes meaning must not be
     readable as if it never had.
     """
+    from openforexai.tools.market import _fomak_core as fomak_core
+    from openforexai.tools.market import _fopok_core as fopok_core
+
+    if atr_short_period is None:
+        atr_short_period = fomak_core.ATR_SHORT_PERIOD
+    if atr_long_period is None:
+        atr_long_period = fomak_core.ATR_LONG_PERIOD
     return (
         f"{timeframe.upper()}-{int(lookback_candles)}-{higher_timeframe.upper()}"
         f"-{int(atr_short_period)}-{int(atr_long_period)}-{bins_checksum()}"

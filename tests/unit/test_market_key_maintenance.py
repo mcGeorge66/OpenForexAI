@@ -23,6 +23,8 @@ from openforexai.data.market_keys import (
 )
 from openforexai.models.market import Candle
 
+REPO_ROOT = __import__('pathlib').Path(__file__).resolve().parents[2]
+
 
 def _candles(count: int, start: datetime | None = None) -> list[Candle]:
     """A gently rising series, oldest first, all of them closed."""
@@ -146,3 +148,29 @@ def test_table_and_parameter_set_match_the_backfill() -> None:
         lookback_candles=DEFAULT_SETTINGS["lookback_candles"],
         higher_timeframe=DEFAULT_SETTINGS["higher_timeframe"],
     ) == "M5-24-M30-14-50-a5e8feae-p2"
+
+
+def test_market_keys_imports_on_its_own() -> None:
+    """In a fresh interpreter, with nothing else loaded first.
+
+    `openforexai.tools.__init__` imports compute_fomak, which reads the stored
+    key and therefore imports this module — a module-level import back into
+    the tools package makes that a cycle whose outcome depends on who is
+    imported first. The test suite never hits it, because pytest has already
+    loaded the tools package by the time anything asks for market_keys. The
+    backfill script starts at market_keys and broke immediately.
+
+    A subprocess is the only way to test this: within one interpreter the
+    modules are already cached.
+    """
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "from openforexai.data.market_keys import param_set, keys_table, row_for; "
+         "print(param_set(timeframe='M5', lookback_candles=24, higher_timeframe='M30'))"],
+        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=120,
+    )
+    assert proc.returncode == 0, f"importing market_keys alone fails:\n{proc.stderr}"
+    assert proc.stdout.strip().endswith("-p2")
