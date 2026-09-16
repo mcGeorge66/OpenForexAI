@@ -43,12 +43,23 @@ def _load_chartshot_cfg(config_name: str) -> tuple[str, str, dict[str, Any]]:
     return output_dir, output_mode, named
 
 
+_ui_tz_cache: timezone | None = None
+
+
 def _ui_timezone() -> timezone:
     """The timezone every timestamp in this application is displayed in.
 
     Same source the web UI reads through /system/ui-settings, so a rendered
     chart and the tables next to it agree. Candles are stored in UTC.
+
+    Cached: this is called once per candle and once per indicator value, and
+    parsing config.json5 (JSON5, pure Python) on every one of them blocks the
+    event loop for the whole render — the same reason _load_tool_defaults()
+    caches.
     """
+    global _ui_tz_cache
+    if _ui_tz_cache is not None:
+        return _ui_tz_cache
     from openforexai.config.json_loader import resolve_config_path
     path = resolve_config_path(Path(__file__).parents[3] / "config")
     try:
@@ -58,7 +69,8 @@ def _ui_timezone() -> timezone:
     except Exception as exc:
         _log.warning("chartshot: could not read ui_utc, falling back to UTC+3: %s", exc)
         offset = 3
-    return timezone(timedelta(hours=offset))
+    _ui_tz_cache = timezone(timedelta(hours=offset))
+    return _ui_tz_cache
 
 
 def _make_mpf_style(style: str) -> Any:
