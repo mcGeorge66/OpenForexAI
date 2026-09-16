@@ -38,6 +38,12 @@ def fake_bus_request(monkeypatch):
     calls: list[dict] = []
 
     async def _fake(context, event_type, target_id, payload, instrument=None, timeout=30.0):
+        # The tool also asks the repository for a stored key and offers to
+        # store a fresh one. Those go through the same helper; only candle
+        # requests belong in `calls`, and the store must answer "nothing
+        # there" so every test still exercises the computation.
+        if "operation" in payload:
+            return {"result": None}
         calls.append({"payload": payload, "instrument": instrument})
         timeframe = payload["timeframe"]
         limit = payload["limit"]
@@ -118,6 +124,8 @@ async def test_no_pair_available_rejected(tool, fake_bus_request):
 @pytest.mark.asyncio
 async def test_insufficient_candle_history_reported_clearly(tool, monkeypatch):
     async def _fake_short(context, event_type, target_id, payload, instrument=None, timeout=30.0):
+        if "operation" in payload:
+            return {"result": None}
         return {"candles": _synthetic_candles(5, 5), "error": None}  # far fewer than needed
 
     monkeypatch.setattr("openforexai.tools.base.bus_request", _fake_short)
@@ -129,6 +137,8 @@ async def test_insufficient_candle_history_reported_clearly(tool, monkeypatch):
 @pytest.mark.asyncio
 async def test_data_container_error_propagated(tool, monkeypatch):
     async def _fake_error(context, event_type, target_id, payload, instrument=None, timeout=30.0):
+        if "operation" in payload:
+            return {"result": None}
         return {"candles": [], "error": "boom"}
 
     monkeypatch.setattr("openforexai.tools.base.bus_request", _fake_error)

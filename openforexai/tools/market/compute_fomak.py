@@ -14,7 +14,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import logging
+
+from openforexai.data.market_keys import param_set as market_key_param_set
 from openforexai.tools.base import BaseTool, ToolContext, fetch_candles
+_log = logging.getLogger(__name__)
+
 from openforexai.tools.market._fomak_core import (
     EMA_STATE_PERIOD,
     WARMUP_CANDLES,
@@ -143,11 +148,34 @@ class ComputeFomakTool(BaseTool):
             return {"error": "broker_name not set in tool context."}
 
         include_forming = _truthy(arguments.get("include_forming_candle"))
+        want_raw = _truthy(arguments.get("include_raw_values"))
+        want_explanation = _truthy(arguments.get("include_explanation"))
         atr_short_period = int(arguments.get("atr_short_period") or 14)
         atr_long_period = int(arguments.get("atr_long_period") or 50)
         # The warmup follows the longer period — otherwise the rolling ATR has
         # not settled by the time the window starts.
         total_needed = lookback_candles + warmup_for(atr_short_period, atr_long_period)
+
+        # Stored first. One key costs ~10 ms to compute and the DataContainer
+        # already writes one per closed candle, so recomputing it on every
+        # question is work done for nothing — and, worse, a second opinion
+        # where there should be one answer.
+        params = market_key_param_set(
+            timeframe=timeframe,
+            lookback_candles=lookback_candles,
+            higher_timeframe=higher_timeframe,
+            atr_short_period=atr_short_period,
+            atr_long_period=atr_long_period,
+        )
+        if not include_forming:
+            stored = await _stored_key(context, pair, timeframe, params, anchor)
+            if stored:
+                return _response_from_stored(
+                    stored, pair=pair, timeframe=timeframe,
+                    higher_timeframe=higher_timeframe,
+                    lookback_candles=lookback_candles,
+                    want_raw=want_raw, want_explanation=want_explanation,
+                )
         try:
             candles = await fetch_candles(
                 context, timeframe, total_needed, pair=pair, start=anchor,
@@ -190,13 +218,110 @@ class ComputeFomakTool(BaseTool):
             "anchor": anchor or datetime.now(UTC).isoformat(),
             "includes_forming_candle": include_forming,
         }
-        if _truthy(arguments.get("include_raw_values")):
+        if not include_forming:
+            await _store_key(
+                context, pair, timeframe, params,
+                window_candles[-1]["timestamp"], result,
+            )
+
+        if want_raw:
             response["direction"] = result["direction"]
             response["higher_timeframe_direction"] = result["higher_timeframe_direction"]
             response["raw_values"] = result["raw_values"]
-        if _truthy(arguments.get("include_explanation")):
+        if want_explanation:
             response["explanation"] = (
                 f"{explain_fomak(result['fomak'])}\n\n{interpret_fomak(result['fomak'])}"
             )
         return response
 
+
+# ── The stored key as a cache ──────────────────────────────────────────────
+
+async def _stored_key(
+    context: ToolContext, pair: str, timeframe: str, params: str, anchor: str | None,
+) -> dict[str, Any] | None:
+    """The row in force at *anchor*, or None — never an exception.
+
+    A missing repository, an older one without the method, a timeout: all of
+    them mean "compute it yourself", never "fail the analysis". The value is
+    derived and reproducible, so falling back costs time and nothing else.
+    """
+    from openforexai.tools.base import repo_request
+
+    try:
+        row = await repo_request(context, "get_market_key_at", {
+            "broker_name": context.broker_name,
+            "pair": pair,
+            "timeframe": timeframe,
+            "param_set": params,
+            "at": anchor,
+        }, timeout=5.0)
+    except Exception:
+        return None
+    return row if isinstance(row, dict) and row.get("fomak") else None
+
+
+async def _store_key(
+    context: ToolContext, pair: str, timeframe: str, params: str,
+    last_candle_timestamp: str, result: dict[str, Any],
+) -> None:
+    """Keep what was just computed, stamped the way the maintenance stamps it.
+
+    The stamp is the close time of the newest candle in the window — the
+    moment the key becomes valid — not the anchor that was asked for. An
+    anchor mid-candle and one at its close describe the same market and must
+    not produce two rows.
+    """
+    from datetime import datetime, timedelta
+
+    from openforexai.data.market_keys import row_for
+    from openforexai.tools.base import TIMEFRAME_MINUTES, repo_request
+
+    minutes = TIMEFRAME_MINUTES.get(timeframe.upper())
+    if not minutes:
+        return
+    try:
+        opened = datetime.fromisoformat(str(last_candle_timestamp))
+        valid_from = (opened + timedelta(minutes=minutes)).isoformat()
+        await repo_request(context, "save_market_keys", {
+            "broker_name": context.broker_name,
+            "pair": pair,
+            "timeframe": timeframe,
+            "rows": [list(row_for(
+                timestamp=valid_from, params=params, fomak=result["fomak"],
+                raw_values=result.get("raw_values"),
+                computed_at=datetime.now(UTC).isoformat(),
+            ))],
+        }, timeout=5.0)
+    except Exception as exc:
+        _log.debug("Market key not stored: %s", exc)
+
+
+def _response_from_stored(
+    row: dict[str, Any], *, pair: str, timeframe: str, higher_timeframe: str,
+    lookback_candles: int, want_raw: bool, want_explanation: bool,
+) -> dict[str, Any]:
+    """Same shape as a freshly computed answer, so a caller cannot tell — and
+    does not need to — whether it was read or computed. `from_store` says so
+    anyway, because a cached answer that hides that it is cached is the kind
+    of thing nobody can debug later."""
+    import json
+
+    response: dict[str, Any] = {
+        "fomak": row["fomak"],
+        "pair": pair,
+        "timeframe": timeframe,
+        "higher_timeframe": higher_timeframe,
+        "lookback_candles": lookback_candles,
+        "anchor": row["timestamp"],
+        "includes_forming_candle": False,
+        "from_store": True,
+    }
+    if want_raw and row.get("raw_values"):
+        try:
+            response["raw_values"] = json.loads(row["raw_values"])
+        except (TypeError, ValueError):
+            pass
+    if want_explanation:
+        response["explanation"] = row.get("fomak_text") or explain_fomak(row["fomak"])
+    return response

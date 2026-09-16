@@ -165,6 +165,11 @@ def recorded_requests(monkeypatch):
     calls: list[dict] = []
 
     async def _fake(context, event_type, target_id, payload, instrument=None, timeout=30.0):
+        # compute_fomak also reads and writes the stored market key through
+        # this helper. Those are not candle requests: answer "nothing stored"
+        # so the computation runs, and keep them out of the recorded calls.
+        if "operation" in payload:
+            return {"result": None}
         calls.append({"payload": dict(payload), "instrument": instrument})
         return {"candles": _synthetic_candles(int(payload["limit"])), "error": None}
 

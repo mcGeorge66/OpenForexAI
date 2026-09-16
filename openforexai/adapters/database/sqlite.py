@@ -700,6 +700,45 @@ class SQLiteRepository(AbstractRepository):
         cursor = await self._db().execute(sql, tuple(params))
         return [dict(r) for r in await cursor.fetchall()]
 
+    async def get_market_key_at(
+        self,
+        broker_name: str,
+        pair: str,
+        timeframe: str,
+        param_set: str,
+        at: str | None = None,
+    ) -> dict[str, Any] | None:
+        """The key in force at *at* — the newest row stamped at or before it.
+
+        Strings only, no datetimes: this is the method tools reach through the
+        event bus, which carries JSON.
+
+        A row's timestamp is the moment its key becomes valid, so "the key at
+        time X" is the largest timestamp <= X. That is exactly what the tool
+        computes when asked with anchor X, which is what makes the row usable
+        as its cache rather than a second opinion.
+        """
+        from openforexai.data.market_keys import keys_table
+        table = keys_table(broker_name, pair, timeframe)
+        cursor = await self._db().execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (table,),
+        )
+        if await cursor.fetchone() is None:
+            return None
+        if at:
+            cursor = await self._db().execute(
+                f"SELECT * FROM {table} WHERE param_set = ? AND timestamp <= ? "
+                "ORDER BY timestamp DESC LIMIT 1",
+                (param_set, at),
+            )
+        else:
+            cursor = await self._db().execute(
+                f"SELECT * FROM {table} WHERE param_set = ? ORDER BY timestamp DESC LIMIT 1",
+                (param_set,),
+            )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def get_market_key_coverage(
         self, broker_name: str, pair: str, timeframe: str, param_set: str,
     ) -> dict[str, Any]:
