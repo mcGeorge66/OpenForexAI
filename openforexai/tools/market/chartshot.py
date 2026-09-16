@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import logging
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,24 @@ def _load_chartshot_cfg(config_name: str) -> tuple[str, str, dict[str, Any]]:
     named = configs.get(config_name) or configs.get("default") or {}
     output_mode = str(named.get("output_mode", "temp"))
     return output_dir, output_mode, named
+
+
+def _ui_timezone() -> timezone:
+    """The timezone every timestamp in this application is displayed in.
+
+    Same source the web UI reads through /system/ui-settings, so a rendered
+    chart and the tables next to it agree. Candles are stored in UTC.
+    """
+    from openforexai.config.json_loader import resolve_config_path
+    path = resolve_config_path(Path(__file__).parents[3] / "config")
+    try:
+        import json5
+        data = json5.loads(path.read_text(encoding="utf-8"))
+        offset = int((data.get("system") or {}).get("ui_utc", 3))
+    except Exception as exc:
+        _log.warning("chartshot: could not read ui_utc, falling back to UTC+3: %s", exc)
+        offset = 3
+    return timezone(timedelta(hours=offset))
 
 
 def _make_mpf_style(style: str) -> Any:
@@ -113,7 +131,11 @@ def _candles_to_dataframe(candles: list) -> Any:
 
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        dt = dt.replace(tzinfo=None)
+        # The axis labels below read dt.hour, so the wall clock has to be the
+        # one the rest of the UI shows (config `ui_utc`). Candles are stored in
+        # UTC — dropping the offset without converting would label this chart
+        # three hours off from every other timestamp in the application.
+        dt = dt.astimezone(_ui_timezone()).replace(tzinfo=None)
 
         rows.append({
             "Date":   dt,
@@ -170,8 +192,11 @@ def _align_to_df(df: Any, values: list) -> Any:
         else:
             continue
 
-        if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
+        # Same wall clock as the candle index in _candles_to_dataframe, or the
+        # overlay lands three hours beside the candles it belongs to.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(_ui_timezone()).replace(tzinfo=None)
         idx.append(dt)
         vals.append(float(val))
 

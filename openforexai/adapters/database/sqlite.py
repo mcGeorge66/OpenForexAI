@@ -21,6 +21,7 @@ from openforexai.models.trade import (
     TradeDirection,
 )
 from openforexai.ports.database import AbstractRepository
+from openforexai.utils.time_utils import candle_timestamp_key
 
 
 class SQLiteRepository(AbstractRepository):
@@ -567,7 +568,7 @@ class SQLiteRepository(AbstractRepository):
             ) VALUES (?,?,?,?,?,?,?)
             """,
             (
-                candle.timestamp.isoformat(),
+                candle_timestamp_key(candle.timestamp),
                 str(candle.open),
                 str(candle.high),
                 str(candle.low),
@@ -588,7 +589,7 @@ class SQLiteRepository(AbstractRepository):
         table = self._series_table(broker_name, pair, timeframe)
         values = [
             (
-                c.timestamp.isoformat(),
+                candle_timestamp_key(c.timestamp),
                 str(c.open),
                 str(c.high),
                 str(c.low),
@@ -622,7 +623,7 @@ class SQLiteRepository(AbstractRepository):
         if start is not None:
             cursor = await self._db().execute(
                 f"SELECT * FROM {table} WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT ?",
-                (start.isoformat(), limit),
+                (candle_timestamp_key(start), limit),
             )
         else:
             cursor = await self._db().execute(

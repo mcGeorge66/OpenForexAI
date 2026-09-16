@@ -18,6 +18,7 @@ from openforexai.models.trade import (
     TradeDirection,
 )
 from openforexai.ports.database import AbstractRepository
+from openforexai.utils.time_utils import candle_timestamp_key
 
 
 class PostgreSQLRepository(AbstractRepository):
@@ -610,7 +611,7 @@ class PostgreSQLRepository(AbstractRepository):
                 tick_volume=EXCLUDED.tick_volume,
                 spread=EXCLUDED.spread
             """,
-            candle.timestamp.isoformat(),
+            candle_timestamp_key(candle.timestamp),
             str(candle.open),
             str(candle.high),
             str(candle.low),
@@ -635,7 +636,7 @@ class PostgreSQLRepository(AbstractRepository):
         )
         rows = [
             (
-                c.timestamp.isoformat(),
+                candle_timestamp_key(c.timestamp),
                 str(c.open),
                 str(c.high),
                 str(c.low),
@@ -663,7 +664,7 @@ class PostgreSQLRepository(AbstractRepository):
         if start is not None:
             rows = await self._fetch(
                 f"SELECT * FROM {table} WHERE timestamp <= $1 ORDER BY timestamp DESC LIMIT $2",
-                start.isoformat(), limit,
+                candle_timestamp_key(start), limit,
             )
         else:
             rows = await self._fetch(
