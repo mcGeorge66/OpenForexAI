@@ -92,6 +92,62 @@ class ToolContext:
     as_of: str | None = None
 
 
+TIMEFRAME_MINUTES: dict[str, int] = {
+    "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440,
+}
+
+
+def _drop_forming_candle(
+    candles: list[dict[str, Any]], timeframe: str, anchor: str | None,
+) -> list[dict[str, Any]]:
+    """Remove the trailing candle when its period has not elapsed yet.
+
+    The newest row in the candle tables is the bar currently being built — it
+    grows tick by tick until its period ends. A window that includes it gives a
+    different answer at 20:10:30 than at 20:14:30 for the same bar, and a
+    different one again after the bar closed and the row was overwritten with
+    its final values.
+
+    Measured: of 103 trades whose FOMAK was stored at decision time, the same
+    tool with the same anchor and the same code reproduces only 62 today. Not a
+    version difference (matches and mismatches span the same days) and not a
+    window-edge offset (shifting the anchor by one candle makes it worse). A key
+    that answers the same moment differently twice cannot group markets, cannot
+    be validated and cannot be backtested.
+
+    "Elapsed" is judged against the anchor when one is set, otherwise against
+    now — so a replay drops exactly the bar that was still forming back then.
+    """
+    minutes = TIMEFRAME_MINUTES.get(timeframe.upper())
+    if not minutes or not candles:
+        return candles
+    from datetime import UTC, datetime, timedelta
+
+    if anchor:
+        try:
+            reference = datetime.fromisoformat(anchor)
+        except ValueError:
+            return candles
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=UTC)
+    else:
+        reference = datetime.now(UTC)
+
+    last = candles[-1]
+    raw = last.get("timestamp")
+    if not isinstance(raw, str):
+        return candles
+    try:
+        opened = datetime.fromisoformat(raw)
+    except ValueError:
+        return candles
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=UTC)
+    if opened + timedelta(minutes=minutes) > reference:
+        return candles[:-1]
+    return candles
+
+
 async def fetch_candles(
     context: ToolContext,
     timeframe: str,
@@ -99,6 +155,7 @@ async def fetch_candles(
     *,
     pair: str | None = None,
     start: str | None = None,
+    include_forming: bool = False,
     timeout: float = 30.0,
 ) -> list[dict[str, Any]]:
     """The only way a tool may read candles.
@@ -113,7 +170,12 @@ async def fetch_candles(
     despite its name means ``WHERE timestamp <= ?`` — the state as of that
     moment, looking backwards. Nothing after it is returned.
 
-    Returns the newest *count* candles as dicts (oldest first).
+    By default the still-forming candle is dropped, so the same moment always
+    yields the same numbers — see ``_drop_forming_candle``. ``include_forming``
+    opts back in for an on-the-fly look at the bar in progress; anything whose
+    result gets stored, compared or replayed must leave it off.
+
+    Returns the newest *count* closed candles as dicts (oldest first).
 
     Raises:
         RuntimeError: if the DataContainer answers with an error.
@@ -122,6 +184,8 @@ async def fetch_candles(
     from openforexai.models.messaging import EventType
 
     anchor = context.as_of or start
+    # One extra, so dropping the forming bar still leaves `count` closed ones.
+    requested = count if include_forming else count + 1
     response = await bus_request(
         context=context,
         event_type=EventType.CANDLES_REQUEST,
@@ -130,14 +194,17 @@ async def fetch_candles(
         payload={
             "broker_name": context.broker_name,
             "timeframe": timeframe,
-            "limit": count,
+            "limit": requested,
             **({"start": anchor} if anchor else {}),
         },
         timeout=timeout,
     )
     if response.get("error"):
         raise RuntimeError(f"DataContainer error: {response['error']}")
-    return (response.get("candles") or [])[-count:]
+    candles = response.get("candles") or []
+    if not include_forming:
+        candles = _drop_forming_candle(candles, timeframe, anchor)
+    return candles[-count:]
 
 
 def candle_dicts_to_objects(raw: list) -> list:

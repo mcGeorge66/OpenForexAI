@@ -70,7 +70,10 @@ async def test_as_of_is_sent_as_start() -> None:
     await fetch_candles(_context(bus, "2026-07-01T12:00:00+00:00"), "M5", 10)
     assert bus.payloads[0]["start"] == "2026-07-01T12:00:00+00:00"
     assert bus.payloads[0]["timeframe"] == "M5"
-    assert bus.payloads[0]["limit"] == 10
+    # One more than asked for: the still-forming candle is dropped afterwards,
+    # and the caller must still end up with a full window. See
+    # tests/unit/test_forming_candle.py.
+    assert bus.payloads[0]["limit"] == 11
 
 
 @pytest.mark.asyncio

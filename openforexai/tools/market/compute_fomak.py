@@ -75,6 +75,16 @@ class ComputeFomakTool(BaseTool):
                 "enum": _VALID_TIMEFRAMES,
                 "description": "Timeframe used for the alignment character (A). Omit to auto-use the next higher timeframe above 'timeframe'.",
             },
+            "include_forming_candle": {
+                "type": "boolean",
+                "description": (
+                    "Include the candle currently being built. Default false, and it "
+                    "should stay false for anything whose result is stored, compared or "
+                    "replayed: a forming candle grows tick by tick, so the same moment "
+                    "yields a different key when asked twice. Set it only for an "
+                    "on-the-fly look at the bar in progress."
+                ),
+            },
             "include_raw_values": {
                 "type": "boolean",
                 "description": "Include the underlying continuous values (strength, vola_ratio, persist_score, ...) and bins. Default false.",
@@ -132,17 +142,20 @@ class ComputeFomakTool(BaseTool):
         if not context.broker_name:
             return {"error": "broker_name not set in tool context."}
 
+        include_forming = _truthy(arguments.get("include_forming_candle"))
         atr_short_period = int(arguments.get("atr_short_period") or 14)
         atr_long_period = int(arguments.get("atr_long_period") or 50)
-        # Die Aufwaermlaenge folgt der laengeren Periode, sonst ist die
-        # rollende ATR beim Fensterstart noch nicht eingelaufen.
+        # The warmup follows the longer period — otherwise the rolling ATR has
+        # not settled by the time the window starts.
         total_needed = lookback_candles + warmup_for(atr_short_period, atr_long_period)
         try:
             candles = await fetch_candles(
                 context, timeframe, total_needed, pair=pair, start=anchor,
+                include_forming=include_forming,
             )
             higher_tf_candles = await fetch_candles(
                 context, higher_timeframe, EMA_STATE_PERIOD + 10, pair=pair, start=anchor,
+                include_forming=include_forming,
             )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -175,6 +188,7 @@ class ComputeFomakTool(BaseTool):
             "higher_timeframe": higher_timeframe,
             "lookback_candles": lookback_candles,
             "anchor": anchor or datetime.now(UTC).isoformat(),
+            "includes_forming_candle": include_forming,
         }
         if _truthy(arguments.get("include_raw_values")):
             response["direction"] = result["direction"]
