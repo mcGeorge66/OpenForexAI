@@ -21,18 +21,22 @@ the similarity score by 0.04, changing its meaning by 0.27.
 Every letter is unique across the five positions, so a code can be read without
 knowing which position a letter came from.
 
-The thresholds below are PROVISIONAL. The FOMAK's bin edges come from the
-33rd/66th percentiles of ~12,000 real windows; these have no such backing yet.
-They are parameters, not constants, so a calibration run can replace them
-without touching this logic.
+The width thresholds are calibrated the same way the FOMAK's bin edges are:
+percentiles of real windows, not judgement. The touch count and the
+higher-timeframe tolerance are not — they are still chosen, and marked as such
+where they are defined.
 """
 from __future__ import annotations
 
 from typing import Any
 
 # Corridor width in ATR: below TIGHT it is tight, above WIDE it is wide.
-WIDTH_TIGHT_ATR = 3.0
-WIDTH_WIDE_ATR = 8.0
+# From the 33rd/66th percentiles of 2210 real M15 windows across both pairs
+# (13.07.-16.09.2026), the same way the FOMAK's bin edges were derived. The
+# first guess here was 3.0/8.0, which was wrong by a factor of five: the whole
+# corridor is a median 0.70 ATR wide, so everything came out Tight.
+WIDTH_TIGHT_ATR = 0.56
+WIDTH_WIDE_ATR = 0.88
 # A level merged from this many swings has been tested repeatedly without
 # holding or breaking — get_swing_levels' own docs call that weaker, not
 # stronger, so it reads as "exhausted".
