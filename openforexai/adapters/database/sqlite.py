@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -641,6 +642,81 @@ class SQLiteRepository(AbstractRepository):
         cursor = await self._db().execute(f"SELECT COUNT(*) AS c FROM {table}")
         row = await cursor.fetchone()
         return int(row["c"]) if row else 0
+
+    # --- Market keys (FOMAK/FOPOK per closed candle) ---
+
+    async def save_market_keys(
+        self, broker_name: str, pair: str, timeframe: str, rows: list[tuple],
+    ) -> int:
+        """Store computed keys. *rows* come from ``market_keys.row_for``.
+
+        INSERT OR REPLACE on (timestamp, param_set): recomputing the same
+        candle with the same parameters overwrites, recomputing it with
+        different ones adds a row beside it. Nothing is ever silently
+        invalidated by a threshold change — see market_keys.param_set.
+        """
+        if not rows:
+            return 0
+        from openforexai.data.market_keys import CREATE_SQL, INSERT_SQL, keys_table
+        table = keys_table(broker_name, pair, timeframe)
+        await self._db().execute(CREATE_SQL.format(table=table))
+        await self._db().executemany(INSERT_SQL.format(table=table), rows)
+        await self._db().commit()
+        return len(rows)
+
+    async def get_market_keys(
+        self,
+        broker_name: str,
+        pair: str,
+        timeframe: str,
+        param_set: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read stored keys for exactly one parameter set, oldest first.
+
+        The parameter set is required, not optional: returning a mix of
+        parameterisations would be the same trap the checksum exists to close.
+        """
+        from openforexai.data.market_keys import keys_table
+        table = keys_table(broker_name, pair, timeframe)
+        cursor = await self._db().execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (table,),
+        )
+        if await cursor.fetchone() is None:
+            return []
+        clauses, params = ["param_set = ?"], [param_set]
+        if start is not None:
+            clauses.append("timestamp >= ?")
+            params.append(candle_timestamp_key(start))
+        if end is not None:
+            clauses.append("timestamp <= ?")
+            params.append(candle_timestamp_key(end))
+        sql = f"SELECT * FROM {table} WHERE {' AND '.join(clauses)} ORDER BY timestamp"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cursor = await self._db().execute(sql, tuple(params))
+        return [dict(r) for r in await cursor.fetchall()]
+
+    async def get_market_key_coverage(
+        self, broker_name: str, pair: str, timeframe: str, param_set: str,
+    ) -> dict[str, Any]:
+        """How much history is filled — so a gap is visible instead of assumed."""
+        from openforexai.data.market_keys import keys_table
+        table = keys_table(broker_name, pair, timeframe)
+        cursor = await self._db().execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (table,),
+        )
+        if await cursor.fetchone() is None:
+            return {"rows": 0, "first": None, "last": None}
+        cursor = await self._db().execute(
+            f"SELECT COUNT(*) AS n, MIN(timestamp) AS first, MAX(timestamp) AS last "
+            f"FROM {table} WHERE param_set = ?", (param_set,),
+        )
+        row = await cursor.fetchone()
+        return {"rows": int(row["n"]), "first": row["first"], "last": row["last"]}
 
     # --- Account status ---
 

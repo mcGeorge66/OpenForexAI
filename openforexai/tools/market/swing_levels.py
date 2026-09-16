@@ -224,8 +224,6 @@ class GetSwingLevelsTool(BaseTool):
         return candle_dicts_to_objects(raw)
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> Any:
-        from openforexai.data.indicators import atr, swing_highs, swing_lows
-
         if not context.broker_name:
             raise RuntimeError("broker_name not set in tool context")
         if not context.pair:
@@ -285,114 +283,161 @@ class GetSwingLevelsTool(BaseTool):
             current_price = float(candles[-1].close)
             current_price_source = "M5"
 
-        def _ts(candle: Any) -> str | None:
-            ts = getattr(candle, "timestamp", None)
-            if not isinstance(ts, datetime):
-                return None
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=UTC)
-            return ts.isoformat().replace("+00:00", "Z")
-
-        # ATR for adaptive clustering gap
-        atr_value = atr(candles, period=atr_period)
-        min_gap = round(atr_value * min_gap_atr, 6) if (atr_value and min_gap_atr > 0) else 0.0
-        # prominence_atr wird hier zum absoluten Abstand, weil die Peak-Erkennung
-        # nur Preiseinheiten kennt. Der groessere der beiden Werte gewinnt.
-        if prominence_atr > 0 and atr_value:
-            prominence = max(prominence, atr_value * prominence_atr)
-
-        if use_oc:
-            import numpy as np
-            from openforexai.data.indicators import _find_peaks_plateau
-            body_highs = np.array([max(float(c.open), float(c.close)) for c in candles], dtype=float)
-            body_lows  = np.array([min(float(c.open), float(c.close)) for c in candles], dtype=float)
-            high_peaks = _find_peaks_plateau(body_highs, prominence=prominence)
-            low_peaks  = _find_peaks_plateau(-body_lows,  prominence=prominence)
-            _high_price = lambda i: round(max(float(candles[i].open), float(candles[i].close)), 6)
-            _low_price  = lambda i: round(min(float(candles[i].open), float(candles[i].close)), 6)
-        else:
-            high_peaks = swing_highs(candles, prominence=prominence)
-            low_peaks  = swing_lows(candles,  prominence=prominence)
-            _high_price = lambda i: round(float(candles[i].high), 6)
-            _low_price  = lambda i: round(float(candles[i].low),  6)
-
-        # Build level dicts for all detected swings (pre-cluster — no max_levels cap yet)
-        raw_highs = [
-            {
-                "price":      _high_price(i),
-                "timestamp":  _ts(candles[i]),
-                "distance":   round(abs(_high_price(i) - current_price), 6),
-                "prominence": round(prom, 5),
-            }
-            for i, prom in high_peaks
-        ]
-        raw_lows = [
-            {
-                "price":      _low_price(i),
-                "timestamp":  _ts(candles[i]),
-                "distance":   round(abs(_low_price(i) - current_price), 6),
-                "prominence": round(prom, 5),
-            }
-            for i, prom in low_peaks
-        ]
-
-        # Cluster nearby levels within SH and SL groups
-        clustered_highs = _cluster_levels(raw_highs, min_gap, keep="max")
-        clustered_lows  = _cluster_levels(raw_lows,  min_gap, keep="min")
-
-        def _sort_nearest(levels: list[dict]) -> list[dict]:
-            if sort_by == "prominent":
-                return sorted(levels, key=lambda x: x["prominence"], reverse=True)[:max_levels]
-            return sorted(levels, key=lambda x: x["distance"])[:max_levels]
-
-        # Cap H and L to max_levels BEFORE confluence detection so that confluence
-        # can only merge existing entries — it never adds new ones.
-        capped_highs = _sort_nearest(clustered_highs)
-        capped_lows  = _sort_nearest(clustered_lows)
-
-        # Detect SH/SL confluence from the already-capped pools
-        remaining_highs, remaining_lows, confluence_levels = _detect_confluence(
-            capped_highs, capped_lows, min_gap, current_price
+        return compute_swing_levels(
+            list(candles),
+            timeframe=timeframe,
+            lookback=lookback,
+            current_price=current_price,
+            current_price_source=current_price_source,
+            prominence=prominence,
+            prominence_atr=prominence_atr,
+            atr_period=atr_period,
+            min_gap_atr=min_gap_atr,
+            max_levels=max_levels,
+            price_source=price_source,
+            sort_by=sort_by,
         )
 
-        highs      = remaining_highs
-        lows       = remaining_lows
-        confluence = confluence_levels
 
-        # Tag types and recompute distance after clustering
-        for level in highs:
-            level["type"]     = "high"
-            level["distance"] = round(abs(level["price"] - current_price), 6)
-        for level in lows:
-            level["type"]     = "low"
-            level["distance"] = round(abs(level["price"] - current_price), 6)
-        for level in confluence:
-            level["distance"] = round(abs(level["price"] - current_price), 6)
+def compute_swing_levels(
+    candles: list,
+    *,
+    timeframe: str,
+    lookback: int,
+    current_price: float,
+    current_price_source: str,
+    prominence: float = 0.0,
+    prominence_atr: float = 0.0,
+    atr_period: int = 14,
+    min_gap_atr: float = 0.3,
+    max_levels: int = 5,
+    price_source: str = "HL",
+    sort_by: str = "nearest",
+) -> dict[str, Any]:
+    """Swing levels from candles already in hand — the pure half of the tool.
 
-        all_levels = highs + lows + confluence
-        nearest_resistance = min(
-            (lv for lv in all_levels if lv["price"] > current_price),
-            key=lambda lv: lv["distance"],
-            default=None,
-        )
-        nearest_support = min(
-            (lv for lv in all_levels if lv["price"] < current_price),
-            key=lambda lv: lv["distance"],
-            default=None,
-        )
+    Split out of GetSwingLevelsTool.execute so the tool and anything computing
+    the same thing offline (the market-key backfill) share one implementation.
+    Reimplementing it went wrong twice in one evening — a one-candle shift and
+    a wrong higher-timeframe bar count — and both stayed invisible until a spot
+    check against the tool caught them.
 
-        return {
-            "timeframe":            timeframe,
-            "lookback":             lookback,
-            "candles_available":    len(candles),
-            "current_price":        current_price,
-            "current_price_source": current_price_source,
-            "atr":                  round(atr_value, 6) if atr_value else None,
-            "min_gap":              min_gap,
-            "prominence_used":      round(prominence, 6),
-            "highs":                highs,
-            "lows":                 lows,
-            "confluence":           confluence,
-            "nearest_resistance":   nearest_resistance,
-            "nearest_support":      nearest_support,
+    *candles* are Candle objects, oldest first. *current_price* and its source
+    stay with the caller: the rule "last M5 close when the timeframe is not M5"
+    needs a second fetch, which does not belong in a pure function.
+    """
+    from openforexai.data.indicators import atr, swing_highs, swing_lows
+
+    use_oc = price_source.upper() == "OC"
+    sort_by = sort_by.lower()
+    def _ts(candle: Any) -> str | None:
+        ts = getattr(candle, "timestamp", None)
+        if not isinstance(ts, datetime):
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return ts.isoformat().replace("+00:00", "Z")
+
+    # ATR for adaptive clustering gap
+    atr_value = atr(candles, period=atr_period)
+    min_gap = round(atr_value * min_gap_atr, 6) if (atr_value and min_gap_atr > 0) else 0.0
+    # prominence_atr wird hier zum absoluten Abstand, weil die Peak-Erkennung
+    # nur Preiseinheiten kennt. Der groessere der beiden Werte gewinnt.
+    if prominence_atr > 0 and atr_value:
+        prominence = max(prominence, atr_value * prominence_atr)
+
+    if use_oc:
+        import numpy as np
+        from openforexai.data.indicators import _find_peaks_plateau
+        body_highs = np.array([max(float(c.open), float(c.close)) for c in candles], dtype=float)
+        body_lows  = np.array([min(float(c.open), float(c.close)) for c in candles], dtype=float)
+        high_peaks = _find_peaks_plateau(body_highs, prominence=prominence)
+        low_peaks  = _find_peaks_plateau(-body_lows,  prominence=prominence)
+        _high_price = lambda i: round(max(float(candles[i].open), float(candles[i].close)), 6)
+        _low_price  = lambda i: round(min(float(candles[i].open), float(candles[i].close)), 6)
+    else:
+        high_peaks = swing_highs(candles, prominence=prominence)
+        low_peaks  = swing_lows(candles,  prominence=prominence)
+        _high_price = lambda i: round(float(candles[i].high), 6)
+        _low_price  = lambda i: round(float(candles[i].low),  6)
+
+    # Build level dicts for all detected swings (pre-cluster — no max_levels cap yet)
+    raw_highs = [
+        {
+            "price":      _high_price(i),
+            "timestamp":  _ts(candles[i]),
+            "distance":   round(abs(_high_price(i) - current_price), 6),
+            "prominence": round(prom, 5),
         }
+        for i, prom in high_peaks
+    ]
+    raw_lows = [
+        {
+            "price":      _low_price(i),
+            "timestamp":  _ts(candles[i]),
+            "distance":   round(abs(_low_price(i) - current_price), 6),
+            "prominence": round(prom, 5),
+        }
+        for i, prom in low_peaks
+    ]
+
+    # Cluster nearby levels within SH and SL groups
+    clustered_highs = _cluster_levels(raw_highs, min_gap, keep="max")
+    clustered_lows  = _cluster_levels(raw_lows,  min_gap, keep="min")
+
+    def _sort_nearest(levels: list[dict]) -> list[dict]:
+        if sort_by == "prominent":
+            return sorted(levels, key=lambda x: x["prominence"], reverse=True)[:max_levels]
+        return sorted(levels, key=lambda x: x["distance"])[:max_levels]
+
+    # Cap H and L to max_levels BEFORE confluence detection so that confluence
+    # can only merge existing entries — it never adds new ones.
+    capped_highs = _sort_nearest(clustered_highs)
+    capped_lows  = _sort_nearest(clustered_lows)
+
+    # Detect SH/SL confluence from the already-capped pools
+    remaining_highs, remaining_lows, confluence_levels = _detect_confluence(
+        capped_highs, capped_lows, min_gap, current_price
+    )
+
+    highs      = remaining_highs
+    lows       = remaining_lows
+    confluence = confluence_levels
+
+    # Tag types and recompute distance after clustering
+    for level in highs:
+        level["type"]     = "high"
+        level["distance"] = round(abs(level["price"] - current_price), 6)
+    for level in lows:
+        level["type"]     = "low"
+        level["distance"] = round(abs(level["price"] - current_price), 6)
+    for level in confluence:
+        level["distance"] = round(abs(level["price"] - current_price), 6)
+
+    all_levels = highs + lows + confluence
+    nearest_resistance = min(
+        (lv for lv in all_levels if lv["price"] > current_price),
+        key=lambda lv: lv["distance"],
+        default=None,
+    )
+    nearest_support = min(
+        (lv for lv in all_levels if lv["price"] < current_price),
+        key=lambda lv: lv["distance"],
+        default=None,
+    )
+
+    return {
+        "timeframe":            timeframe,
+        "lookback":             lookback,
+        "candles_available":    len(candles),
+        "current_price":        current_price,
+        "current_price_source": current_price_source,
+        "atr":                  round(atr_value, 6) if atr_value else None,
+        "min_gap":              min_gap,
+        "prominence_used":      round(prominence, 6),
+        "highs":                highs,
+        "lows":                 lows,
+        "confluence":           confluence,
+        "nearest_resistance":   nearest_resistance,
+        "nearest_support":      nearest_support,
+    }
