@@ -65,6 +65,12 @@ async def bootstrap(
 
     db_cfg    = system_config.get("database", {})
     data_cfg  = system_config.get("data", {})
+    # Ein Block an der falschen Stelle wird nicht gelesen und faellt still
+    # auf seine Vorgabe zurueck. Das muss beim Start auffallen.
+    from openforexai.config.json_loader import misplaced_top_level_blocks
+    for name, keys in misplaced_top_level_blocks(system_config).items():
+        _log.warning("config.json5: block sits under 'system' where nothing reads it "
+                     "— move it to the top level", block=name, ignored_keys=keys)
     mod_cfg   = system_config.get("modules",  {})
     agent_cfg = system_config.get("agents",   {})
     enabled_agent_cfg = {

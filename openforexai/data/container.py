@@ -113,7 +113,18 @@ class DataContainer:
         self._reporting_path = cfg.get("path")
         self._reporting_every = max(1, int(cfg.get("every_candles", 12)))
         self._reporting_counter = 0
+        self._reporting_skipped = 0
         self._reporting_task: asyncio.Task | None = None
+        # Ein abgeschalteter Spiegel sagt es. Ohne diese Zeile ist "aus"
+        # nicht von "falsch einsortiert" zu unterscheiden - und genau das
+        # hat die Sync nach dem Einbau lautlos stillgelegt.
+        if self._reporting_enabled:
+            _log.info("Reporting mirror on", every_candles=self._reporting_every,
+                      path=str(self._reporting_path or "data/reporting.db"))
+        else:
+            _log.warning("Reporting mirror OFF — simulations have no data source. "
+                         "Expected in config.json5 under the top-level key "
+                         "data.reporting_db.enabled")
         self._reporting_reader = None       # angelegt beim ersten Lesen
         self._registered: set[tuple[str, str]] = set()
         self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -506,8 +517,37 @@ class DataContainer:
         if self._reporting_counter % self._reporting_every:
             return
         if self._reporting_task is not None and not self._reporting_task.done():
-            return          # still running — skip this round rather than pile up
+            # Ueberspringen statt anstauen. Aber ein Durchlauf dauert unter
+            # einer Sekunde: haeuft sich das, haengt er, und der Spiegel
+            # friert ein, ohne dass irgendwo ein Fehler steht.
+            self._reporting_skipped += 1
+            if self._reporting_skipped % 12 == 0:
+                _log.warning("Reporting sync still busy — mirror is falling behind",
+                             skipped_passes=self._reporting_skipped)
+            return
+        self._reporting_skipped = 0
         self._reporting_task = asyncio.create_task(self._reporting_sync())
+
+    def apply_reporting_config(self, reporting_db: dict | None) -> dict:
+        """Take a changed data.reporting_db without a restart.
+
+        Everything under config/ takes effect immediately — this is no
+        exception. Returns what changed so the caller can report it.
+        """
+        cfg = reporting_db or {}
+        before = {"enabled": self._reporting_enabled, "every_candles": self._reporting_every,
+                  "path": self._reporting_path}
+        self._reporting_enabled = bool(cfg.get("enabled", False))
+        self._reporting_every = max(1, int(cfg.get("every_candles", 12)))
+        path = cfg.get("path")
+        if path != self._reporting_path:
+            self._reporting_path = path
+            self._reporting_reader = None       # beim naechsten Lesen neu oeffnen
+        after = {"enabled": self._reporting_enabled, "every_candles": self._reporting_every,
+                 "path": self._reporting_path}
+        if before != after:
+            _log.info("Reporting mirror reconfigured", **after)
+        return {"changed": before != after, **after}
 
     async def _reporting_sync(self) -> None:
         """One incremental pass, off the message loop.

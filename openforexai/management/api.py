@@ -5040,6 +5040,22 @@ async def _apply_runtime_agent_changes(previous_system_config: dict[str, Any]) -
     return {"started": started, "stopped": stopped, "refresh": refresh}
 
 
+async def _apply_runtime_data_changes(previous_system_config: dict[str, Any]) -> dict[str, Any]:
+    """Hand a changed data.reporting_db to the live DataContainer.
+
+    Same rule as agents and composers: what stands in config/ is what runs,
+    immediately. Before this, the mirror could only be switched at boot —
+    and a wrongly placed block meant it stayed off without a word.
+    """
+    before = (previous_system_config.get("data") or {}).get("reporting_db")
+    after = (_system_config.get("data") or {}).get("reporting_db")
+    if before == after:
+        return {"changed": False}
+    if _data_container is None or not hasattr(_data_container, "apply_reporting_config"):
+        return {"changed": False, "reason": "no data container"}
+    return _data_container.apply_reporting_config(after)
+
+
 @router.put("/config/system")
 async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
     """Persist raw config.json5, refresh memory, and trigger runtime apply."""
@@ -5057,12 +5073,14 @@ async def save_system_config_raw(content: dict[str, Any] | str) -> dict:
     llm_module_apply = await _apply_runtime_llm_module_changes(previous_system_config)
     runtime_apply = await _apply_runtime_agent_changes(previous_system_config)
     composer_apply = await _apply_runtime_composer_changes(previous_system_config)
+    data_apply = await _apply_runtime_data_changes(previous_system_config)
     return {
         "status": "saved",
         "file": f"config/{_system_config_path().name}",
         "llm_module_apply": llm_module_apply,
         "runtime_apply": runtime_apply,
         "composer_apply": composer_apply,
+        "data_apply": data_apply,
     }
 
 # ── Notifications (Telegram designer) ─────────────────────────────────────────

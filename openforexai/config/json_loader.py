@@ -180,3 +180,37 @@ def load_json_config(path: str | Path) -> dict[str, Any]:
     if p.name in (CONFIG_FILENAME, LEGACY_CONFIG_FILENAME):
         return _load_system_with_defaults(p)
     return _load_single(p)
+
+
+# ── Fehlplatzierte Bloecke ────────────────────────────────────────────────────
+#
+# Diese Schluessel liest bootstrap.py auf der obersten Ebene der Config. Liegt
+# einer von ihnen stattdessen unter "system", liest ihn niemand: jede
+# Einstellung darin faellt still auf ihre Vorgabe zurueck. Beim Reporting-
+# Spiegel hiess das "aus", und weil "aus" die Vorgabe ist, stand darueber auch
+# nichts im Log - die Sync war wochenlang tot, ohne eine einzige Fehlerzeile.
+TOP_LEVEL_BLOCKS = (
+    "agents", "data", "database", "event_composers",
+    "modules", "notifications", "semantic_memory",
+)
+
+
+def misplaced_top_level_blocks(config: dict) -> dict[str, list[str]]:
+    """Bloecke, die unter "system" liegen, aber oben gelesen werden.
+
+    Gibt {Blockname: enthaltene Schluessel} zurueck — leer, wenn alles sitzt.
+    Absichtlich nur eine Meldung und keine Reparatur: ein stillschweigend
+    verschobener Wert waere genau die versteckte Umleitung, gegen die die
+    Config die einzige Wahrheit sein soll.
+    """
+    nested = config.get("system")
+    if not isinstance(nested, dict):
+        return {}
+    found = {}
+    for name in TOP_LEVEL_BLOCKS:
+        block = nested.get(name)
+        if isinstance(block, dict) and block:
+            found[name] = sorted(block)
+        elif block:
+            found[name] = []
+    return found

@@ -959,6 +959,17 @@ class Agent:
                         pair=cycle_pair,
                         reason=cancel_reason or "no reason given",
                     )
+                    # Gesehen und entschieden — nicht stehengeblieben. Ohne diese
+                    # Meldung bleibt der zugestellte Ausloeser offen und der
+                    # Waechter meldet nach 60 s "Agent reagiert nicht", obwohl das
+                    # Tor genau so arbeiten soll.
+                    self._emit_agent_trigger_skipped(
+                        event_val=str(trigger),
+                        source=source,
+                        reason=f"assembly_cancel: {cancel_reason or 'no reason given'}",
+                        backlog_remaining=0,
+                        trigger_age_ms=None,
+                    )
                     return
 
                 self._emit_analysis_snapshot_built(
