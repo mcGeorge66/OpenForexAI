@@ -44,7 +44,6 @@
 	"chartshot",
 	"get_account_status",
 	"get_open_positions",
-	"get_order_book",
 	"ask_ga_market_outlook",
     // Sandbox-only chart-annotation tools (Prompt Workbench): depend on
     // ToolContext.extra keys (candle_index_map etc.) that a real Snapshot run

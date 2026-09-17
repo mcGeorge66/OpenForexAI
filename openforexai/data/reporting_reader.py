@@ -119,3 +119,96 @@ class ReportingReader:
             (table,),
         ).fetchone()
         return dict(row) if row else {"rows": 0, "watermark": None, "synced_at": None}
+
+
+    # -- Trades ---------------------------------------------------------------
+
+    def get_trades(
+        self,
+        pair: str,
+        *,
+        status: str = "open",
+        limit: int = 20,
+        as_of: str | None = None,
+    ) -> list[dict]:
+        """Trades of *pair* as they stood at *as_of*.
+
+        "As of" is the whole point. Asking a simulation of last Tuesday which
+        positions are open must answer for last Tuesday, not for now - so a
+        trade counts as open when it was opened before the anchor and closed
+        after it (or not at all).
+
+        Timestamps in the mirror carry mixed offsets (the broker writes
+        +03:00, one path writes UTC), so every comparison runs over
+        ``candle_timestamp_key`` rather than over the raw text.
+        """
+        from openforexai.utils.time_utils import candle_timestamp_key
+
+        con = self._connect()
+        try:
+            con.execute("SELECT 1 FROM trades LIMIT 1")
+        except sqlite3.Error as exc:
+            raise ReportingUnavailable(
+                f"Reporting database at {self._path} has no trades table. "
+                "Build it with: python scripts/reporting_db.py --sync"
+            ) from exc
+
+        def schluessel(wert):
+            if not wert:
+                return None
+            try:
+                return candle_timestamp_key(datetime.fromisoformat(str(wert)))
+            except (TypeError, ValueError):
+                return None
+
+        anker = schluessel(as_of)
+        rows = con.execute(
+            "SELECT broker_order_id, pair, direction, requested_at, opened_at, closed_at,"
+            "       units, fill_price, stop_loss, take_profit, close_price, close_reason,"
+            "       pnl_pips, pnl_money, spread_at_entry"
+            "  FROM trades WHERE pair = ?", (str(pair or "").upper(),),
+        ).fetchall()
+
+        raus = []
+        for r in rows:
+            auf = schluessel(r["opened_at"]) or schluessel(r["requested_at"])
+            zu = schluessel(r["closed_at"])
+            if anker:
+                if auf and auf > anker:
+                    continue                      # gab es damals noch nicht
+                offen = (zu is None) or (zu > anker)
+            else:
+                offen = zu is None
+            if status == "open" and not offen:
+                continue
+            if status == "closed" and offen:
+                continue
+            noch_offen = bool(anker) and offen
+            raus.append({
+                "broker_order_id": r["broker_order_id"],
+                "pair": r["pair"],
+                "direction": r["direction"],
+                "status": "OPEN" if offen else "CLOSED",
+                "units": r["units"],
+                "requested_at": r["requested_at"],
+                "opened_at": r["opened_at"],
+                # Zum Anker noch offen: das Ende lag in der Zukunft und darf
+                # hier nicht auftauchen, sonst sieht die Simulation voraus.
+                "closed_at": None if noch_offen else r["closed_at"],
+                "fill_price": r["fill_price"],
+                "stop_loss": r["stop_loss"],
+                "take_profit": r["take_profit"],
+                "close_price": None if noch_offen else r["close_price"],
+                "close_reason": None if noch_offen else r["close_reason"],
+                "pnl_pips": None if noch_offen else r["pnl_pips"],
+                # Die Produktion nennt es pnl_account_currency; die
+                # Transform-Skripte der Snapshot-Profile lesen diesen Namen.
+                "pnl_account_currency": None if noch_offen else r["pnl_money"],
+                "spread_at_entry": r["spread_at_entry"],
+                "_sortier": auf or "",
+            })
+
+        raus.sort(key=lambda x: x["_sortier"], reverse=True)
+        for x in raus:
+            x.pop("_sortier", None)
+        return raus[:max(1, int(limit))]

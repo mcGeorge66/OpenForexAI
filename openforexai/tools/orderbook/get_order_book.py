@@ -37,6 +37,9 @@ class GetOrderBookTool(BaseTool):
         limit = min(int(arguments.get("limit", 20)), 100)
         pair = context.pair
 
+        if getattr(context, "data_source", None) == "reporting":
+            return await self._from_mirror(context, pair, status_filter, limit)
+
         if status_filter == "open":
             entries = await repo_request(
                 context, "get_open_order_book_entries",
@@ -60,6 +63,31 @@ class GetOrderBookTool(BaseTool):
         if not with_aa_analysis:
             result = [_entry_to_dict(e) for e in result]
         return result
+
+
+    @staticmethod
+    async def _from_mirror(context: ToolContext, pair: str, status_filter: str, limit: int) -> Any:
+        """The simulation's order book: the mirror, as of the anchor.
+
+        Only the states the mirror can answer for. A trade there is either
+        still running at that moment or finished - it carries no record of
+        having once been pending or rejected, and answering those with an
+        empty list would read as "none happened" instead of "cannot say".
+        """
+        import asyncio
+
+        from openforexai.data.reporting_reader import ReportingReader
+
+        if status_filter not in ("open", "closed", "all"):
+            raise RuntimeError(
+                f"status_filter {status_filter!r} cannot be answered from the reporting "
+                "mirror - it keeps open and closed trades, not the order lifecycle. "
+                "Use 'open', 'closed' or 'all'."
+            )
+        reader = ReportingReader()
+        return await asyncio.to_thread(
+            reader.get_trades, pair, status=status_filter, limit=limit, as_of=context.as_of,
+        )
 
 
 def _entry_status(e: Any) -> str:
