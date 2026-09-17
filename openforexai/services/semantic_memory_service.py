@@ -224,13 +224,24 @@ def find_absolute_price_quotes(text: str, pair: str) -> list[str]:
     return found
 
 
+class MemoryRejected(ValueError):
+    """The note was understood and refused — not a failure.
+
+    Its own class so the service can tell "this text may not be stored"
+    apart from "something broke". The guard refuses a note after almost
+    every closed trade; surfacing that as an error with a stack trace,
+    right behind the trade notification, teaches whoever watches the
+    console to stop reading errors at all.
+    """
+
+
 def _reject_absolute_price_quotes(text: str, pair: str) -> None:
-    """Raise ValueError if ``text`` looks like it names an absolute FX price
-    for ``pair`` instead of describing it relatively. See module comment
+    """Raise MemoryRejected if ``text`` names an absolute FX price for
+    ``pair`` instead of describing it relatively. See module comment
     above for the heuristic."""
     for number_str in find_absolute_price_quotes(text, pair):
         pair_label = pair or "(unknown/unspecified)"
-        raise ValueError(
+        raise MemoryRejected(
             f"Memory text contains {number_str!r}, which looks like an absolute price "
             f"quote for pair {pair_label!r}, not a relative description. Rewrite this "
             "value in relative terms — pips/ATR distance, position within a range, or "
@@ -865,6 +876,20 @@ class SemanticMemoryService:
                 result = await self.find_pattern(args)
             else:
                 raise ValueError(f"Unknown operation {operation!r}")
+        except MemoryRejected as exc:
+            # Working as designed. The note was refused, nothing broke — so it
+            # travels back as a RESULT the caller can act on, not as an error,
+            # and it is logged as a warning without a stack trace. Returning it
+            # also gives the examiner what it needs to rewrite the note in
+            # relative terms instead of losing the observation entirely.
+            result = {
+                "status": "rejected",
+                "operation": operation,
+                "reason": str(exc),
+                "stored": False,
+            }
+            _log.warning("Memory note refused by the price guard",
+                         operation=operation, reason=str(exc)[:200])
         except Exception as exc:
             error = str(exc)
             _log.error("SemanticMemoryService: operation '%s' failed: %s", operation, exc, exc_info=True)

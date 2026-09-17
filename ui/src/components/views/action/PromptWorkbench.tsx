@@ -329,6 +329,8 @@ export function PromptWorkbench() {
           broker_name: brokerName,
           ...(ind.smoothPeriod && ind.smoothPeriod > 1 ? { smooth_period: ind.smoothPeriod } : {}),
           ...(anchorIso ? { start: anchorIso } : {}),
+          // Simulation: Indikatoren aus dem Spiegel, wie die Kerzen.
+          data_source: 'reporting',
         })
         if (ind.name === 'BB') {
           type BBRaw = { timestamp: string; value: { upper: number; middle: number; lower: number } }
@@ -476,7 +478,8 @@ export function PromptWorkbench() {
         atr_period: swingAtrPeriod, min_gap_atr: swingMinGapAtr,
         price_source: swingPriceSource, sort_by: swingSortByRef.current,
         ...(anchor ? { start: anchor } : {}),
-      }, null, brokerName, null, pair)
+        // Simulation: alle Kerzenzugriffe in den Spiegel.
+      }, null, brokerName, null, pair, 'reporting')
       const result = res.result as SwingResult
       const lines: ForexChartPriceLine[] = [
         ...(result.highs ?? []).map(h => ({

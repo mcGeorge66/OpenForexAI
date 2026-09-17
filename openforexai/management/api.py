@@ -1600,6 +1600,13 @@ class RoutingRuleInfo(BaseModel):
 
 class ToolExecuteRequest(BaseModel):
     tool_name: str = Field(..., description="Name of the registered tool to execute")
+    data_source: str | None = Field(
+        default=None,
+        description=(
+            "Where candle reads go. None is production; \"reporting\" reads the "
+            "mirror. The simulation sets it so a run is never half live data."
+        ),
+    )
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Arguments to pass to the tool"
     )
@@ -4155,6 +4162,7 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
         pair=derived_pair,
         monitoring_bus=_monitoring_bus,
         event_bus=_bus,
+        data_source=req.data_source,
         extra={
             "llm_name": llm_name,
             "llm": llm_instance,

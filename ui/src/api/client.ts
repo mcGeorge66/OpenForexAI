@@ -254,6 +254,9 @@ export const api = {
                     broker_name?: string | null,
                     llm_name?: string | null,
                     pair?: string | null,
+                    // 'reporting' sends the tool's candle reads to the mirror.
+                    // The Simulation sets it; everyone else stays on production.
+                    data_source?: string | null,
                   ) =>
                     post<ToolExecuteResponse>("/tools/execute", {
                       tool_name,
@@ -262,6 +265,7 @@ export const api = {
                       broker_name: broker_name || null,
                       llm_name: llm_name || null,
                       pair: pair || null,
+                      data_source: data_source || null,
                     }),
   calculateIndicator: (params: {
                     indicator: string
@@ -273,9 +277,11 @@ export const api = {
                     agent_id?: string | null
                     smooth_period?: number
                     start?: string | null
+                    data_source?: string | null
                   }) =>
                     post<ToolExecuteResponse>('/tools/execute', {
                       tool_name: 'calculate_indicator',
+                      data_source: params.data_source || null,
                       arguments: {
                         indicator: params.indicator,
                         period: params.period,
