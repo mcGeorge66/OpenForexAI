@@ -84,12 +84,22 @@ def _bin_by_thresholds(val: float | None, thresholds: list[float]) -> int:
 
 
 def _candles_to_df(candles: list[dict[str, Any]]) -> pd.DataFrame:
-    df = pd.DataFrame(candles)
-    df["datetime"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_localize(None)
-    df = df.sort_values("datetime").reset_index(drop=True)
-    for col in ("open", "high", "low", "close"):
-        df[col] = df[col].astype(float)
-    return df
+    """Candles as a frame with float OHLC, oldest first.
+
+    Sorted on the timestamp STRING, not on a parsed datetime. Parsing was the
+    single most expensive thing this function did — profiled at two thirds of
+    a whole FOMAK computation, a third of that spent guessing the date format
+    on every call — and the parsed column was never read by anything but the
+    sort. ISO-8601 timestamps sort lexicographically in chronological order as
+    long as they all carry the same UTC offset, which candle_timestamp_key
+    guarantees on write.
+    """
+    df = pd.DataFrame(
+        [(c["timestamp"], float(c["open"]), float(c["high"]),
+          float(c["low"]), float(c["close"])) for c in candles],
+        columns=["timestamp", "open", "high", "low", "close"],
+    )
+    return df.sort_values("timestamp", kind="stable").reset_index(drop=True)
 
 
 def alignment_char(d_char: str, higher_dir: str) -> str:

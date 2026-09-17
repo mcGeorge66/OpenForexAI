@@ -88,6 +88,7 @@ class DataContainer:
         monitoring_bus=None,
         resample_bucket_offset_hours: int = 0,
         market_key_settings: list[dict] | None = None,
+        reporting_db: dict | None = None,
     ) -> None:
         if store is None:
             raise ValueError(
@@ -105,6 +106,14 @@ class DataContainer:
             [dict(DEFAULT_SETTINGS)] if market_key_settings is None
             else [dict(s) for s in market_key_settings]
         )
+        # Reporting mirror. Off unless configured: it is derived data and the
+        # live path must never wait on it.
+        cfg = reporting_db or {}
+        self._reporting_enabled = bool(cfg.get("enabled", False))
+        self._reporting_path = cfg.get("path")
+        self._reporting_every = max(1, int(cfg.get("every_candles", 12)))
+        self._reporting_counter = 0
+        self._reporting_task: asyncio.Task | None = None
         self._registered: set[tuple[str, str]] = set()
         self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
@@ -271,6 +280,7 @@ class DataContainer:
 
         # After the candle is safely stored, never before.
         await self._maintain_market_keys(broker_name, pair)
+        self._kick_reporting_sync()
 
     async def _on_gap_detected(self, message: AgentMessage) -> None:
         """Forward gap notification to the appropriate broker adapter."""
@@ -452,6 +462,57 @@ class DataContainer:
             _log.exception("Candle repair failed", broker=broker_name, pair=pair, error=str(exc))
             self._emit("data_container", MonitoringEventType.CANDLE_REPAIR_FAILED,
                        broker_name=broker_name, pair=pair, error=str(exc))
+
+    # ── Reporting mirror ──────────────────────────────────────────────────────
+
+    def _kick_reporting_sync(self) -> None:
+        """Start a sync pass in the background, at most one at a time.
+
+        Fire-and-forget on purpose: the mirror is derived, and a live candle
+        must never wait for it. Only every Nth candle, because a pass reads
+        the whole production file and there is nothing to gain from doing that
+        twelve times an hour.
+        """
+        if not self._reporting_enabled:
+            return
+        self._reporting_counter += 1
+        if self._reporting_counter % self._reporting_every:
+            return
+        if self._reporting_task is not None and not self._reporting_task.done():
+            return          # still running — skip this round rather than pile up
+        self._reporting_task = asyncio.create_task(self._reporting_sync())
+
+    async def _reporting_sync(self) -> None:
+        """One incremental pass, off the message loop.
+
+        Errors are logged and shown, never raised and never retried in a tight
+        loop: the next pass starts from the same watermark, so a failure heals
+        itself as soon as its cause is gone.
+        """
+        from openforexai.data.reporting_sync import sync_all
+
+        try:
+            counts = await asyncio.to_thread(
+                sync_all, self._production_db_path(), self._reporting_path,
+            )
+            written = sum(counts.values())
+            if written:
+                _log.debug("Reporting mirror synced", rows=written)
+        except Exception as exc:
+            # Visible in the log, but the candle path does not care.
+            _log.warning("Reporting mirror sync failed — retrying on the next pass",
+                         error=str(exc))
+            self._emit("data_container", MonitoringEventType.SYSTEM_ERROR,
+                       reason="reporting_sync_failed", error=str(exc))
+
+    def _production_db_path(self) -> str:
+        """Where the live database actually is, asked of the store itself."""
+        for attr in ("_db_path", "db_path", "path"):
+            value = getattr(self._store, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        from pathlib import Path
+        return str(Path(__file__).resolve().parents[2] / "data" / "openforexai.db")
 
     # ── Market keys ───────────────────────────────────────────────────────────
 

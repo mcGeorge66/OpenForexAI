@@ -273,6 +273,8 @@ async def bootstrap(
         # code because comparing two parameterisations on the same history is
         # the point of having the set in the row key at all.
         market_key_settings=data_cfg.get("market_key_settings"),
+        # Reporting mirror: off unless config says otherwise.
+        reporting_db=data_cfg.get("reporting_db"),
     )
 
     # Register each unique broker + its pairs (derived from agent configs)
