@@ -1,0 +1,250 @@
+{
+ "tabelle": [
+  {
+   "kerze": "2026-09-16T07:05:00+00:00",
+   "fomak": "3D213S",
+   "fopok": "DNEEA",
+   "richtung": "SHORT",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -10.3
+  },
+  {
+   "kerze": "2026-09-16T07:25:00+00:00",
+   "fomak": "3D312S",
+   "fopok": "DNFEA",
+   "richtung": "LONG",
+   "A_ein": 2,
+   "A_n": 3,
+   "B_ein": 1,
+   "B_n": 3,
+   "pips": 9.9
+  },
+  {
+   "kerze": "2026-09-16T07:30:00+00:00",
+   "fomak": "3D312S",
+   "fopok": "MNFEA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 1.7
+  },
+  {
+   "kerze": "2026-09-16T07:35:00+00:00",
+   "fomak": "3D312S",
+   "fopok": "UNFEA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 1.7
+  },
+  {
+   "kerze": "2026-09-16T07:40:00+00:00",
+   "fomak": "3D312S",
+   "fopok": "DTEFC",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 8.3
+  },
+  {
+   "kerze": "2026-09-16T07:55:00+00:00",
+   "fomak": "3D322S",
+   "fopok": "UNFEA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 5.7
+  },
+  {
+   "kerze": "2026-09-16T08:15:00+00:00",
+   "fomak": "1D331S",
+   "fopok": "MNEEA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 6.6
+  },
+  {
+   "kerze": "2026-09-16T14:15:00+00:00",
+   "fomak": "2U321S",
+   "fopok": "UNEEA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-16T18:10:00+00:00",
+   "fomak": "1D223S",
+   "fopok": "DTFEC",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T18:30:00+00:00",
+   "fomak": "3U233S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T18:35:00+00:00",
+   "fomak": "3U233S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T18:50:00+00:00",
+   "fomak": "3U233S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 1,
+   "B_ein": 0,
+   "B_n": 1,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T19:05:00+00:00",
+   "fomak": "3U333S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 1,
+   "B_n": 2,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T19:20:00+00:00",
+   "fomak": "3U333S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 2,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T19:35:00+00:00",
+   "fomak": "3U333S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 1,
+   "B_ein": 0,
+   "B_n": 2,
+   "pips": 30.0
+  },
+  {
+   "kerze": "2026-09-16T19:50:00+00:00",
+   "fomak": "3U333S",
+   "fopok": "XXOFA",
+   "richtung": "SHORT",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-16T20:05:00+00:00",
+   "fomak": "3U332S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-16T20:35:00+00:00",
+   "fomak": "3U331S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-16T20:50:00+00:00",
+   "fomak": "3U332S",
+   "fopok": "XXOFA",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-17T02:40:00+00:00",
+   "fomak": "2U321S",
+   "fopok": "MWEFA",
+   "richtung": "LONG",
+   "A_ein": 2,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 2,
+   "pips": -20.0
+  },
+  {
+   "kerze": "2026-09-17T03:30:00+00:00",
+   "fomak": "1U233S",
+   "fopok": "UWFFN",
+   "richtung": "LONG",
+   "A_ein": 0,
+   "A_n": 3,
+   "B_ein": 0,
+   "B_n": 3,
+   "pips": -20.0
+  }
+ ],
+ "summe": {
+  "A_heute": -6.733333333333333,
+  "B_neu": 18.3
+ },
+ "einstiege": {
+  "A": 4,
+  "A_n": 59,
+  "B": 2,
+  "B_n": 57
+ },
+ "parameter": {
+  "stop": 20.0,
+  "ziel": 30.0,
+  "stunden": 4
+ }
+}
