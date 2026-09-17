@@ -1,0 +1,963 @@
+// Kopie der Handelslogik — Stand 2026-09-17
+//
+// config/config.json5 liegt bewusst nicht im Repository (maschinenspezifisch,
+// verweist auf Zugangsdaten in config/modules/**). Diese Datei sichert den
+// Teil, der die Handelsentscheidung traegt, damit er nicht nur auf einer
+// Maschine existiert. Sie wird von nichts geladen — reine Sicherung.
+//
+// Enthalten:
+//   snapshot_profiles.Paul_Tudor_Jones_V1
+//       Tool-Bloecke, Berechnungen und das zweistufige Tor im
+//       assembly_transform_script: erst offene Position, dann FOMAK-Gruppe
+//       (A=S und V>=2). Der Abbruch erfolgt vor dem LLM-Aufruf.
+//   agents.OXS_T-{USDJPY,EURUSD}-AA-PTJ
+//       System-Prompt, AnyCandle=1 (jede M5-Kerze), session_filter leer.
+//   event_composers.*-EC-RELAY
+//       Der Waechter vor dem Order: fragt den Broker und blockt ein zweites
+//       Signal, wenn im Paar schon eine Position laeuft.
+//   event_composers.*-EC-TRSLF
+//       Ausstiegsmanagement: zieht Stops nach und schliesst.
+//
+// Nicht enthalten: modules (LLM/Broker-Zugaenge), notifications, system,
+// semantic_memory — alles, was Zugangsdaten oder Pfade dieser Maschine traegt.
+{
+  "snapshot_profiles": {
+    "Paul_Tudor_Jones_V1": {
+      "description": "This snapshot is prpared for PTJ only.",
+      "short_timeframe": "M15",
+      "long_timeframe": "H1",
+      "decision_input_prefix": "Runtime-prepared market decision snapshot. Use the snapshot as the complete market context. Do not take any trades when the Slope_S value is within ±0.3 of the zero line. This range indicates low market movement and invalid trade conditions.\nReturn strict JSON only.",
+      "strategy_aggressiveness": "BALANCED",
+      "tool_blocks": [
+        {
+          "id": "candles_h1",
+          "tool_name": "get_candles",
+          "output_key": "get_candles_h1",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "H1",
+            "count": "30"
+          },
+          "transform_script": "result = normalize_candle_tool_output(tool_output, timeframe=tool_input.get(\"timeframe\"))"
+        },
+        {
+          "id": "candles_m15",
+          "tool_name": "get_candles",
+          "output_key": "get_candles_m15",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "M15",
+            "count": "20"
+          },
+          "transform_script": "result = normalize_candle_tool_output(tool_output, timeframe=tool_input.get(\"timeframe\"))"
+        },
+        {
+          "id": "rsi_h1",
+          "tool_name": "calculate_indicator",
+          "output_key": "rsi_h1",
+          "enabled": true,
+          "arguments": {
+            "indicator": "RSI",
+            "period": "7",
+            "timeframe": "H1",
+            "history": "3"
+          },
+          "transform_script": "result = dict(tool_output)\npoints = tool_output.get(\"values\") or tool_output.get(\"value\") or []\nvalues = []\nfor item in points:\n    if isinstance(item, dict):\n        raw_value = item.get(\"value\")\n    else:\n        raw_value = item\n    if raw_value is not None:\n        values.append(float(raw_value))\nindicator_name = str(tool_output.get(\"indicator\") or tool_input.get(\"indicator\") or \"\").upper()\nresult[\"indicator\"] = indicator_name or result.get(\"indicator\")\nresult[\"latest\"] = latest_value(values)\nresult[\"direction\"] = classify_indicator_direction(values, indicator_name)\nresult[\"values\"] = points\nif \"value\" in result:\n    del result[\"value\"]"
+        },
+        {
+          "id": "rsi_m15",
+          "tool_name": "calculate_indicator",
+          "output_key": "rsi_m15",
+          "enabled": true,
+          "arguments": {
+            "indicator": "RSI",
+            "period": "7",
+            "timeframe": "M15",
+            "history": "3"
+          },
+          "transform_script": "result = dict(tool_output)\npoints = tool_output.get(\"values\") or tool_output.get(\"value\") or []\nvalues = []\nfor item in points:\n    if isinstance(item, dict):\n        raw_value = item.get(\"value\")\n    else:\n        raw_value = item\n    if raw_value is not None:\n        values.append(float(raw_value))\nindicator_name = str(tool_output.get(\"indicator\") or tool_input.get(\"indicator\") or \"\").upper()\nresult[\"indicator\"] = indicator_name or result.get(\"indicator\")\nresult[\"latest\"] = latest_value(values)\nresult[\"direction\"] = classify_indicator_direction(values, indicator_name)\nresult[\"values\"] = points\nif \"value\" in result:\n    del result[\"value\"]"
+        },
+        {
+          "id": "atr_m15",
+          "tool_name": "calculate_indicator",
+          "output_key": "atr_m15",
+          "enabled": true,
+          "arguments": {
+            "indicator": "ATR",
+            "period": "7",
+            "timeframe": "M15",
+            "history": "3"
+          },
+          "transform_script": "result = dict(tool_output)\npoints = tool_output.get(\"values\") or tool_output.get(\"value\") or []\nvalues = []\nfor item in points:\n    if isinstance(item, dict):\n        raw_value = item.get(\"value\")\n    else:\n        raw_value = item\n    if raw_value is not None:\n        values.append(float(raw_value))\nindicator_name = str(tool_output.get(\"indicator\") or tool_input.get(\"indicator\") or \"\").upper()\nresult[\"indicator\"] = indicator_name or result.get(\"indicator\")\nresult[\"latest\"] = latest_value(values)\nresult[\"direction\"] = classify_indicator_direction(values, indicator_name)\nresult[\"values\"] = points\nif \"value\" in result:\n    del result[\"value\"]"
+        },
+        {
+          "id": "swing_level_m15",
+          "tool_name": "get_swing_levels",
+          "output_key": "swing_level_m15",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "M15",
+            "prominence_atr": "0.25",
+            "atr_period": "14"
+          },
+          "transform_script": "result = tool_output"
+        },
+        {
+          "id": "fomak_m5",
+          "tool_name": "compute_fomak",
+          "output_key": "fomak_m5",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "M5",
+            "lookback_candles": "24",
+            "higher_timeframe": "M30",
+            "include_raw_values": "true",
+            "include_explanation": "true"
+          },
+          "transform_script": "result = tool_output"
+        },
+        {
+          "id": "fopok_m15",
+          "tool_name": "compute_fopok",
+          "output_key": "fopok_m15",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "M15",
+            "higher_timeframe": "H1",
+            "lookback": "100",
+            "prominence_atr": "0.25",
+            "atr_period": "14",
+            "include_explanation": "true"
+          },
+          "transform_script": "result = tool_output"
+        },
+        {
+          "id": "impulse_pullback",
+          "tool_name": "detect_impulse_pullback",
+          "output_key": "impulse_pullback",
+          "enabled": true,
+          "arguments": {
+            "timeframe": "M5",
+            "impulse_atr": "3.0",
+            "impulse_candles": "8",
+            "wait_candles": "24",
+            "atr_period": "14"
+          },
+          "transform_script": "result = tool_output"
+        },
+        {
+          "id": "slope_s_m15",
+          "tool_name": "calculate_indicator",
+          "output_key": "slope_s_m15",
+          "enabled": true,
+          "arguments": {
+            "indicator": "SLOPE_S",
+            "period": "5",
+            "timeframe": "M15",
+            "history": "3",
+            "smooth_period": "3"
+          },
+          "transform_script": "result = dict(tool_output)\npoints = tool_output.get(\"values\") or tool_output.get(\"value\") or []\nvalues = []\nfor item in points:\n    if isinstance(item, dict):\n        raw_value = item.get(\"value\")\n    else:\n        raw_value = item\n    if raw_value is not None:\n        values.append(float(raw_value))\nindicator_name = str(tool_output.get(\"indicator\") or tool_input.get(\"indicator\") or \"\").upper()\nresult[\"indicator\"] = indicator_name or result.get(\"indicator\")\nresult[\"latest\"] = latest_value(values)\nresult[\"direction\"] = classify_indicator_direction(values, indicator_name)\nresult[\"values\"] = points\nif \"value\" in result:\n    del result[\"value\"]\n"
+        },
+        {
+          "id": "recent_trade_this_pair",
+          "tool_name": "get_order_book",
+          "output_key": "recent_trade_this_pair",
+          "enabled": true,
+          "arguments": {
+            "status_filter": "closed",
+            "limit": "1",
+            "with_aa_analysis": "false"
+          },
+          "transform_script": "result = {\"has_recent_trade\": False, \"minutes_open\": None}\nentries = tool_output if isinstance(tool_output, list) else []\nif entries:\n    e = entries[0]\n    def _epoch(ts):\n        if not ts:\n            return None\n        try:\n            date_part, time_part = str(ts).split(\"T\")\n            y, mo, d = [int(x) for x in date_part.split(\"-\")]\n            if \"Z\" in time_part:\n                time_part = time_part.replace(\"Z\", \"+00:00\")\n            if \"+\" in time_part:\n                body, off = time_part.split(\"+\")\n                sign = 1\n            else:\n                idx = time_part.rfind(\"-\")\n                body, off = time_part[:idx], time_part[idx+1:]\n                sign = -1\n            h, m, s = body.split(\":\")\n            s = s.split(\".\")[0]\n            oh, om = off.split(\":\")\n            days = y * 372 + mo * 31 + d\n            secs = days * 86400 + int(h) * 3600 + int(m) * 60 + int(s)\n            offset_secs = sign * (int(oh) * 3600 + int(om) * 60)\n            return secs - offset_secs\n        except Exception:\n            return None\n    ea = _epoch(e.get(\"requested_at\"))\n    eb = _epoch(e.get(\"closed_at\"))\n    minutes_open = round((eb - ea) / 60.0, 1) if (ea is not None and eb is not None) else None\n    result = {\n        \"has_recent_trade\": True,\n        \"direction\": e.get(\"direction\"),\n        \"closed_at\": e.get(\"closed_at\"),\n        \"minutes_open\": minutes_open,\n        \"close_reason\": e.get(\"close_reason\"),\n        \"pnl_account_currency\": e.get(\"pnl_account_currency\"),\n    }\n"
+        },
+        {
+          "id": "open_position_this_pair",
+          "tool_name": "get_order_book",
+          "output_key": "open_position_this_pair",
+          "enabled": true,
+          "arguments": {
+            "status_filter": "open",
+            "limit": "5",
+            "with_aa_analysis": "false"
+          },
+          "transform_script": "entries = tool_output if isinstance(tool_output, list) else []\nresult = {\"count\": len(entries), \"has_open_position\": len(entries) > 0}\n"
+        },
+        {
+          "id": "last_own_decision",
+          "tool_name": "get_last_decision",
+          "output_key": "last_own_decision",
+          "enabled": true,
+          "arguments": {},
+          "transform_script": "decision = tool_output.get(\"decision\") or {}\nanalysis = decision.get(\"analysis\") or {}\nentry_decision = analysis.get(\"entry_decision\") or {}\nside = analysis.get(\"best_opportunity_side\")\nif side == \"LONG\":\n    case = analysis.get(\"long_case\") or {}\nelif side == \"SHORT\":\n    case = analysis.get(\"short_case\") or {}\nelse:\n    case = {}\nresult = {\n    \"is_own_previous_analysis\": True,\n    \"found\": bool(tool_output.get(\"found\")),\n    \"decided_at\": decision.get(\"decided_at\"),\n    \"state\": entry_decision.get(\"state\"),\n    \"quality\": entry_decision.get(\"quality\"),\n    \"order_start_signal\": entry_decision.get(\"order_start_signal\"),\n    \"best_opportunity_side\": side,\n    \"trigger_level\": case.get(\"trigger_level\"),\n    \"invalidation_level\": case.get(\"invalidation_level\"),\n    \"entry_zone\": case.get(\"entry_zone\"),\n    \"decision_reason\": entry_decision.get(\"decision_reason\"),\n    \"check_next_candle\": analysis.get(\"CheckNextCandle\"),\n}\n"
+        }
+      ],
+      "assembly_transform_script": "outs = snapshot.get('tool_outputs', {}) or {}\n\n# Tor 1: laeuft schon ein Trade in diesem Paar, setzt der Analyst aus.\n# Es ist immer nur einer erlaubt, und der Relay wirft ein zweites Signal\n# ohnehin weg - bisher aber erst nachdem der LLM-Aufruf bezahlt war.\n# Fehlt der Block (Simulator: get_order_book ist dort gesperrt), laeuft\n# der Zyklus weiter: das kostet hoechstens einen Aufruf, waehrend der\n# Relay vor jedem Order weiterhin beim Broker nachsieht.\npos = outs.get('open_position_this_pair')\nif isinstance(pos, dict) and pos.get('count'):\n    cancel = True\n    cancel_reason = 'Position offen (' + str(pos.get('count')) + ') - der Analyst setzt aus, bis sie geschlossen ist'\n\n# Tor 2: handeln nur, wenn die hoehere Zeitebene zustimmt (A=S) und der\n# Markt sich bewegt (V>=2). An 450 Trades gemessen besteht diese Lage\n# 23 % der Zeit und ist die einzige mit positivem Ergebnis (+8,74 $ je\n# Trade); die drei anderen kosten zusammen -3542 $.\nif not cancel:\n    fomak = (outs.get('fomak_m5') or {}).get('fomak') or ''\n    if len(fomak) != 6:\n        cancel = True\n        cancel_reason = 'kein FOMAK im Snapshot - ohne Marktzustand keine Freigabe'\n    elif not (fomak[5] == 'S' and fomak[2] in ('2', '3')):\n        cancel = True\n        cancel_reason = 'FOMAK ' + fomak + ' ausserhalb der Handelsgruppe (verlangt A=S und V>=2)'\n\nresult = outs\n"
+    }
+  },
+  "agents": {
+    "OXS_T-USDJPY-AA-PTJ": {
+      "comment": "Analysis Agent USDJPY",
+      "enable": true,
+      "pass_trigger": false,
+      "type": "AA",
+      "llm": "gpt-5.6-luna",
+      "broker": "mt5_oxs_t",
+      "pair": "USDJPY",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 300
+      },
+      "event_triggers": [
+        "m5_candle_trigger",
+        "prompt_updated",
+        "agent_query"
+      ],
+      "AnyCandle": 1,
+      "session_filter": [],
+      "system_prompt": "Du analysierst {pair} als opportunistischer Intraday-Trader.\n\nDies ist ein reines Intraday-Trading-System.\nH1 ist der höchste Entscheidungszeitrahmen und definiert den Intraday-Bias.\nM15 wird für Setup und Entry-Timing verwendet.\nM5 wird nur zur Verfeinerung der Ausführung verwendet.\n\nDeine Aufgabe ist es, handelbare Intraday-Chancen zu finden und zu nutzen, nicht Risiko zu vermeiden.\n\nFalls unten im Text ein Abschnitt \"EXPERIENCE FROM EARLIER TRADES\" auftaucht: Das sind Beobachtungen eines Prüf-Agenten aus vergangenen, bereits geschlossenen Trades - keine Regel und keine Vorgabe. Gewichte sie wie eigene Erfahrung zusätzlich zu deiner aktuellen Analyse; du bist nicht verpflichtet, ihnen zu folgen, und ein einzelner Fall widerlegt nie eine klare aktuelle Analyse.\n\nFalle nicht standardmäßig in eine neutrale Haltung.\nWarte nicht auf perfekte Bestätigung.\nLehne einen Trade nicht allein ab, weil der Markt unruhig, gemischt, unvollkommen oder aggressiv ist.\nBevorzuge den Einstieg beim ersten gültigen M15-Setup oder einer frühen M5-Bestätigung, bevor die Bewegung überdehnt ist.\nEine Bewegung ist überdehnt, wenn der Preis bereits mehrere aufeinanderfolgende M5-Kerzen in dieselbe Richtung gebildet hat oder den Großteil der realistischen Distanz zu seinem Intraday-Ziel ohne einen bedeutenden Rücksetzer zurückgelegt hat.\nEröffne keinen Market-Trade in eine überdehnte Bewegung, nur weil das Momentum weiterhin gerichtet ist. Verlange in diesem Fall einen neuen Rücksetzer/Re-Test, eine Konsolidierung mit erneutem Ausbruch oder ein neu gebildetes M15-Setup; ansonsten WAIT oder NO_ORDER.\nBevorzuge den Einstieg beim ersten gültigen M15-Setup oder einer frühen M5-Bestätigung, bevor die Bewegung überdehnt ist.\nEine Bewegung ist überdehnt, wenn der Preis bereits mehrere aufeinanderfolgende M5-Kerzen in dieselbe Richtung gebildet hat oder den Großteil der realistischen Distanz zu seinem Intraday-Ziel ohne einen bedeutenden Rücksetzer zurückgelegt hat.\nEröffne keinen Market-Trade in eine überdehnte Bewegung, nur weil das Momentum weiterhin gerichtet ist. Verlange in diesem Fall einen neuen Rücksetzer/Re-Test, eine Konsolidierung mit erneutem Ausbruch oder ein neu gebildetes M15-Setup; ansonsten WAIT oder NO_ORDER.\nEin Widerstand ist nicht nur ein Ziel, sondern Marktgedächtnis. Wurde die Zone kürzlich mehrfach getestet und abgewiesen, behandle einen Long darunter als Rebound gegen ein Hindernis: Er erfordert klare Käuferqualität, konservatives Gewinnmanagement und darf nicht automatisch als Breakout-Fortsetzung interpretiert werden. Fehlt diese Käuferqualität, ist Warten auf Pullback oder Bestätigung meist besser als ein Market-Entry.\n\nPrüfe bei einem relevanten Level aus `swing_level_m15` (nächster Widerstand/Support oder Einträge in `highs`/`lows`/`confluence`) den Wert `touch_count`. Ein Level mit `touch_count` von 8 oder mehr wurde bereits mehrfach getestet, ohne endgültig zu halten oder zu brechen — solche Level werden mit jedem weiteren Test eher schwächer, nicht stärker. Ein neuer Ablehnungs-Trade an einem so oft getesteten Level braucht eine klar erkennbare, frische Ablehnungskerze als Bestätigung; ohne diese Bestätigung ist WAIT_FOR_TRIGGER die bessere Wahl als ein sofortiger Market-Entry.\n\nPrüfe außerdem, wie weit sich der Preis bereits in die geplante Trade-Richtung von der letzten M15-Kerze mit Richtungswechsel bzw. dem letzten swing High/Low in dieser Richtung entfernt hat, gemessen an `atr_m15`. Liegt diese Distanz bei mehr als etwa dem 2,8-fachen des aktuellen `atr_m15`-Werts und gab es seither keinen Pullback, ist das keine frische Chance mehr, sondern eine bereits weit gelaufene Bewegung — das gilt für einen Fortsetzungs-Trade in dieselbe Richtung genauso wie für einen Trade gegen die Richtung. Nach einem impulsiven Breakout/Breakdown in genau diese Richtung sofort weiter in dieselbe Richtung zu handeln, ohne einen Rücksetzer abzuwarten, ist der häufigste Fehler hierbei. Verlange in diesem Fall einen Rücksetzer, einen Re-Test oder ein neu gebildetes M15-Setup, bevor du EXECUTABLE_NOW zurückgibst; ansonsten WAIT_FOR_TRIGGER.\n\n## Schneller Stop-Out beim letzten Trade dieses Pairs\n\nIm Abschnitt `recent_trade_this_pair` siehst du den zuletzt geschlossenen Trade für dieses Pair. Zeigt `has_recent_trade: true`, ein `minutes_open` von etwa 20 oder weniger und ein negatives `pnl_account_currency`, wurde die vorherige Einschätzung für dieses Pair sehr schnell widerlegt. Bewegt sich der Preis seither klar in die Gegenrichtung von `direction` dieses gescheiterten Trades, darfst du diese Gegenbewegung stärker gewichten als sonst üblich — ein derart schneller Stop-Out ist ein aktuelles, starkes Signal, dass die vorherige Richtung falsch war, und rechtfertigt eine zügigere Neubewertung als die übliche H1-Bestätigung, statt stundenlang auf ein neues H1-Signal zu warten.\n\n## Deine letzte eigene Analyse für dieses Pair (last_own_decision)\n\nIm Abschnitt `last_own_decision` siehst du deine eigene zuletzt gespeicherte Analyse für dieses Pair aus einem früheren Zyklus — das ist etwas anderes als die \"Erfahrungswerte aus smem\" weiter unten (das sind Beobachtungen zu abgeschlossenen Trades); hier geht es um deine eigene letzte Einschätzung, unabhängig davon, ob daraus ein Trade wurde.\n\nIst `last_own_decision.found` false, gab es noch keine vorherige Analyse für dieses Pair — bewerte ohne diesen Kontext.\n\nWar `last_own_decision.state` gleich WAIT_FOR_TRIGGER, sind `trigger_level` und `invalidation_level` die konkreten Werte, die du damals selbst genannt hast. Prüfe anhand der aktuellen Kerzendaten, ob genau dieser `trigger_level` seitdem erreicht oder bestätigt wurde, oder ob `invalidation_level` verletzt wurde — das ist der maßgebliche Vergleich, nicht eine neu hergeleitete Einschätzung von \"wirkt das gerade frisch\". Wurde der Trigger bestätigt und die übrigen Bedingungen sind weiterhin erfüllt, darf jetzt EXECUTABLE_NOW zurückgegeben werden. Wurde die Invalidierung verletzt oder hat sich die Lage grundlegend geändert, bewerte komplett neu, unabhängig vom alten Trigger. War `last_own_decision.state` etwas anderes als WAIT_FOR_TRIGGER, sind `trigger_level`/`invalidation_level` nicht relevant.\n\nWar `last_own_decision.check_next_candle` true, hast du selbst beim letzten Mal um eine schnelle Nachprüfung genau jetzt gebeten — das System hat deshalb bereits nach der nächsten Kerze erneut ausgelöst, statt die übliche Wartezeit abzuwarten. Komm in diesem Zyklus zu einer klaren Entscheidung zum genannten Trigger (bestätigen oder verwerfen); warte nicht erneut ohne einen klaren neuen Grund. Setze `CheckNextCandle` nicht wiederholt ohne Fortschritt auf true — keine endlose Warteschleife.\n\n## Erfahrungswerte aus smem\n\nNutze bei jeder Analyse `semantic_memory recall`, um nach Erfahrungen aus früheren Trades zu suchen, die zur aktuellen Marktsituation semantisch ähnlich sind. Beziehe dabei insbesondere Pair, Richtung, Timeframes, Marktstruktur, Setup-Typ, Volatilität, relevante Levels und die aktuelle Position des Preises ein. Die gefundenen smem-Einträge sind historische Beobachtungen und Erfahrungswerte, keine Regeln oder Vorgaben.\n\nBewerte selbst:\n- wie ähnlich die damalige Situation zur aktuellen ist,\n- welche Unterschiede bestehen,\n- welchen Evidence status die Erfahrung besitzt,\n- ob bestätigende oder widersprechende Erfahrungen vorhanden sind.\n\nGewichte `single_observation` nur schwach. Wiederholt bestätigte Erfahrungen dürfen stärker berücksichtigt werden, ersetzen aber niemals die aktuelle Marktanalyse.\n\nEin smem-Eintrag darf niemals allein einen Trade erlauben oder verhindern. Die aktuelle Marktsituation hat Vorrang. Falls zusätzlich ein Abschnitt \"EXPERIENCE FROM EARLIER TRADES\" im Kontext bereitgestellt wird, behandle dessen Inhalt nach denselben Grundsätzen.\n\n## Lage im Levelgefüge (fopok_m15)\n\nIm Abschnitt `fopok_m15` steht eine fünfstellige Lagekennung und ihr Klartext. Sie beschreibt, **wo** der Kurs steht, während `fomak_m5` beschreibt, **wie** er sich bewegt. Dieselbe Bewegung am oberen Rand eines engen Korridors ist eine andere Situation als dieselbe Bewegung an einem abgenutzten Support.\n\nDie fünf Stellen: Position im Korridor (Down/Middle/Up), Korridorbreite in ATR (Tight/Normal/Wide), Barriere oben frisch oder abgenutzt (Fresh/Exhausted), Barriere unten dasselbe, höhere Zeitebene bestätigend/ohne Meinung/widersprechend (Aligned/None/Conflict).\n\nEntscheidend für das Ziel sind `room_up_atr` und `room_down_atr` in `raw_values`: das ist der Abstand vom aktuellen Kurs bis zur nächsten Barriere, in ATR. Ein Take-Profit jenseits dieser Zahl setzt voraus, dass die Barriere vorher bricht — wenn du darüber hinaus zielst, begründe warum.\n\nSteht an der fünften Stelle `C`, widersprechen sich M15 und H1 darüber, wo Raum ist. Das ist kein Verbot, aber ein Grund für ein konservativeres Ziel.\n\n## Impuls mit Rückgabe (impulse_pullback)\n\nIm Abschnitt `impulse_pullback` steht, ob gerade eine Extrembewegung mit anschließender Rückgabe läuft. `state` hat drei Werte:\n\n- `none` — keine solche Bewegung, der Abschnitt ist ohne Bedeutung\n- `rejected` — der Impuls ist ausgelaufen, das gebrochene Level hält noch\n- `break_confirmed` — der Kurs ist durch dieses Level zurückgefallen\n\nBei `break_confirmed` ist die Seite in `trade_side_if_taken` genannt, das Ziel in `target_50_percent` (die halbe Impulsstrecke) und die Invalidierung liegt über `extreme`.\n\nDieses Setup ist gemessen: über 154 Fälle auf USDJPY bei einem Impuls von mindestens 3 ATR wurde die halbe Rückgabe in **73 %** der Fälle erreicht, mit +0,69 Pips je Trade nach Spread. Auf EURUSD war es nicht tragfähig. Die vollständige Rückgabe wurde nur in 41 % erreicht — ziele **nicht** über die halbe Strecke hinaus.\n\nBei `state = break_confirmed` und einem Impuls von mindestens 3 ATR ist ein Ziel, das näher liegt als der Stop, kein Ausschlussgrund: die halbe Rückgabe wurde in 73 % der Fälle erreicht, und das trägt das Verhältnis. Nenne in `decision_reason` die Impulsgröße in ATR, damit nachvollziehbar bleibt, worauf du dich berufst.\n\nBei `state = rejected` ist der Einstieg noch nicht bestätigt: gib WAIT_FOR_TRIGGER mit `trigger_level` = dem Level aus `level_broken_by_impulse` zurück.\n\nEin Trade ist ausführbar, wenn:\n1. eine Seite eine bessere Intraday-Chance als die andere hat,\n2. die aktuelle Preisposition akzeptabel ist,\n3. eine Invalidierung definiert werden kann,\n4. ein Intraday-Ziel realistisch erreichbar ist,\n5. es keinen klaren strukturellen Grund gegen den Trade gibt,\n6. der Abstand vom Entry zum geplanten Intraday-Ziel mindestens `latest_spread` plus etwa 2 Pips Reserve beträgt — liegt das Ziel kaum weiter als der Spread selbst entfernt, ist der Trade rechnerisch nicht sinnvoll, unabhängig von der übrigen Analyse.\n\nVergleiche immer LONG mit SHORT.\nWähle die stärkere Seite, es sei denn, beide Seiten sind tatsächlich nicht nutzbar oder ausgeglichen.\n\nBIAS_NEUTRAL ist nur erlaubt, wenn keine Seite einen nutzbaren Vorteil hat.\nWAIT ist nur erlaubt, wenn ein konkreter Trigger noch fehlt.\nNO_ORDER ist nur erlaubt, wenn kein gültiges Intraday-Setup besteht oder das Risiko nicht definiert werden kann.\n\nTrades der Qualität A und B sind ausführbar.\nTrades der Qualität C sind aggressiv, aber weiterhin ausführbar, wenn die Invalidierung klar und das Zielpotenzial realistisch ist — außer wenn `market_type` zugleich 'ranging' UND `bias_quality` zugleich 'weak' ist. In genau dieser Kombination ist keine der beiden Seiten stark genug, um einen aggressiven Entry zu rechtfertigen: behandle das dann wie Qualität D und handle nicht. Trifft nur eine der beiden Bedingungen zu (z. B. ranging mit moderatem oder stärkerem Bias, oder trending/reversing mit schwachem Bias), bleibt Qualität C weiterhin ausführbar wie gewohnt.\nNur Qualität D verhindert die Ausführung.\n\nVerwende ausschließlich die bereitgestellten Marktdaten.\nErfinde keine fehlenden Preise, Kerzen, Indikatoren oder Levels.\nFalls ein nicht kritischer Wert fehlt, gib null zurück, triff aber weiterhin die bestmögliche Entscheidung anhand der verfügbaren Daten.\nFalls ein kritischer Wert für Entry, Stop oder Invalidierung fehlt, eröffne keinen Trade.\n\nGib ausschließlich gültiges JSON aus.\nKeinen Text vor oder nach dem JSON.\n\nIm Kontext oben findest du einen Abschnitt `fomak_m5` mit einem Feld `fomak` (ein 6-stelliger Code). Kopiere diesen Wert unverändert in dein Ausgabefeld `fomak` — erfinde ihn nicht neu und leite ihn nicht selbst her. Damit sieht der nachgeschaltete Broker-Agent und später der Examiner-Agent exakt denselben Code, den du bei dieser Entscheidung gesehen hast.\n\nSetze `CheckNextCandle` auf true nur dann, wenn `entry_decision.state` WAIT_FOR_TRIGGER ist und eine einzelne weitere M5-Kerze die dort genannte Trigger-Bedingung realistisch bestätigen oder verwerfen kann; sonst false.\n\nGib exakt diese Struktur zurück:\n\n{\n  \"symbol\": \"{pair}\",\n  \"fomak\": \"<unverändert aus fomak_m5.fomak>\",\n  \"primary_bias\": \"BIAS_LONG | BIAS_SHORT | BIAS_REVERSAL_LONG | BIAS_REVERSAL_SHORT | BIAS_NEUTRAL\",\n  \"bias_quality\": \"strong | moderate | weak | mixed\",\n  \"market_type\": \"trending | ranging | compressing | reversing | chaotic\",\n  \"confidence\": 0.0,\n\n  \"best_opportunity_side\": \"LONG | SHORT | NONE\",\n  \"opportunity_type\": \"trend_continuation | breakout | breakdown | failed_breakout | failed_breakdown | liquidity_sweep_reversal | support_rejection | resistance_rejection | compression_expansion | aggressive_momentum | none\",\n\n  \"long_case\": {\n    \"status\": \"executable | wait | invalid\",\n    \"entry_zone\": null,\n    \"trigger_level\": null,\n    \"invalidation_level\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"reason\": \"\"\n  },\n\n  \"short_case\": {\n    \"status\": \"executable | wait | invalid\",\n    \"entry_zone\": null,\n    \"trigger_level\": null,\n    \"invalidation_level\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"reason\": \"\"\n  },\n\n  \"entry_decision\": {\n    \"state\": \"EXECUTABLE_NOW | WAIT_FOR_TRIGGER | VALID_BIAS_NO_ENTRY | NO_TRADE\",\n    \"quality\": \"A | B | C | D\",\n    \"order_start_signal\": \"LONG_NOW | SHORT_NOW | WAIT | NO_ORDER\",\n    \"why_not_waiting\": \"\",\n    \"decision_reason\": \"\"\n  },\n\n  \"broker_instruction\": {\n    \"action\": \"OPEN_LONG | OPEN_SHORT | WAIT | NO_ORDER\",\n    \"direction\": \"LONG | SHORT | NONE\",\n    \"order_type_preference\": \"MARKET | LIMIT | STOP | NONE\",\n    \"entry_reference_price\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"invalidation_level\": null,\n    \"max_entry_slippage_pips\": null,\n    \"do_not_trade_condition\": \"\",\n    \"intraday_validity\": \"current_session_only | next_candle_only | until_trigger_invalidated | not_applicable\",\n    \"reason\": \"\"\n  },\n\n  \"CheckNextCandle\": true\n}\n\nKonsistenzregeln:\n- Wenn action OPEN_LONG ist, muss direction LONG sein, order_start_signal LONG_NOW und long_case.status executable.\n- Wenn action OPEN_SHORT ist, muss direction SHORT sein, order_start_signal SHORT_NOW und short_case.status executable.\n- Wenn action WAIT ist, gib ein konkretes trigger_level oder eine Trigger-Bedingung an.\n- Wenn action NO_ORDER ist, erkläre, warum keine nutzbare Intraday-Chance besteht.\n- Gib nicht WAIT zurück, wenn der Trade bereits akzeptabel ist.\n- Gib nicht BIAS_NEUTRAL zurück, wenn eine Seite deutlich besser ist.",
+      "snapshot_profile": "Paul_Tudor_Jones_V1",
+      "tool_config": {
+        "allowed_tools": [
+          "semantic_memory",
+          "assessment_memory",
+          "compute_fomak"
+        ],
+        "forced_arguments": {
+          "semantic_memory": {
+            "write_tables": [
+              "mem_agent_OXS_T-USDJPY-AA-PTJ"
+            ],
+            "read_tables": [
+              "mem_agent_OXS_T-USDJPY-AA-PTJ",
+              "mem_shared_OXS_T"
+            ]
+          },
+          "assessment_memory": {
+            "agentid": "OXS_T-USDJPY-AA-PTJ"
+          }
+        },
+        "response_schema_name": "aa_ptj_decision",
+        "response_schema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "fomak": {
+              "type": "string"
+            },
+            "primary_bias": {
+              "type": "string",
+              "enum": [
+                "BIAS_LONG",
+                "BIAS_SHORT",
+                "BIAS_REVERSAL_LONG",
+                "BIAS_REVERSAL_SHORT",
+                "BIAS_NEUTRAL"
+              ]
+            },
+            "bias_quality": {
+              "type": "string",
+              "enum": [
+                "strong",
+                "moderate",
+                "weak",
+                "mixed"
+              ]
+            },
+            "market_type": {
+              "type": "string",
+              "enum": [
+                "trending",
+                "ranging",
+                "compressing",
+                "reversing",
+                "chaotic"
+              ]
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "best_opportunity_side": {
+              "type": "string",
+              "enum": [
+                "LONG",
+                "SHORT",
+                "NONE"
+              ]
+            },
+            "opportunity_type": {
+              "type": "string",
+              "enum": [
+                "trend_continuation",
+                "breakout",
+                "breakdown",
+                "failed_breakout",
+                "failed_breakdown",
+                "liquidity_sweep_reversal",
+                "support_rejection",
+                "resistance_rejection",
+                "compression_expansion",
+                "aggressive_momentum",
+                "none"
+              ]
+            },
+            "long_case": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executable",
+                    "wait",
+                    "invalid"
+                  ]
+                },
+                "entry_zone": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "trigger_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "short_case": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executable",
+                    "wait",
+                    "invalid"
+                  ]
+                },
+                "entry_zone": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "trigger_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "entry_decision": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "EXECUTABLE_NOW",
+                    "WAIT_FOR_TRIGGER",
+                    "VALID_BIAS_NO_ENTRY",
+                    "NO_TRADE"
+                  ]
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "A",
+                    "B",
+                    "C",
+                    "D"
+                  ]
+                },
+                "order_start_signal": {
+                  "type": "string",
+                  "enum": [
+                    "LONG_NOW",
+                    "SHORT_NOW",
+                    "WAIT",
+                    "NO_ORDER"
+                  ]
+                },
+                "why_not_waiting": {
+                  "type": "string"
+                },
+                "decision_reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "broker_instruction": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "OPEN_LONG",
+                    "OPEN_SHORT",
+                    "WAIT",
+                    "NO_ORDER"
+                  ]
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "LONG",
+                    "SHORT",
+                    "NONE"
+                  ]
+                },
+                "order_type_preference": {
+                  "type": "string",
+                  "enum": [
+                    "MARKET",
+                    "LIMIT",
+                    "STOP",
+                    "NONE"
+                  ]
+                },
+                "entry_reference_price": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "max_entry_slippage_pips": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "do_not_trade_condition": {
+                  "type": "string"
+                },
+                "intraday_validity": {
+                  "type": "string",
+                  "enum": [
+                    "current_session_only",
+                    "next_candle_only",
+                    "until_trigger_invalidated",
+                    "not_applicable"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "CheckNextCandle": {
+              "type": "boolean"
+            }
+          }
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      },
+      "llm_config": {
+        "reasoning_effort": "low"
+      }
+    },
+    "OXS_T-EURUSD-AA-PTJ": {
+      "comment": "Analysis Agent EURUSD",
+      "enable": true,
+      "pass_trigger": false,
+      "type": "AA",
+      "llm": "gpt-5.6-luna",
+      "broker": "mt5_oxs_t",
+      "pair": "EURUSD",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 300
+      },
+      "event_triggers": [
+        "m5_candle_trigger",
+        "prompt_updated",
+        "agent_query"
+      ],
+      "AnyCandle": 1,
+      "session_filter": [],
+      "system_prompt": "Du analysierst {pair} als opportunistischer Intraday-Trader.\n\nDies ist ein reines Intraday-Trading-System.\nH1 ist der höchste Entscheidungszeitrahmen und definiert den Intraday-Bias.\nM15 wird für Setup und Entry-Timing verwendet.\nM5 wird nur zur Verfeinerung der Ausführung verwendet.\n\nDeine Aufgabe ist es, handelbare Intraday-Chancen zu finden und zu nutzen, nicht Risiko zu vermeiden.\n\nFalls unten im Text ein Abschnitt \"EXPERIENCE FROM EARLIER TRADES\" auftaucht: Das sind Beobachtungen eines Prüf-Agenten aus vergangenen, bereits geschlossenen Trades - keine Regel und keine Vorgabe. Gewichte sie wie eigene Erfahrung zusätzlich zu deiner aktuellen Analyse; du bist nicht verpflichtet, ihnen zu folgen, und ein einzelner Fall widerlegt nie eine klare aktuelle Analyse.\n\nFalle nicht standardmäßig in eine neutrale Haltung.\nWarte nicht auf perfekte Bestätigung.\nLehne einen Trade nicht allein ab, weil der Markt unruhig, gemischt, unvollkommen oder aggressiv ist.\nBevorzuge den Einstieg beim ersten gültigen M15-Setup oder einer frühen M5-Bestätigung, bevor die Bewegung überdehnt ist.\nEine Bewegung ist überdehnt, wenn der Preis bereits mehrere aufeinanderfolgende M5-Kerzen in dieselbe Richtung gebildet hat oder den Großteil der realistischen Distanz zu seinem Intraday-Ziel ohne einen bedeutenden Rücksetzer zurückgelegt hat.\nEröffne keinen Market-Trade in eine überdehnte Bewegung, nur weil das Momentum weiterhin gerichtet ist. Verlange in diesem Fall einen neuen Rücksetzer/Re-Test, eine Konsolidierung mit erneutem Ausbruch oder ein neu gebildetes M15-Setup; ansonsten WAIT oder NO_ORDER.\nBevorzuge den Einstieg beim ersten gültigen M15-Setup oder einer frühen M5-Bestätigung, bevor die Bewegung überdehnt ist.\nEine Bewegung ist überdehnt, wenn der Preis bereits mehrere aufeinanderfolgende M5-Kerzen in dieselbe Richtung gebildet hat oder den Großteil der realistischen Distanz zu seinem Intraday-Ziel ohne einen bedeutenden Rücksetzer zurückgelegt hat.\nEröffne keinen Market-Trade in eine überdehnte Bewegung, nur weil das Momentum weiterhin gerichtet ist. Verlange in diesem Fall einen neuen Rücksetzer/Re-Test, eine Konsolidierung mit erneutem Ausbruch oder ein neu gebildetes M15-Setup; ansonsten WAIT oder NO_ORDER.\nEin Widerstand ist nicht nur ein Ziel, sondern Marktgedächtnis. Wurde die Zone kürzlich mehrfach getestet und abgewiesen, behandle einen Long darunter als Rebound gegen ein Hindernis: Er erfordert klare Käuferqualität, konservatives Gewinnmanagement und darf nicht automatisch als Breakout-Fortsetzung interpretiert werden. Fehlt diese Käuferqualität, ist Warten auf Pullback oder Bestätigung meist besser als ein Market-Entry.\n\nPrüfe bei einem relevanten Level aus `swing_level_m15` (nächster Widerstand/Support oder Einträge in `highs`/`lows`/`confluence`) den Wert `touch_count`. Ein Level mit `touch_count` von 8 oder mehr wurde bereits mehrfach getestet, ohne endgültig zu halten oder zu brechen — solche Level werden mit jedem weiteren Test eher schwächer, nicht stärker. Ein neuer Ablehnungs-Trade an einem so oft getesteten Level braucht eine klar erkennbare, frische Ablehnungskerze als Bestätigung; ohne diese Bestätigung ist WAIT_FOR_TRIGGER die bessere Wahl als ein sofortiger Market-Entry.\n\nPrüfe außerdem, wie weit sich der Preis bereits in die geplante Trade-Richtung von der letzten M15-Kerze mit Richtungswechsel bzw. dem letzten swing High/Low in dieser Richtung entfernt hat, gemessen an `atr_m15`. Liegt diese Distanz bei mehr als etwa dem 2,8-fachen des aktuellen `atr_m15`-Werts und gab es seither keinen Pullback, ist das keine frische Chance mehr, sondern eine bereits weit gelaufene Bewegung — das gilt für einen Fortsetzungs-Trade in dieselbe Richtung genauso wie für einen Trade gegen die Richtung. Nach einem impulsiven Breakout/Breakdown in genau diese Richtung sofort weiter in dieselbe Richtung zu handeln, ohne einen Rücksetzer abzuwarten, ist der häufigste Fehler hierbei. Verlange in diesem Fall einen Rücksetzer, einen Re-Test oder ein neu gebildetes M15-Setup, bevor du EXECUTABLE_NOW zurückgibst; ansonsten WAIT_FOR_TRIGGER.\n\n## Schneller Stop-Out beim letzten Trade dieses Pairs\n\nIm Abschnitt `recent_trade_this_pair` siehst du den zuletzt geschlossenen Trade für dieses Pair. Zeigt `has_recent_trade: true`, ein `minutes_open` von etwa 20 oder weniger und ein negatives `pnl_account_currency`, wurde die vorherige Einschätzung für dieses Pair sehr schnell widerlegt. Bewegt sich der Preis seither klar in die Gegenrichtung von `direction` dieses gescheiterten Trades, darfst du diese Gegenbewegung stärker gewichten als sonst üblich — ein derart schneller Stop-Out ist ein aktuelles, starkes Signal, dass die vorherige Richtung falsch war, und rechtfertigt eine zügigere Neubewertung als die übliche H1-Bestätigung, statt stundenlang auf ein neues H1-Signal zu warten.\n\n## Deine letzte eigene Analyse für dieses Pair (last_own_decision)\n\nIm Abschnitt `last_own_decision` siehst du deine eigene zuletzt gespeicherte Analyse für dieses Pair aus einem früheren Zyklus — das ist etwas anderes als die \"Erfahrungswerte aus smem\" weiter unten (das sind Beobachtungen zu abgeschlossenen Trades); hier geht es um deine eigene letzte Einschätzung, unabhängig davon, ob daraus ein Trade wurde.\n\nIst `last_own_decision.found` false, gab es noch keine vorherige Analyse für dieses Pair — bewerte ohne diesen Kontext.\n\nWar `last_own_decision.state` gleich WAIT_FOR_TRIGGER, sind `trigger_level` und `invalidation_level` die konkreten Werte, die du damals selbst genannt hast. Prüfe anhand der aktuellen Kerzendaten, ob genau dieser `trigger_level` seitdem erreicht oder bestätigt wurde, oder ob `invalidation_level` verletzt wurde — das ist der maßgebliche Vergleich, nicht eine neu hergeleitete Einschätzung von \"wirkt das gerade frisch\". Wurde der Trigger bestätigt und die übrigen Bedingungen sind weiterhin erfüllt, darf jetzt EXECUTABLE_NOW zurückgegeben werden. Wurde die Invalidierung verletzt oder hat sich die Lage grundlegend geändert, bewerte komplett neu, unabhängig vom alten Trigger. War `last_own_decision.state` etwas anderes als WAIT_FOR_TRIGGER, sind `trigger_level`/`invalidation_level` nicht relevant.\n\nWar `last_own_decision.check_next_candle` true, hast du selbst beim letzten Mal um eine schnelle Nachprüfung genau jetzt gebeten — das System hat deshalb bereits nach der nächsten Kerze erneut ausgelöst, statt die übliche Wartezeit abzuwarten. Komm in diesem Zyklus zu einer klaren Entscheidung zum genannten Trigger (bestätigen oder verwerfen); warte nicht erneut ohne einen klaren neuen Grund. Setze `CheckNextCandle` nicht wiederholt ohne Fortschritt auf true — keine endlose Warteschleife.\n\n## Erfahrungswerte aus smem\n\nNutze bei jeder Analyse `semantic_memory recall`, um nach Erfahrungen aus früheren Trades zu suchen, die zur aktuellen Marktsituation semantisch ähnlich sind. Beziehe dabei insbesondere Pair, Richtung, Timeframes, Marktstruktur, Setup-Typ, Volatilität, relevante Levels und die aktuelle Position des Preises ein. Die gefundenen smem-Einträge sind historische Beobachtungen und Erfahrungswerte, keine Regeln oder Vorgaben.\n\nBewerte selbst:\n- wie ähnlich die damalige Situation zur aktuellen ist,\n- welche Unterschiede bestehen,\n- welchen Evidence status die Erfahrung besitzt,\n- ob bestätigende oder widersprechende Erfahrungen vorhanden sind.\n\nGewichte `single_observation` nur schwach. Wiederholt bestätigte Erfahrungen dürfen stärker berücksichtigt werden, ersetzen aber niemals die aktuelle Marktanalyse.\n\nEin smem-Eintrag darf niemals allein einen Trade erlauben oder verhindern. Die aktuelle Marktsituation hat Vorrang. Falls zusätzlich ein Abschnitt \"EXPERIENCE FROM EARLIER TRADES\" im Kontext bereitgestellt wird, behandle dessen Inhalt nach denselben Grundsätzen.\n\n## Lage im Levelgefüge (fopok_m15)\n\nIm Abschnitt `fopok_m15` steht eine fünfstellige Lagekennung und ihr Klartext. Sie beschreibt, **wo** der Kurs steht, während `fomak_m5` beschreibt, **wie** er sich bewegt. Dieselbe Bewegung am oberen Rand eines engen Korridors ist eine andere Situation als dieselbe Bewegung an einem abgenutzten Support.\n\nDie fünf Stellen: Position im Korridor (Down/Middle/Up), Korridorbreite in ATR (Tight/Normal/Wide), Barriere oben frisch oder abgenutzt (Fresh/Exhausted), Barriere unten dasselbe, höhere Zeitebene bestätigend/ohne Meinung/widersprechend (Aligned/None/Conflict).\n\nEntscheidend für das Ziel sind `room_up_atr` und `room_down_atr` in `raw_values`: das ist der Abstand vom aktuellen Kurs bis zur nächsten Barriere, in ATR. Ein Take-Profit jenseits dieser Zahl setzt voraus, dass die Barriere vorher bricht — wenn du darüber hinaus zielst, begründe warum.\n\nSteht an der fünften Stelle `C`, widersprechen sich M15 und H1 darüber, wo Raum ist. Das ist kein Verbot, aber ein Grund für ein konservativeres Ziel.\n\n## Impuls mit Rückgabe (impulse_pullback)\n\nIm Abschnitt `impulse_pullback` steht, ob gerade eine Extrembewegung mit anschließender Rückgabe läuft. `state` hat drei Werte:\n\n- `none` — keine solche Bewegung, der Abschnitt ist ohne Bedeutung\n- `rejected` — der Impuls ist ausgelaufen, das gebrochene Level hält noch\n- `break_confirmed` — der Kurs ist durch dieses Level zurückgefallen\n\nBei `break_confirmed` ist die Seite in `trade_side_if_taken` genannt, das Ziel in `target_50_percent` (die halbe Impulsstrecke) und die Invalidierung liegt über `extreme`.\n\nDieses Setup ist gemessen: über 154 Fälle auf USDJPY bei einem Impuls von mindestens 3 ATR wurde die halbe Rückgabe in **73 %** der Fälle erreicht, mit +0,69 Pips je Trade nach Spread. Auf EURUSD war es nicht tragfähig. Die vollständige Rückgabe wurde nur in 41 % erreicht — ziele **nicht** über die halbe Strecke hinaus.\n\nBei `state = break_confirmed` und einem Impuls von mindestens 3 ATR ist ein Ziel, das näher liegt als der Stop, kein Ausschlussgrund: die halbe Rückgabe wurde in 73 % der Fälle erreicht, und das trägt das Verhältnis. Nenne in `decision_reason` die Impulsgröße in ATR, damit nachvollziehbar bleibt, worauf du dich berufst.\n\nBei `state = rejected` ist der Einstieg noch nicht bestätigt: gib WAIT_FOR_TRIGGER mit `trigger_level` = dem Level aus `level_broken_by_impulse` zurück.\n\nEin Trade ist ausführbar, wenn:\n1. eine Seite eine bessere Intraday-Chance als die andere hat,\n2. die aktuelle Preisposition akzeptabel ist,\n3. eine Invalidierung definiert werden kann,\n4. ein Intraday-Ziel realistisch erreichbar ist,\n5. es keinen klaren strukturellen Grund gegen den Trade gibt,\n6. der Abstand vom Entry zum geplanten Intraday-Ziel mindestens `latest_spread` plus etwa 2 Pips Reserve beträgt — liegt das Ziel kaum weiter als der Spread selbst entfernt, ist der Trade rechnerisch nicht sinnvoll, unabhängig von der übrigen Analyse.\n\nVergleiche immer LONG mit SHORT.\nWähle die stärkere Seite, es sei denn, beide Seiten sind tatsächlich nicht nutzbar oder ausgeglichen.\n\nBIAS_NEUTRAL ist nur erlaubt, wenn keine Seite einen nutzbaren Vorteil hat.\nWAIT ist nur erlaubt, wenn ein konkreter Trigger noch fehlt.\nNO_ORDER ist nur erlaubt, wenn kein gültiges Intraday-Setup besteht oder das Risiko nicht definiert werden kann.\n\nTrades der Qualität A und B sind ausführbar.\nTrades der Qualität C sind aggressiv, aber weiterhin ausführbar, wenn die Invalidierung klar und das Zielpotenzial realistisch ist — außer wenn `market_type` zugleich 'ranging' UND `bias_quality` zugleich 'weak' ist. In genau dieser Kombination ist keine der beiden Seiten stark genug, um einen aggressiven Entry zu rechtfertigen: behandle das dann wie Qualität D und handle nicht. Trifft nur eine der beiden Bedingungen zu (z. B. ranging mit moderatem oder stärkerem Bias, oder trending/reversing mit schwachem Bias), bleibt Qualität C weiterhin ausführbar wie gewohnt.\nNur Qualität D verhindert die Ausführung.\n\nVerwende ausschließlich die bereitgestellten Marktdaten.\nErfinde keine fehlenden Preise, Kerzen, Indikatoren oder Levels.\nFalls ein nicht kritischer Wert fehlt, gib null zurück, triff aber weiterhin die bestmögliche Entscheidung anhand der verfügbaren Daten.\nFalls ein kritischer Wert für Entry, Stop oder Invalidierung fehlt, eröffne keinen Trade.\n\nGib ausschließlich gültiges JSON aus.\nKeinen Text vor oder nach dem JSON.\n\nIm Kontext oben findest du einen Abschnitt `fomak_m5` mit einem Feld `fomak` (ein 6-stelliger Code). Kopiere diesen Wert unverändert in dein Ausgabefeld `fomak` — erfinde ihn nicht neu und leite ihn nicht selbst her. Damit sieht der nachgeschaltete Broker-Agent und später der Examiner-Agent exakt denselben Code, den du bei dieser Entscheidung gesehen hast.\n\nSetze `CheckNextCandle` auf true nur dann, wenn `entry_decision.state` WAIT_FOR_TRIGGER ist und eine einzelne weitere M5-Kerze die dort genannte Trigger-Bedingung realistisch bestätigen oder verwerfen kann; sonst false.\n\nGib exakt diese Struktur zurück:\n\n{\n  \"symbol\": \"{pair}\",\n  \"fomak\": \"<unverändert aus fomak_m5.fomak>\",\n  \"primary_bias\": \"BIAS_LONG | BIAS_SHORT | BIAS_REVERSAL_LONG | BIAS_REVERSAL_SHORT | BIAS_NEUTRAL\",\n  \"bias_quality\": \"strong | moderate | weak | mixed\",\n  \"market_type\": \"trending | ranging | compressing | reversing | chaotic\",\n  \"confidence\": 0.0,\n\n  \"best_opportunity_side\": \"LONG | SHORT | NONE\",\n  \"opportunity_type\": \"trend_continuation | breakout | breakdown | failed_breakout | failed_breakdown | liquidity_sweep_reversal | support_rejection | resistance_rejection | compression_expansion | aggressive_momentum | none\",\n\n  \"long_case\": {\n    \"status\": \"executable | wait | invalid\",\n    \"entry_zone\": null,\n    \"trigger_level\": null,\n    \"invalidation_level\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"reason\": \"\"\n  },\n\n  \"short_case\": {\n    \"status\": \"executable | wait | invalid\",\n    \"entry_zone\": null,\n    \"trigger_level\": null,\n    \"invalidation_level\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"reason\": \"\"\n  },\n\n  \"entry_decision\": {\n    \"state\": \"EXECUTABLE_NOW | WAIT_FOR_TRIGGER | VALID_BIAS_NO_ENTRY | NO_TRADE\",\n    \"quality\": \"A | B | C | D\",\n    \"order_start_signal\": \"LONG_NOW | SHORT_NOW | WAIT | NO_ORDER\",\n    \"why_not_waiting\": \"\",\n    \"decision_reason\": \"\"\n  },\n\n  \"broker_instruction\": {\n    \"action\": \"OPEN_LONG | OPEN_SHORT | WAIT | NO_ORDER\",\n    \"direction\": \"LONG | SHORT | NONE\",\n    \"order_type_preference\": \"MARKET | LIMIT | STOP | NONE\",\n    \"entry_reference_price\": null,\n    \"stop_loss\": null,\n    \"take_profit\": null,\n    \"invalidation_level\": null,\n    \"max_entry_slippage_pips\": null,\n    \"do_not_trade_condition\": \"\",\n    \"intraday_validity\": \"current_session_only | next_candle_only | until_trigger_invalidated | not_applicable\",\n    \"reason\": \"\"\n  },\n\n  \"CheckNextCandle\": true\n}\n\nKonsistenzregeln:\n- Wenn action OPEN_LONG ist, muss direction LONG sein, order_start_signal LONG_NOW und long_case.status executable.\n- Wenn action OPEN_SHORT ist, muss direction SHORT sein, order_start_signal SHORT_NOW und short_case.status executable.\n- Wenn action WAIT ist, gib ein konkretes trigger_level oder eine Trigger-Bedingung an.\n- Wenn action NO_ORDER ist, erkläre, warum keine nutzbare Intraday-Chance besteht.\n- Gib nicht WAIT zurück, wenn der Trade bereits akzeptabel ist.\n- Gib nicht BIAS_NEUTRAL zurück, wenn eine Seite deutlich besser ist.",
+      "snapshot_profile": "Paul_Tudor_Jones_V1",
+      "tool_config": {
+        "allowed_tools": [
+          "semantic_memory",
+          "assessment_memory",
+          "compute_fomak"
+        ],
+        "forced_arguments": {
+          "semantic_memory": {
+            "write_tables": [
+              "mem_agent_OXS_T-EURUSD-AA-PTJ"
+            ],
+            "read_tables": [
+              "mem_agent_OXS_T-EURUSD-AA-PTJ",
+              "mem_shared_OXS_T"
+            ]
+          },
+          "assessment_memory": {
+            "agentid": "OXS_T-EURUSD-AA-PTJ"
+          }
+        },
+        "response_schema_name": "aa_ptj_decision",
+        "response_schema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "fomak": {
+              "type": "string"
+            },
+            "primary_bias": {
+              "type": "string",
+              "enum": [
+                "BIAS_LONG",
+                "BIAS_SHORT",
+                "BIAS_REVERSAL_LONG",
+                "BIAS_REVERSAL_SHORT",
+                "BIAS_NEUTRAL"
+              ]
+            },
+            "bias_quality": {
+              "type": "string",
+              "enum": [
+                "strong",
+                "moderate",
+                "weak",
+                "mixed"
+              ]
+            },
+            "market_type": {
+              "type": "string",
+              "enum": [
+                "trending",
+                "ranging",
+                "compressing",
+                "reversing",
+                "chaotic"
+              ]
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "best_opportunity_side": {
+              "type": "string",
+              "enum": [
+                "LONG",
+                "SHORT",
+                "NONE"
+              ]
+            },
+            "opportunity_type": {
+              "type": "string",
+              "enum": [
+                "trend_continuation",
+                "breakout",
+                "breakdown",
+                "failed_breakout",
+                "failed_breakdown",
+                "liquidity_sweep_reversal",
+                "support_rejection",
+                "resistance_rejection",
+                "compression_expansion",
+                "aggressive_momentum",
+                "none"
+              ]
+            },
+            "long_case": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executable",
+                    "wait",
+                    "invalid"
+                  ]
+                },
+                "entry_zone": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "trigger_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "short_case": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executable",
+                    "wait",
+                    "invalid"
+                  ]
+                },
+                "entry_zone": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "trigger_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "entry_decision": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "EXECUTABLE_NOW",
+                    "WAIT_FOR_TRIGGER",
+                    "VALID_BIAS_NO_ENTRY",
+                    "NO_TRADE"
+                  ]
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "A",
+                    "B",
+                    "C",
+                    "D"
+                  ]
+                },
+                "order_start_signal": {
+                  "type": "string",
+                  "enum": [
+                    "LONG_NOW",
+                    "SHORT_NOW",
+                    "WAIT",
+                    "NO_ORDER"
+                  ]
+                },
+                "why_not_waiting": {
+                  "type": "string"
+                },
+                "decision_reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "broker_instruction": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "OPEN_LONG",
+                    "OPEN_SHORT",
+                    "WAIT",
+                    "NO_ORDER"
+                  ]
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "LONG",
+                    "SHORT",
+                    "NONE"
+                  ]
+                },
+                "order_type_preference": {
+                  "type": "string",
+                  "enum": [
+                    "MARKET",
+                    "LIMIT",
+                    "STOP",
+                    "NONE"
+                  ]
+                },
+                "entry_reference_price": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "stop_loss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "invalidation_level": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "max_entry_slippage_pips": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "do_not_trade_condition": {
+                  "type": "string"
+                },
+                "intraday_validity": {
+                  "type": "string",
+                  "enum": [
+                    "current_session_only",
+                    "next_candle_only",
+                    "until_trigger_invalidated",
+                    "not_applicable"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            "CheckNextCandle": {
+              "type": "boolean"
+            }
+          }
+        },
+        "max_tool_turns": 10,
+        "max_tokens": 4096
+      },
+      "llm_config": {
+        "reasoning_effort": "low"
+      }
+    }
+  },
+  "event_composers": {
+    "OXS_T-USDJPY-EC-RELAY": {
+      "comment": "USDJPY relay for pre checking before BA agent",
+      "enable": true,
+      "broker": "mt5_oxs_t",
+      "pair": "USDJPY",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 60
+      },
+      "AnyCandle": 1,
+      "event_triggers": [
+        "analysis_result",
+        "signal_generated"
+      ],
+      "session_filter": [],
+      "tool_config": {
+        "allowed_tools": [
+          "get_open_positions"
+        ],
+        "max_tool_turns": 0,
+        "script_timeout_seconds": 10
+      },
+      "pass_trigger": false,
+      "script": "async def main(input, config, tools):\n    symbol = message.get(\"instrument\")\n    if not symbol:\n        log(\"EC guard: cannot extract instrument from message – signal BLOCKED\", level=\"error\", pin=True)\n        await emit(\"ec_guard_block\", {\"reason\": \"no_instrument_in_message\", \"input_keys\": list(input.keys())})\n        return None\n\n    resp = await tools.call(\"get_open_positions\", pair=symbol)\n\n    if not isinstance(resp, dict) or resp.get(\"error\") or \"pairs\" not in resp:\n        err = resp.get(\"error\") if isinstance(resp, dict) else repr(resp)\n        log(f\"{symbol}: EC guard: get_open_positions invalid response – signal BLOCKED. Error: {err}\", level=\"error\", pin=True)\n        await emit(\"ec_guard_block\", {\"reason\": \"tool_error\", \"pair\": symbol, \"error\": str(err)})\n        return None\n\n    pairs = resp.get(\"pairs\") or {}\n    pair_data = pairs.get(symbol, {})\n    count = pair_data.get(\"count\", 0)\n\n    if count == 0:\n        return input\n\n    log(f\"{symbol}: signal blocked - {count} position(s) already open\", level=\"info\", pin=True)\n    await emit(\"ec_guard_block\", {\"reason\": \"position_already_open\", \"pair\": symbol, \"open_count\": count})\n    return None",
+      "config_json": "{}"
+    },
+    "OXS_T-USDJPY-EC-TRSLF": {
+      "comment": "Trailing Stop-Loss adjusts the SL with each M5 candle if the distance to the ATR is too large, using the live broker price (not the M5 candle close). If the broker keeps rejecting the trail (e.g. 'Invalid stops') several times in a row while the position is in profit, closes it instead of leaving the stale stop in place.",
+      "enable": true,
+      "broker": "mt5_oxs_t",
+      "pair": "USDJPY",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 60
+      },
+      "AnyCandle": 1,
+      "event_triggers": [
+        "m5_candle_trigger"
+      ],
+      "session_filter": [],
+      "tool_config": {
+        "allowed_tools": [
+          "calculate_indicator",
+          "modify_order",
+          "get_open_positions",
+          "close_position",
+          "assessment_memory"
+        ],
+        "max_tool_turns": 0,
+        "script_timeout_seconds": 15
+      },
+      "pass_trigger": false,
+      "script": "async def main(input, config, tools):\n    pair = (message.get(\"instrument\") or \"\").strip().upper()\n    candle = input.get(\"candle\") or {}\n\n    if input.get(\"is_null_candle\") or not pair:\n        return None\n\n    # -- Config ---------------------------------------------------------------\n    atr_period    = int(config.get(\"atr_period\", 14))\n    atr_timeframe = str(config.get(\"atr_timeframe\", \"M15\")).upper()\n    max_sl_atr    = float(config.get(\"max_sl_distance_atr\", 2.0))\n    target_sl_atr = float(config.get(\"target_sl_distance_atr\", 1.5))\n    max_failures  = int(config.get(\"max_consecutive_trail_failures\", 2))\n\n    # -- Open Positions -------------------------------------------------------\n    pos_resp = await tools.call(\"get_open_positions\", pair=pair)\n    pos_result = pos_resp or {}\n    orders = ((pos_result.get(\"pairs\") or {}).get(pair) or {}).get(\"orders\") or []\n\n    if not orders:\n        return None\n\n    adjustments = []\n\n    # -- Per-position consecutive-trail-failure counters, persisted across cycles\n    # via assessment_memory (plain \"position_id=count\" lines -- no import needed).\n    # Scoped per pair so EURUSD/USDJPY never share state.\n    mem_key = f\"trail_failures_{pair}\"\n    open_ids = {str(o.get(\"broker_position_id\")) for o in orders if o.get(\"broker_position_id\") is not None}\n    failure_counts = {}\n    mem_resp = await tools.call(\"assessment_memory\", agentid=mem_key, mode=\"get\")\n    raw_state = (mem_resp or {}).get(\"message\") or \"\"\n    for line in raw_state.splitlines():\n        if \"=\" not in line:\n            continue\n        pid, _, count_text = line.partition(\"=\")\n        if pid in open_ids and count_text.strip().lstrip(\"-\").isdigit():\n            failure_counts[pid] = int(count_text)\n\n    # -- M15 ATR for the SL-trailing phase --------------------------------------\n    atr_resp = await tools.call(\n        \"calculate_indicator\",\n        indicator=\"ATR\",\n        period=atr_period,\n        timeframe=atr_timeframe,\n        history=1,\n    )\n    atr_values = (atr_resp.get(\"values\") or [])\n    if not atr_values or atr_values[0].get(\"value\") is None:\n        return None\n\n    atr = float(atr_values[0][\"value\"])\n    if atr <= 0:\n        return None\n\n    # -- SL trailing only. Take-profit is never touched here -- it stays active\n    # alongside the trailing stop, so the trade can still close at its original\n    # target even while the stop is being trailed; the position closes at\n    # whichever of TP or the trailing SL is hit first. When a modify IS needed,\n    # the existing take-profit is re-affirmed explicitly in the same call\n    # instead of relying on the broker adapter's \"keep current value\" fallback\n    # for an omitted argument -- that fallback re-reads the broker's own current\n    # tp, which has been observed to read back as empty even when a real tp is\n    # set; protection must never be silently dropped by an SL-only modify.\n    max_dist = max_sl_atr * atr\n\n    for order in orders:\n        pos_id = order.get(\"broker_position_id\")\n        direction = str(order.get(\"direction\") or \"\").lower()\n        sl = order.get(\"stop_loss\")\n        tp = order.get(\"take_profit\")\n        # Live broker price from this same get_open_positions call -- NOT the M5\n        # trigger candle's close, which can be up to ~5 minutes stale. A stale\n        # price here means a newly-trailed stop can already be too close to the\n        # *real* live price by the time the modify request reaches the broker,\n        # which is exactly what caused repeated \"Invalid stops\" rejections (MT5\n        # retcode 10016) on a real EURUSD trade that kept moving in its favor\n        # while every trail attempt after the first bounced off the broker.\n        current_price = order.get(\"current_price\")\n        open_price = order.get(\"open_price\")\n\n        if pos_id is None or sl is None or current_price is None:\n            continue\n        pos_id = str(pos_id)\n\n        sl = float(sl)\n        price = float(current_price)\n        distance = abs(price - sl)\n        if distance <= max_dist:\n            continue\n\n        if direction == \"buy\":\n            new_sl = round(price - target_sl_atr * atr, 5)\n            improved = new_sl > sl\n        elif direction == \"sell\":\n            new_sl = round(price + target_sl_atr * atr, 5)\n            improved = new_sl < sl\n        else:\n            continue\n\n        if not improved:\n            log(\n                f\"SL_UPDATE_SKIPPED_NOT_IMPROVEMENT {pair} position={pos_id} \"\n                f\"old_sl={sl:.5f} proposed_sl={new_sl:.5f}\",\n                level=\"info\",\n            )\n            continue\n\n        mod_kwargs = {\n            \"position_id\": pos_id,\n            \"stop_loss\": new_sl,\n            \"reasoning\": (\n                f\"SL trailed: dist {distance:.5f} > max {max_dist:.5f} \"\n                f\"(M15 ATR {atr:.5f}, live price {price:.5f})\"\n            ),\n        }\n        try:\n            tp_value = float(tp) if tp is not None else 0.0\n        except (TypeError, ValueError):\n            tp_value = 0.0\n        if tp_value > 0:\n            mod_kwargs[\"take_profit\"] = tp_value\n\n        mod_resp = await tools.call(\"modify_order\", **mod_kwargs)\n        success = (mod_resp or {}).get(\"success\", False)\n        log(\n            f\"SL_TRAILED {pair} position={pos_id} old_sl={sl:.5f} \"\n            f\"new_sl={new_sl:.5f} success={success}\",\n            level=\"info\",\n            pin=True,\n        )\n        adjustments.append({\n            \"position_id\": pos_id,\n            \"action\": \"SL_TRAILED\",\n            \"direction\": direction,\n            \"old_sl\": sl,\n            \"new_sl\": new_sl,\n            \"atr\": atr,\n            \"success\": success,\n        })\n\n        if success:\n            failure_counts.pop(pos_id, None)\n            continue\n\n        # Fallback: the broker keeps rejecting the trail attempt (e.g. \"Invalid\n        # stops\"). If that happens several cycles in a row while the position is\n        # genuinely in profit, the old stop is stuck too far away to protect the\n        # gain -- better to lock the profit in now than keep retrying and risk\n        # giving it all back, which is exactly what happened to a real EURUSD\n        # trade this mechanism failed to protect (four rejections in a row,\n        # then a reversal turned the open profit into a closed loss).\n        failure_counts[pos_id] = failure_counts.get(pos_id, 0) + 1\n        if failure_counts[pos_id] < max_failures:\n            continue\n\n        in_profit = False\n        if open_price is not None:\n            open_price_f = float(open_price)\n            if direction == \"buy\":\n                in_profit = price > open_price_f\n            elif direction == \"sell\":\n                in_profit = price < open_price_f\n\n        if not in_profit:\n            continue\n\n        close_resp = await tools.call(\n            \"close_position\",\n            position_id=pos_id,\n            reasoning=(\n                f\"Emergency close: SL trail rejected by broker \"\n                f\"{failure_counts[pos_id]}x in a row while position is in \"\n                f\"profit (open {open_price}, live {price:.5f}).\"\n            ),\n        )\n        close_success = (close_resp or {}).get(\"success\", False)\n        log(\n            f\"EMERGENCY_CLOSE_AFTER_TRAIL_FAILURES {pair} position={pos_id} \"\n            f\"failures={failure_counts[pos_id]} success={close_success}\",\n            level=\"warning\",\n            pin=True,\n        )\n        adjustments.append({\n            \"position_id\": pos_id,\n            \"action\": \"EMERGENCY_CLOSE\",\n            \"direction\": direction,\n            \"failures\": failure_counts[pos_id],\n            \"success\": close_success,\n        })\n        if close_success:\n            failure_counts.pop(pos_id, None)\n\n    new_state = \"\\n\".join(f\"{pid}={count}\" for pid, count in failure_counts.items())\n    await tools.call(\"assessment_memory\", agentid=mem_key, mode=\"set\", message=new_state)\n\n    return {\"pair\": pair, \"adjustments\": adjustments} if adjustments else None\n",
+      "config_json": "{\r\n  \"atr_period\": 14,\r\n  \"atr_timeframe\": \"M15\",\r\n  \"max_sl_distance_atr\": 2.0,\r\n  \"target_sl_distance_atr\": 1.5,\r\n  \"max_consecutive_trail_failures\": 2\r\n}"
+    },
+    "OXS_T-EURUSD-EC-RELAY": {
+      "comment": "EURUSD relay for pre checking before BA agent",
+      "enable": true,
+      "broker": "mt5_oxs_t",
+      "pair": "EURUSD",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 60
+      },
+      "AnyCandle": 1,
+      "event_triggers": [
+        "analysis_result",
+        "signal_generated"
+      ],
+      "session_filter": [],
+      "tool_config": {
+        "allowed_tools": [
+          "get_open_positions",
+          "assessment_memory"
+        ],
+        "max_tool_turns": 0,
+        "script_timeout_seconds": 10
+      },
+      "pass_trigger": false,
+      "script": "async def main(input, config, tools):\n    symbol = message.get(\"instrument\")\n    if not symbol:\n        log(\"EC guard: cannot extract instrument from message – signal BLOCKED\", level=\"error\", pin=True)\n        await emit(\"ec_guard_block\", {\"reason\": \"no_instrument_in_message\", \"input_keys\": list(input.keys())})\n        return None\n\n    resp = await tools.call(\"get_open_positions\", pair=symbol)\n\n    if not isinstance(resp, dict) or resp.get(\"error\") or \"pairs\" not in resp:\n        err = resp.get(\"error\") if isinstance(resp, dict) else repr(resp)\n        log(f\"{symbol}: EC guard: get_open_positions invalid response – signal BLOCKED. Error: {err}\", level=\"error\", pin=True)\n        await emit(\"ec_guard_block\", {\"reason\": \"tool_error\", \"pair\": symbol, \"error\": str(err)})\n        return None\n\n    pairs = resp.get(\"pairs\") or {}\n    pair_data = pairs.get(symbol, {})\n    count = pair_data.get(\"count\", 0)\n\n    if count == 0:\n        return input\n\n    log(f\"{symbol}: signal blocked - {count} position(s) already open\", level=\"info\", pin=True)\n    await emit(\"ec_guard_block\", {\"reason\": \"position_already_open\", \"pair\": symbol, \"open_count\": count})\n    return None",
+      "config_json": "{}"
+    },
+    "OXS_T-EURUSD-EC-TRSLF": {
+      "comment": "Trailing Stop-Loss adjusts the SL with each M5 candle if the distance to the ATR is too large, using the live broker price (not the M5 candle close). If the broker keeps rejecting the trail (e.g. 'Invalid stops') several times in a row while the position is in profit, closes it instead of leaving the stale stop in place.",
+      "enable": true,
+      "broker": "mt5_oxs_t",
+      "pair": "EURUSD",
+      "timer": {
+        "enabled": false,
+        "interval_seconds": 60
+      },
+      "AnyCandle": 1,
+      "event_triggers": [
+        "m5_candle_trigger"
+      ],
+      "session_filter": [],
+      "tool_config": {
+        "allowed_tools": [
+          "get_open_positions",
+          "calculate_indicator",
+          "modify_order",
+          "close_position",
+          "assessment_memory"
+        ],
+        "max_tool_turns": 0,
+        "script_timeout_seconds": 15
+      },
+      "pass_trigger": false,
+      "script": "async def main(input, config, tools):\n    pair = (message.get(\"instrument\") or \"\").strip().upper()\n    candle = input.get(\"candle\") or {}\n\n    if input.get(\"is_null_candle\") or not pair:\n        return None\n\n    # -- Config ---------------------------------------------------------------\n    atr_period    = int(config.get(\"atr_period\", 14))\n    atr_timeframe = str(config.get(\"atr_timeframe\", \"M15\")).upper()\n    max_sl_atr    = float(config.get(\"max_sl_distance_atr\", 2.0))\n    target_sl_atr = float(config.get(\"target_sl_distance_atr\", 1.5))\n    max_failures  = int(config.get(\"max_consecutive_trail_failures\", 2))\n\n    # -- Open Positions -------------------------------------------------------\n    pos_resp = await tools.call(\"get_open_positions\", pair=pair)\n    pos_result = pos_resp or {}\n    orders = ((pos_result.get(\"pairs\") or {}).get(pair) or {}).get(\"orders\") or []\n\n    if not orders:\n        return None\n\n    adjustments = []\n\n    # -- Per-position consecutive-trail-failure counters, persisted across cycles\n    # via assessment_memory (plain \"position_id=count\" lines -- no import needed).\n    # Scoped per pair so EURUSD/USDJPY never share state.\n    mem_key = f\"trail_failures_{pair}\"\n    open_ids = {str(o.get(\"broker_position_id\")) for o in orders if o.get(\"broker_position_id\") is not None}\n    failure_counts = {}\n    mem_resp = await tools.call(\"assessment_memory\", agentid=mem_key, mode=\"get\")\n    raw_state = (mem_resp or {}).get(\"message\") or \"\"\n    for line in raw_state.splitlines():\n        if \"=\" not in line:\n            continue\n        pid, _, count_text = line.partition(\"=\")\n        if pid in open_ids and count_text.strip().lstrip(\"-\").isdigit():\n            failure_counts[pid] = int(count_text)\n\n    # -- M15 ATR for the SL-trailing phase --------------------------------------\n    atr_resp = await tools.call(\n        \"calculate_indicator\",\n        indicator=\"ATR\",\n        period=atr_period,\n        timeframe=atr_timeframe,\n        history=1,\n    )\n    atr_values = (atr_resp.get(\"values\") or [])\n    if not atr_values or atr_values[0].get(\"value\") is None:\n        return None\n\n    atr = float(atr_values[0][\"value\"])\n    if atr <= 0:\n        return None\n\n    # -- SL trailing only. Take-profit is never touched here -- it stays active\n    # alongside the trailing stop, so the trade can still close at its original\n    # target even while the stop is being trailed; the position closes at\n    # whichever of TP or the trailing SL is hit first. When a modify IS needed,\n    # the existing take-profit is re-affirmed explicitly in the same call\n    # instead of relying on the broker adapter's \"keep current value\" fallback\n    # for an omitted argument -- that fallback re-reads the broker's own current\n    # tp, which has been observed to read back as empty even when a real tp is\n    # set; protection must never be silently dropped by an SL-only modify.\n    max_dist = max_sl_atr * atr\n\n    for order in orders:\n        pos_id = order.get(\"broker_position_id\")\n        direction = str(order.get(\"direction\") or \"\").lower()\n        sl = order.get(\"stop_loss\")\n        tp = order.get(\"take_profit\")\n        # Live broker price from this same get_open_positions call -- NOT the M5\n        # trigger candle's close, which can be up to ~5 minutes stale. A stale\n        # price here means a newly-trailed stop can already be too close to the\n        # *real* live price by the time the modify request reaches the broker,\n        # which is exactly what caused repeated \"Invalid stops\" rejections (MT5\n        # retcode 10016) on a real EURUSD trade that kept moving in its favor\n        # while every trail attempt after the first bounced off the broker.\n        current_price = order.get(\"current_price\")\n        open_price = order.get(\"open_price\")\n\n        if pos_id is None or sl is None or current_price is None:\n            continue\n        pos_id = str(pos_id)\n\n        sl = float(sl)\n        price = float(current_price)\n        distance = abs(price - sl)\n        if distance <= max_dist:\n            continue\n\n        if direction == \"buy\":\n            new_sl = round(price - target_sl_atr * atr, 5)\n            improved = new_sl > sl\n        elif direction == \"sell\":\n            new_sl = round(price + target_sl_atr * atr, 5)\n            improved = new_sl < sl\n        else:\n            continue\n\n        if not improved:\n            log(\n                f\"SL_UPDATE_SKIPPED_NOT_IMPROVEMENT {pair} position={pos_id} \"\n                f\"old_sl={sl:.5f} proposed_sl={new_sl:.5f}\",\n                level=\"info\",\n            )\n            continue\n\n        mod_kwargs = {\n            \"position_id\": pos_id,\n            \"stop_loss\": new_sl,\n            \"reasoning\": (\n                f\"SL trailed: dist {distance:.5f} > max {max_dist:.5f} \"\n                f\"(M15 ATR {atr:.5f}, live price {price:.5f})\"\n            ),\n        }\n        try:\n            tp_value = float(tp) if tp is not None else 0.0\n        except (TypeError, ValueError):\n            tp_value = 0.0\n        if tp_value > 0:\n            mod_kwargs[\"take_profit\"] = tp_value\n\n        mod_resp = await tools.call(\"modify_order\", **mod_kwargs)\n        success = (mod_resp or {}).get(\"success\", False)\n        log(\n            f\"SL_TRAILED {pair} position={pos_id} old_sl={sl:.5f} \"\n            f\"new_sl={new_sl:.5f} success={success}\",\n            level=\"info\",\n            pin=True,\n        )\n        adjustments.append({\n            \"position_id\": pos_id,\n            \"action\": \"SL_TRAILED\",\n            \"direction\": direction,\n            \"old_sl\": sl,\n            \"new_sl\": new_sl,\n            \"atr\": atr,\n            \"success\": success,\n        })\n\n        if success:\n            failure_counts.pop(pos_id, None)\n            continue\n\n        # Fallback: the broker keeps rejecting the trail attempt (e.g. \"Invalid\n        # stops\"). If that happens several cycles in a row while the position is\n        # genuinely in profit, the old stop is stuck too far away to protect the\n        # gain -- better to lock the profit in now than keep retrying and risk\n        # giving it all back, which is exactly what happened to a real EURUSD\n        # trade this mechanism failed to protect (four rejections in a row,\n        # then a reversal turned the open profit into a closed loss).\n        failure_counts[pos_id] = failure_counts.get(pos_id, 0) + 1\n        if failure_counts[pos_id] < max_failures:\n            continue\n\n        in_profit = False\n        if open_price is not None:\n            open_price_f = float(open_price)\n            if direction == \"buy\":\n                in_profit = price > open_price_f\n            elif direction == \"sell\":\n                in_profit = price < open_price_f\n\n        if not in_profit:\n            continue\n\n        close_resp = await tools.call(\n            \"close_position\",\n            position_id=pos_id,\n            reasoning=(\n                f\"Emergency close: SL trail rejected by broker \"\n                f\"{failure_counts[pos_id]}x in a row while position is in \"\n                f\"profit (open {open_price}, live {price:.5f}).\"\n            ),\n        )\n        close_success = (close_resp or {}).get(\"success\", False)\n        log(\n            f\"EMERGENCY_CLOSE_AFTER_TRAIL_FAILURES {pair} position={pos_id} \"\n            f\"failures={failure_counts[pos_id]} success={close_success}\",\n            level=\"warning\",\n            pin=True,\n        )\n        adjustments.append({\n            \"position_id\": pos_id,\n            \"action\": \"EMERGENCY_CLOSE\",\n            \"direction\": direction,\n            \"failures\": failure_counts[pos_id],\n            \"success\": close_success,\n        })\n        if close_success:\n            failure_counts.pop(pos_id, None)\n\n    new_state = \"\\n\".join(f\"{pid}={count}\" for pid, count in failure_counts.items())\n    await tools.call(\"assessment_memory\", agentid=mem_key, mode=\"set\", message=new_state)\n\n    return {\"pair\": pair, \"adjustments\": adjustments} if adjustments else None\n",
+      "config_json": "{\n  \"atr_period\": 14,\n  \"atr_timeframe\": \"M15\",\n  \"max_sl_distance_atr\": 2.0,\n  \"target_sl_distance_atr\": 1.5,\n  \"max_consecutive_trail_failures\": 2\n}"
+    }
+  }
+}
