@@ -2741,6 +2741,9 @@ async def _build_prompt_workbench_context(req: PromptWorkbenchChatRequest) -> di
             raise HTTPException(status_code=422, detail=f"Invalid candle_anchor timestamp: {req.candle_anchor!r}") from None
     candles = await _data_container.get_candles(
         broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit, start=anchor_dt,
+        # Dasselbe Fenster, aus dem auch die Werkzeuge lesen. Zwei Quellen fuer
+        # dieselbe Kerze koennen sich widersprechen, sobald der Spiegel nachhinkt.
+        source="reporting",
     )
     total = len(candles)
     visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
@@ -3178,7 +3181,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             ec_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
-            data_source="reporting",
+                data_source="reporting",
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3230,7 +3233,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             aa_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
-            data_source="reporting",
+                data_source="reporting",
                 extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
             )
             agent._tool_dispatcher = ToolDispatcher(
@@ -3249,7 +3252,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             script_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
-            data_source="reporting",
+                data_source="reporting",
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3407,6 +3410,9 @@ async def prompt_workbench_snapshot_preview(
             raise HTTPException(status_code=422, detail=f"Invalid candle_anchor timestamp: {req.candle_anchor!r}") from None
     candles = await _data_container.get_candles(
         broker_name=short_name, pair=req.pair.upper(), timeframe=tf, limit=limit, start=anchor_dt,
+        # Dasselbe Fenster, aus dem auch die Werkzeuge lesen. Zwei Quellen fuer
+        # dieselbe Kerze koennen sich widersprechen, sobald der Spiegel nachhinkt.
+        source="reporting",
     )
     total = len(candles)
     visible_count = total if req.visible_count is None else max(0, min(req.visible_count, total))
