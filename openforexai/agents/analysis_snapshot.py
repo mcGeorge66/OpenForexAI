@@ -414,6 +414,7 @@ async def _execute_tool_blocks(
     short_timeframe: str = "M5",
     long_timeframe: str = "H1",
     start: str | None = None,
+    data_source: str | None = None,
     blocklist: str = "snapshot_designer",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     # *start* is the historical anchor (the Prompt Workbench's frozen position,
@@ -430,6 +431,9 @@ async def _execute_tool_blocks(
         monitoring_bus=monitoring_bus,
         event_bus=event_bus,
         as_of=start,
+        # The simulation reads the reporting mirror, never live data —
+        # every tool block in this profile inherits that through the context.
+        data_source=data_source,
     )
     errors: list[str] = []
     blocked_tools = _snapshot_tool_blocklist(blocklist)
@@ -832,6 +836,7 @@ async def build_analysis_snapshot(
     monitoring_bus: Any = None,
     event_bus: Any = None,
     start: str | None = None,
+    data_source: str | None = None,
     blocklist: str = "snapshot_designer",
 ) -> tuple[dict[str, Any], list[str]]:
     from time import perf_counter as _perf_counter
@@ -863,6 +868,7 @@ async def build_analysis_snapshot(
             monitoring_bus=monitoring_bus,
             event_bus=event_bus,
             start=start,
+            data_source=data_source,
             blocklist=blocklist,
         )
         if event_bus is not None:
@@ -908,6 +914,7 @@ async def _build_analysis_snapshot_inner(
     monitoring_bus: Any = None,
     event_bus: Any = None,
     start: str | None = None,
+    data_source: str | None = None,
     blocklist: str = "snapshot_designer",
 ) -> tuple[dict[str, Any], list[str]]:
     profile = profile if isinstance(profile, dict) else {}

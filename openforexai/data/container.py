@@ -114,6 +114,7 @@ class DataContainer:
         self._reporting_every = max(1, int(cfg.get("every_candles", 12)))
         self._reporting_counter = 0
         self._reporting_task: asyncio.Task | None = None
+        self._reporting_reader = None       # angelegt beim ersten Lesen
         self._registered: set[tuple[str, str]] = set()
         self._write_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
@@ -360,11 +361,13 @@ class DataContainer:
         timeframe = payload.get("timeframe", "M5")
         limit = payload.get("limit")
         raw_start = payload.get("start")
+        source = payload.get("source")
 
         try:
             start = datetime.fromisoformat(raw_start) if raw_start else None
             candles = await asyncio.wait_for(
-                self._get_candles_from_db(broker_name, pair, timeframe, limit, start=start),
+                self._read_candles(broker_name, pair, timeframe, limit,
+                                   start=start, source=source),
                 timeout=_CANDLES_REQUEST_TIMEOUT_SECONDS,
             )
             result = [
@@ -462,6 +465,30 @@ class DataContainer:
             _log.exception("Candle repair failed", broker=broker_name, pair=pair, error=str(exc))
             self._emit("data_container", MonitoringEventType.CANDLE_REPAIR_FAILED,
                        broker_name=broker_name, pair=pair, error=str(exc))
+
+    async def _read_candles(
+        self, broker_name: str, pair: str, timeframe: str,
+        limit: int | None, start: datetime | None = None, source: str | None = None,
+    ):
+        """Production by default, the reporting mirror when asked for it.
+
+        No fallback on purpose. A simulation that can quietly end up on live
+        data produces numbers nobody can place afterwards, so a missing mirror
+        raises with the command that builds it.
+        """
+        if source != "reporting":
+            return await self._get_candles_from_db(broker_name, pair, timeframe, limit, start=start)
+
+        from openforexai.data.reporting_reader import ReportingReader
+
+        if self._reporting_reader is None:
+            self._reporting_reader = ReportingReader(self._reporting_path)
+        return await asyncio.to_thread(
+            self._reporting_reader.get_candles,
+            broker_name, pair, timeframe,
+            limit if limit is not None else _SNAPSHOT_LIMITS.get(timeframe.upper(), 300),
+            start,
+        )
 
     # ── Reporting mirror ──────────────────────────────────────────────────────
 
@@ -812,7 +839,11 @@ class DataContainer:
         timeframe: str,
         limit: int | None = None,
         start: datetime | None = None,
+        source: str | None = None,
     ) -> list[Candle]:
+        if source == "reporting":
+            return await self._read_candles(
+                broker_name, pair, timeframe, limit, start=start, source=source)
         broker_name = str(broker_name).strip()
         pair = str(pair).strip().upper()
         self._ensure_pair_tracked(broker_name, pair)

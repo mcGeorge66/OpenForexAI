@@ -410,7 +410,9 @@ export function PromptWorkbench() {
       // candles will come back; if the pair actually has none, the result is
       // discarded below exactly like the old sequential guard did.
       const [data, updated] = await Promise.all([
-        api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso),
+        // 'reporting': the Simulation reads the mirror, never live data, so
+        // the chart and the tools work on the same series.
+        api.getCandles(pair, timeframe, candleCount, brokerName, anchorIso, 'reporting'),
         recomputeIndicators(true, indicatorsRef.current),
       ])
       setCandles(data)

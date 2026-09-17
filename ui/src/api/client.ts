@@ -221,10 +221,15 @@ export const api = {
                     ),
   investigateOrder: (entryId: string, req: OrderInvestigateRequest) =>
                     post<OrderInvestigateResponse>(`/orderbook/${encodeURIComponent(entryId)}/investigate`, req),
-  getCandles: (pair: string, timeframe = 'M5', count = 200, broker_name?: string | null, start?: string | null) => {
+  // `source: 'reporting'` reads the reporting mirror instead of production.
+  // The Simulation passes it so the chart shows the same series its tools
+  // compute on — a picture and numbers from two databases is worse than no
+  // picture.
+  getCandles: (pair: string, timeframe = 'M5', count = 200, broker_name?: string | null, start?: string | null, source?: string | null) => {
                     const q = new URLSearchParams({ pair, timeframe, count: String(count) })
                     if (broker_name) q.set('broker_name', broker_name)
                     if (start) q.set('start', start)
+                    if (source) q.set('source', source)
                     return get<CandleBar[]>(`/candles?${q.toString()}`)
                   },
   getAnalyses: (params?: {

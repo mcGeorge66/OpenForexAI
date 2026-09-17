@@ -2425,6 +2425,7 @@ async def get_candles(
     count: int = 200,
     broker_name: str | None = None,
     start: str | None = None,
+    source: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent candles for a pair/timeframe, broker-agnostic.
 
@@ -2463,6 +2464,11 @@ async def get_candles(
         timeframe=tf,
         limit=limit,
         start=start_dt,
+        # source="reporting" reads the mirror instead of production. The
+        # Prompt Workbench passes it so the chart shows the same series its
+        # tools compute on — a simulation whose picture and whose numbers come
+        # from different databases is worse than no picture.
+        source=source,
     )
     return [
         {
@@ -2792,6 +2798,8 @@ async def _build_prompt_workbench_context(req: PromptWorkbenchChatRequest) -> di
             profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
             repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
             start=last_visible.timestamp.isoformat() if last_visible is not None else None,
+            # Every tool block in the simulation reads the mirror.
+            data_source="reporting",
             blocklist="prompt_workbench",
         )
         snapshot_text = json.dumps(snapshot.get("assembled") or snapshot, default=str, indent=2)
@@ -2948,6 +2956,7 @@ async def prompt_workbench_chat(req: PromptWorkbenchChatRequest) -> PromptWorkbe
             agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
             monitoring_bus=_monitoring_bus, event_bus=_bus,
             as_of=(last_visible.timestamp.isoformat() if last_visible is not None else None),
+            data_source="reporting",
             extra={
                 "candle_index_map": candle_index_map,
                 "workbench_annotations": [],
@@ -3162,6 +3171,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             ec_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
+            data_source="reporting",
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3213,6 +3223,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             aa_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
+            data_source="reporting",
                 extra={"candle_index_map": candle_index_map, "existing_annotations": effective_existing_annotations},
             )
             agent._tool_dispatcher = ToolDispatcher(
@@ -3231,6 +3242,7 @@ async def prompt_workbench_simulate_step(req: PromptWorkbenchChatRequest) -> Pro
             script_tool_context = ToolContext(
                 agent_id=temp_agent_id, broker_name=short_name, pair=req.pair.upper(),
                 monitoring_bus=_monitoring_bus, event_bus=_bus, as_of=pwb_candle_anchor,
+            data_source="reporting",
                 extra={
                     "candle_index_map": candle_index_map,
                     "workbench_annotations": [],
@@ -3417,6 +3429,7 @@ async def prompt_workbench_snapshot_preview(
         profile=profile, agent_id=f"WORKBENCH-SNAP-{uuid4().hex[:8]}",
         repository=_repository, monitoring_bus=_monitoring_bus, event_bus=_bus,
         start=last_visible.timestamp.isoformat(),
+        data_source="reporting",
         blocklist="prompt_workbench",
     )
     return PromptWorkbenchSnapshotPreviewResponse(snapshot=snapshot, errors=errors)

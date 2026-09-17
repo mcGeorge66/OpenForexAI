@@ -90,6 +90,11 @@ class ToolContext:
     # happened to compute_fomak (`anchor`), compute_fopok and
     # detect_impulse_pullback (no parameter at all).
     as_of: str | None = None
+    # Which database candles come from. None is production. "reporting"
+    # sends the read to the mirror, which the simulation uses so a run can
+    # never be half live data and half not — and so the higher timeframes
+    # come out of a table instead of an aggregation on every step.
+    data_source: str | None = None
 
 
 TIMEFRAME_MINUTES: dict[str, int] = {
@@ -196,6 +201,7 @@ async def fetch_candles(
             "timeframe": timeframe,
             "limit": requested,
             **({"start": anchor} if anchor else {}),
+            **({"source": context.data_source} if context.data_source else {}),
         },
         timeout=timeout,
     )
